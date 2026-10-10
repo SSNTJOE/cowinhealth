@@ -1,0 +1,24 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: healthing-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: healthing
+      MYSQL_DATABASE: healthing
+      MYSQL_USER: healthing
+      MYSQL_PASSWORD: healthing
+    ports:
+      - "3306:3306"
+    volumes:
+      - healthing_mysql_data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uhealthing", "-phealthing"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  healthing_mysql_data:

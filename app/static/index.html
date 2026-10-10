@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Health-ing</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Health-ing</h1>
+    <p class="sub">E-mail 登入後只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。</p>
+    <p id="mysql-status" class="status">正在檢查 MySQL…</p>
+
+    <section id="auth-card" class="card">
+      <h2>E-mail 登入 / 註冊</h2>
+      <form id="auth-form">
+        <label>E-mail</label>
+        <input type="email" id="email" required placeholder="you@example.com" />
+        <label>密碼</label>
+        <input type="password" id="password" required minlength="6" />
+        <div class="actions">
+          <button type="submit">登入</button>
+          <button type="button" id="register-btn" class="secondary">註冊並產生匿名 ID</button>
+        </div>
+      </form>
+      <p id="auth-msg" class="status"></p>
+    </section>
+
+    <section id="app-card" class="card hidden">
+      <h2>目前帳號</h2>
+      <p>匿名 ID：<span id="anon-id" class="anon"></span></p>
+      <p class="note">網站與 App 畫面只顯示這個 ID。</p>
+      <button id="logout-btn" class="ghost">登出</button>
+
+      <h3>身高體重</h3>
+      <form id="profile-form">
+        <div class="row">
+          <div>
+            <label>身高 (cm)</label>
+            <input type="number" step="0.1" id="height" />
+          </div>
+          <div>
+            <label>體重 (kg)</label>
+            <input type="number" step="0.1" id="weight" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>年齡</label>
+            <input type="number" id="age" />
+          </div>
+          <div>
+            <label>性別</label>
+            <select id="gender">
+              <option value="">未填</option>
+              <option value="female">女</option>
+              <option value="male">男</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+        </div>
+        <label>病史</label>
+        <textarea id="medical_history" rows="2"></textarea>
+        <div class="actions">
+          <button type="submit">儲存身體資料</button>
+        </div>
+      </form>
+      <p id="profile-msg" class="status"></p>
+
+      <h3>今日身體狀況</h3>
+      <label>今天感覺如何？</label>
+      <textarea id="symptoms" rows="3" placeholder="例如：容易疲倦、口乾、怕冷…"></textarea>
+      <label>不舒服的地方</label>
+      <textarea id="discomfort" rows="2" placeholder="例如：腰酸、胃脹、喉嚨痛…"></textarea>
+      <div class="actions">
+        <button type="button" id="open-dialog">再開今日狀況對話框</button>
+      </div>
+
+      <h3>相機擷取</h3>
+      <p class="note">請允許瀏覽器使用相機。按鈕會擷取當下那一幀，轉成圖片後用 fetch 送到 Python。</p>
+      <video id="camera" autoplay playsinline></video>
+      <canvas id="snap" class="hidden"></canvas>
+      <div class="actions">
+        <button type="button" id="btn-face">拍臉 / 眼 / 唇</button>
+        <button type="button" id="btn-tongue" class="secondary">拍舌頭</button>
+        <button type="button" id="btn-save" class="ghost">儲存今日紀錄（含狀況文字）</button>
+      </div>
+      <p id="cam-msg" class="status"></p>
+      <p>
+        主要顏色：
+        <span id="color-chip" class="color-chip"></span>
+        <span id="color-hex"></span>
+        <span id="color-label"></span>
+      </p>
+      <ul id="findings"></ul>
+      <p id="advice" class="advice"></p>
+      <p id="links"></p>
+
+      <h3>臟腑圖（虛／實／熱／寒）</h3>
+      <p class="note">依性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
+      <div class="actions">
+        <button type="button" id="body-boy" class="ghost">男生圖</button>
+        <button type="button" id="body-girl" class="ghost">女生圖</button>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><img src="/media/strong-hot.png" alt="" />實證熱證</span>
+        <span class="legend-item"><img src="/media/strong-cold.png" alt="" />實證寒證</span>
+        <span class="legend-item"><img src="/media/weak-hot.png" alt="" />虛證熱證</span>
+        <span class="legend-item"><img src="/media/weak-cold.png" alt="" />虛證寒證</span>
+      </div>
+      <div class="body-map" id="body-map">
+        <img id="body-img" alt="五臟六腑圖" src="/media/boy-body.png" />
+        <div id="organ-pins"></div>
+      </div>
+      <div id="scores" class="scores"></div>
+      <p class="note" id="disclaimer"></p>
+
+      <h3>歷史紀錄</h3>
+      <div id="records"></div>
+    </section>
+  </div>
+
+  <dialog id="daily-dialog">
+    <form method="dialog" id="daily-form">
+      <h2>今日身體狀況</h2>
+      <p class="note">登入後可先寫下今天的感覺；不確定也可以留空，稍後再補。</p>
+      <label>今天感覺如何？</label>
+      <textarea id="dialog-symptoms" rows="3"></textarea>
+      <label>不舒服的地方</label>
+      <textarea id="dialog-discomfort" rows="2"></textarea>
+      <div class="actions">
+        <button value="ok">記下來</button>
+        <button value="skip" class="ghost">稍後再說</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
