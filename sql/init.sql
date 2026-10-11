@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   user_id VARCHAR(32) PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  nickname VARCHAR(64) NULL,
+  birth_year INT NULL,
   height DECIMAL(5,1) NULL,
   weight DECIMAL(5,1) NULL,
   age INT NULL,

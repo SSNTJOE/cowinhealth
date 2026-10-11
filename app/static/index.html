@@ -9,19 +9,19 @@
 <body>
   <div class="wrap">
     <h1>Health-ing</h1>
-    <p class="sub">E-mail 登入後只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。</p>
+    <p class="sub">用 E-mail 和密碼登入後，畫面只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。</p>
     <p id="mysql-status" class="status">正在檢查 MySQL…</p>
 
     <section id="auth-card" class="card">
-      <h2>E-mail 登入 / 註冊</h2>
+      <h2>E-mail 登入</h2>
       <form id="auth-form">
         <label>E-mail</label>
-        <input type="email" id="email" required placeholder="you@example.com" />
+        <input type="email" id="email" required placeholder="you@example.com" autocomplete="email" />
         <label>密碼</label>
-        <input type="password" id="password" required minlength="6" />
+        <input type="password" id="password" required minlength="6" autocomplete="current-password" />
         <div class="actions">
           <button type="submit">登入</button>
-          <button type="button" id="register-btn" class="secondary">註冊並產生匿名 ID</button>
+          <a href="/register"><button type="button" id="register-btn" class="secondary">前往註冊</button></a>
         </div>
       </form>
       <p id="auth-msg" class="status"></p>
@@ -30,8 +30,11 @@
     <section id="app-card" class="card hidden">
       <h2>目前帳號</h2>
       <p>匿名 ID：<span id="anon-id" class="anon"></span></p>
-      <p class="note">網站與 App 畫面只顯示這個 ID。</p>
-      <button id="logout-btn" class="ghost">登出</button>
+      <p class="note">網站與 App 畫面只顯示這個 ID，不會顯示 E-mail。</p>
+      <div class="actions">
+        <a href="/profile"><button type="button" class="ghost">編輯基本資料</button></a>
+        <button id="logout-btn" class="ghost">登出</button>
+      </div>
 
       <h3>身高體重</h3>
       <form id="profile-form">
@@ -43,21 +46,6 @@
           <div>
             <label>體重 (kg)</label>
             <input type="number" step="0.1" id="weight" />
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label>年齡</label>
-            <input type="number" id="age" />
-          </div>
-          <div>
-            <label>性別</label>
-            <select id="gender">
-              <option value="">未填</option>
-              <option value="female">女</option>
-              <option value="male">男</option>
-              <option value="other">其他</option>
-            </select>
           </div>
         </div>
         <label>病史</label>
@@ -136,6 +124,7 @@
     </form>
   </dialog>
 
+  <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -24,23 +24,6 @@ const organs = [
 let currentBody = "boy";
 let lastResult = null;
 
-async function api(url, options = {}) {
-  const res = await fetch(url, { credentials: "same-origin", ...options });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.detail || "請求失敗");
-  }
-  return data;
-}
-
-function formBody(obj) {
-  const body = new FormData();
-  Object.entries(obj).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") body.append(k, v);
-  });
-  return body;
-}
-
 async function checkMysql() {
   try {
     const data = await api("/api/health");
@@ -62,8 +45,6 @@ function fillProfile(user) {
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
-  document.getElementById("age").value = user.age ?? "";
-  document.getElementById("gender").value = user.gender ?? "";
   document.getElementById("medical_history").value = user.medical_history ?? "";
   setBodyImage(user.gender === "female" ? "girl" : "boy");
 }
@@ -73,6 +54,10 @@ async function loadMe() {
   if (!data.logged_in) {
     authCard.classList.remove("hidden");
     appCard.classList.add("hidden");
+    return;
+  }
+  if (!data.profile_complete) {
+    window.location.href = "/profile";
     return;
   }
   authCard.classList.add("hidden");
@@ -236,7 +221,7 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   authMsg.textContent = "";
   try {
-    await api("/api/login", {
+    const data = await api("/api/login", {
       method: "POST",
       body: formBody({
         email: document.getElementById("email").value,
@@ -244,26 +229,10 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
       }),
     });
     sessionStorage.removeItem("daily-asked");
-    await loadMe();
-  } catch (err) {
-    authMsg.textContent = err.message;
-    authMsg.className = "status err";
-  }
-});
-
-document.getElementById("register-btn").addEventListener("click", async () => {
-  authMsg.textContent = "";
-  try {
-    const data = await api("/api/register", {
-      method: "POST",
-      body: formBody({
-        email: document.getElementById("email").value,
-        password: document.getElementById("password").value,
-      }),
-    });
-    authMsg.textContent = "已建立匿名 ID：" + data.user_id;
-    authMsg.className = "status ok";
-    sessionStorage.removeItem("daily-asked");
+    if (data.profile_complete === false) {
+      window.location.href = "/profile";
+      return;
+    }
     await loadMe();
   } catch (err) {
     authMsg.textContent = err.message;
@@ -285,14 +254,11 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
       body: formBody({
         height: document.getElementById("height").value,
         weight: document.getElementById("weight").value,
-        age: document.getElementById("age").value,
-        gender: document.getElementById("gender").value,
         medical_history: document.getElementById("medical_history").value,
       }),
     });
     profileMsg.textContent = "已儲存";
     profileMsg.className = "status ok";
-    setBodyImage(document.getElementById("gender").value === "female" ? "girl" : "boy");
   } catch (err) {
     profileMsg.textContent = err.message;
     profileMsg.className = "status err";

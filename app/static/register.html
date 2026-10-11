@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>註冊 — Health-ing</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>建立帳號</h1>
+    <p class="sub">先用 E-mail 和密碼註冊並產生匿名 ID。密碼只會加密儲存；暱稱、出生年與性別下一頁再填。</p>
+    <p id="mysql-status" class="status">正在檢查 MySQL…</p>
+
+    <section class="card">
+      <h2>註冊資訊</h2>
+      <form id="register-form">
+        <label>E-mail 帳號</label>
+        <input type="email" id="email" required placeholder="you@example.com" autocomplete="email" />
+        <label>密碼</label>
+        <input type="password" id="password" required minlength="6" placeholder="至少 6 個字元" autocomplete="new-password" />
+        <div class="actions">
+          <button type="submit">註冊並產生匿名 ID</button>
+          <a href="/"><button type="button" class="ghost">已有帳號？登入</button></a>
+        </div>
+      </form>
+      <p id="auth-msg" class="status"></p>
+    </section>
+  </div>
+  <script src="/static/common.js"></script>
+  <script src="/static/register.js"></script>
+</body>
+</html>

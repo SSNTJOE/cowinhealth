@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -14,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
+from pymysql.err import IntegrityError
 
 from .advice import build_advice
 from .analysis import analyze_session
@@ -40,7 +42,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 app = FastAPI(title="Health-ing")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,21 +69,73 @@ def verify_password(password: str, stored: str) -> bool:
     except ValueError:
         return False
     actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
-    return hashlib.compare_digest(actual, expected)
+    return hmac.compare_digest(actual, expected)
 
 
-def new_anonymous_id() -> str:
-    conn = connect()
-    try:
-        with conn.cursor() as cur:
-            for _ in range(30):
-                user_id = f"user_{random.randint(100000, 999999)}"
-                cur.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
-                if cur.fetchone() is None:
-                    return user_id
-    finally:
-        conn.close()
+GENDER_VALUES = {"female", "male", "other"}
+
+
+def allocate_user_id(cur) -> str:
+    for _ in range(30):
+        user_id = f"user_{random.randint(100000, 999999)}"
+        cur.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
+        if cur.fetchone() is None:
+            return user_id
     raise HTTPException(status_code=500, detail="無法產生匿名 ID")
+
+
+def parse_nickname(nickname: str) -> str:
+    name = (nickname or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="請填寫暱稱")
+    if len(name) > 64:
+        raise HTTPException(status_code=400, detail="暱稱太長")
+    return name
+
+
+def parse_birth_year(value: int | str) -> int:
+    try:
+        year = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="出生年不正確") from exc
+    this_year = datetime.now().year
+    if year < 1900 or year > this_year:
+        raise HTTPException(status_code=400, detail="出生年不正確")
+    if this_year - year > 120:
+        raise HTTPException(status_code=400, detail="出生年不正確")
+    return year
+
+
+def parse_gender(gender: str) -> str:
+    value = (gender or "").strip()
+    if value not in GENDER_VALUES:
+        raise HTTPException(status_code=400, detail="請選擇性別")
+    return value
+
+
+def age_from_birth_year(birth_year: int) -> int:
+    return datetime.now().year - birth_year
+
+
+def is_profile_complete(user: dict) -> bool:
+    return bool(user.get("nickname") and user.get("birth_year") and user.get("gender"))
+
+
+def serialize_user(user: dict, include_email: bool = False) -> dict:
+    public = {
+        "user_id": user.get("user_id"),
+        "nickname": user.get("nickname"),
+        "birth_year": user.get("birth_year"),
+        "age": int(user["age"]) if user.get("age") is not None else None,
+        "gender": user.get("gender"),
+        "height": float(user["height"]) if user.get("height") is not None else None,
+        "weight": float(user["weight"]) if user.get("weight") is not None else None,
+        "medical_history": user.get("medical_history"),
+        "profile_complete": is_profile_complete(user),
+    }
+    if include_email:
+        public["email"] = user.get("email")
+    return public
 
 
 def set_session(response: Response, user_id: str) -> str:
@@ -124,7 +178,7 @@ def fetch_user(user_id: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT user_id, email, height, weight, age, gender, medical_history
+                SELECT user_id, email, nickname, birth_year, height, weight, age, gender, medical_history
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -203,6 +257,16 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/register")
+def register_page():
+    return FileResponse(STATIC_DIR / "register.html")
+
+
+@app.get("/profile")
+def profile_page():
+    return FileResponse(STATIC_DIR / "profile.html")
+
+
 @app.get("/media/{name}")
 def body_image(name: str):
     wanted = MEDIA_ALIASES.get(name, name)
@@ -225,7 +289,10 @@ def health():
 
 
 @app.post("/api/register")
-def register(email: str = Form(...), password: str = Form(...)):
+def register(
+    email: str = Form(...),
+    password: str = Form(...),
+):
     email = email.strip().lower()
     if not EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="E-mail 格式不正確")
@@ -238,16 +305,29 @@ def register(email: str = Form(...), password: str = Form(...)):
             cur.execute("SELECT user_id FROM users WHERE email = %s", (email,))
             if cur.fetchone():
                 raise HTTPException(status_code=409, detail="此 E-mail 已註冊")
-            user_id = new_anonymous_id()
+            user_id = allocate_user_id(cur)
             cur.execute(
-                "INSERT INTO users (user_id, email, password_hash) VALUES (%s, %s, %s)",
+                """
+                INSERT INTO users (user_id, email, password_hash)
+                VALUES (%s, %s, %s)
+                """,
                 (user_id, email, hash_password(password)),
             )
+    except HTTPException:
+        raise
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="此 E-mail 已註冊")
     finally:
         conn.close()
 
     token = signer.sign(user_id.encode("utf-8")).decode("utf-8")
-    payload = JSONResponse({"user_id": user_id, "email": email, "token": token})
+    payload = JSONResponse(
+        {
+            "user_id": user_id,
+            "token": token,
+            "profile_complete": False,
+        }
+    )
     set_session(payload, user_id)
     return payload
 
@@ -271,7 +351,14 @@ def login(email: str = Form(...), password: str = Form(...)):
 
     user_id = row["user_id"]
     token = signer.sign(user_id.encode("utf-8")).decode("utf-8")
-    payload = JSONResponse({"user_id": user_id, "email": email, "token": token})
+    user = fetch_user(user_id) or {"user_id": user_id}
+    payload = JSONResponse(
+        {
+            "user_id": user_id,
+            "token": token,
+            "profile_complete": is_profile_complete(user),
+        }
+    )
     set_session(payload, user_id)
     return payload
 
@@ -284,43 +371,74 @@ def logout():
 
 
 @app.get("/api/me")
-def me(request: Request):
+def me(request: Request, include_email: bool = False):
     user_id = current_user_id(request)
     if not user_id:
         return {"logged_in": False}
     user = fetch_user(user_id)
     if not user:
         return {"logged_in": False}
-    public = {k: v for k, v in user.items() if k != "email"}
-    return {"logged_in": True, "user": public}
+    public = serialize_user(user, include_email=include_email)
+    return {
+        "logged_in": True,
+        "user": public,
+        "profile_complete": public["profile_complete"],
+    }
 
 
 @app.post("/api/profile")
 def update_profile(
     request: Request,
+    nickname: str | None = Form(default=None),
+    birth_year: int | None = Form(default=None),
     height: float | None = Form(default=None),
     weight: float | None = Form(default=None),
-    age: int | None = Form(default=None),
     gender: str | None = Form(default=None),
     medical_history: str | None = Form(default=None),
 ):
     user_id = require_user(request)
+    current = fetch_user(user_id)
+    if not current:
+        raise HTTPException(status_code=401, detail="請先登入")
+
+    next_nickname = (
+        parse_nickname(nickname)
+        if nickname is not None and str(nickname).strip()
+        else current.get("nickname")
+    )
+    next_birth = parse_birth_year(birth_year) if birth_year is not None else current.get("birth_year")
+    next_gender = parse_gender(gender) if gender else current.get("gender")
+    next_age = age_from_birth_year(next_birth) if next_birth else current.get("age")
+    next_height = height if height is not None else current.get("height")
+    next_weight = weight if weight is not None else current.get("weight")
+    next_history = medical_history if medical_history is not None else current.get("medical_history")
+
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE users
-                SET height = %s, weight = %s, age = %s, gender = %s, medical_history = %s
+                SET nickname = %s, birth_year = %s, height = %s, weight = %s,
+                    age = %s, gender = %s, medical_history = %s
                 WHERE user_id = %s
                 """,
-                (height, weight, age, gender or None, medical_history or None, user_id),
+                (
+                    next_nickname,
+                    next_birth,
+                    next_height,
+                    next_weight,
+                    next_age,
+                    next_gender,
+                    next_history,
+                    user_id,
+                ),
             )
     finally:
         conn.close()
     user = fetch_user(user_id) or {}
-    public = {k: v for k, v in user.items() if k != "email"}
-    return {"ok": True, "user": public}
+    public = serialize_user(user, include_email=True)
+    return {"ok": True, "user": public, "profile_complete": public["profile_complete"]}
 
 
 async def collect_images(

@@ -18,6 +18,8 @@ SCHEMA_SQL = [
       user_id VARCHAR(32) PRIMARY KEY,
       email VARCHAR(255) NOT NULL UNIQUE,
       password_hash VARCHAR(255) NOT NULL,
+      nickname VARCHAR(64) NULL,
+      birth_year INT NULL,
       height DECIMAL(5,1) NULL,
       weight DECIMAL(5,1) NULL,
       age INT NULL,
@@ -67,6 +69,10 @@ SCHEMA_SQL = [
 ]
 
 EXTRA_COLUMNS = [
+    ("users", "email", "VARCHAR(255) NULL"),
+    ("users", "password_hash", "VARCHAR(255) NULL"),
+    ("users", "nickname", "VARCHAR(64) NULL"),
+    ("users", "birth_year", "INT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
     ("health_records", "face_color", "VARCHAR(64) NULL"),
@@ -92,6 +98,7 @@ def connect(with_db: bool = True, autocommit: bool = True):
         charset="utf8mb4",
         cursorclass=DictCursor,
         autocommit=autocommit,
+        connect_timeout=10,
     )
     if with_db:
         kwargs["database"] = MYSQL_DATABASE
