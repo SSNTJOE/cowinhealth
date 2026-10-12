@@ -30,12 +30,12 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
     profileMsg.className = "status ok";
     window.location.href = "/";
   } catch (err) {
-    profileMsg.textContent = err.message;
+    profileMsg.textContent = formatApiError(err);
     profileMsg.className = "status err";
   }
 });
 
 loadProfile().catch((err) => {
-  profileMsg.textContent = err.message;
+  profileMsg.textContent = formatApiError(err);
   profileMsg.className = "status err";
 });

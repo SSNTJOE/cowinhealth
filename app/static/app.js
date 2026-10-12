@@ -30,7 +30,7 @@ async function checkMysql() {
     mysqlStatus.textContent = data.mysql ? "MySQL 連線成功" : "MySQL 回應異常";
     mysqlStatus.className = data.mysql ? "status ok" : "status err";
   } catch (err) {
-    mysqlStatus.textContent = "MySQL 尚未連上：" + err.message;
+    mysqlStatus.textContent = "MySQL 尚未連上：" + formatApiError(err);
     mysqlStatus.className = "status err";
   }
 }
@@ -88,7 +88,7 @@ async function startCamera() {
     camMsg.textContent = "相機已開啟，對準後按按鈕擷取";
     camMsg.className = "status ok";
   } catch (err) {
-    camMsg.textContent = "無法開啟相機：" + err.message;
+    camMsg.textContent = "無法開啟相機：" + formatApiError(err);
     camMsg.className = "status err";
   }
 }
@@ -235,7 +235,7 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
     }
     await loadMe();
   } catch (err) {
-    authMsg.textContent = err.message;
+    authMsg.textContent = formatApiError(err);
     authMsg.className = "status err";
   }
 });
@@ -260,26 +260,26 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
     profileMsg.textContent = "已儲存";
     profileMsg.className = "status ok";
   } catch (err) {
-    profileMsg.textContent = err.message;
+    profileMsg.textContent = formatApiError(err);
     profileMsg.className = "status err";
   }
 });
 
 document.getElementById("btn-face").addEventListener("click", async () => {
   try { await sendRecord("face"); } catch (err) {
-    camMsg.textContent = err.message;
+    camMsg.textContent = formatApiError(err);
     camMsg.className = "status err";
   }
 });
 document.getElementById("btn-tongue").addEventListener("click", async () => {
   try { await sendRecord("tongue"); } catch (err) {
-    camMsg.textContent = err.message;
+    camMsg.textContent = formatApiError(err);
     camMsg.className = "status err";
   }
 });
 document.getElementById("btn-save").addEventListener("click", async () => {
   try { await sendRecord(null); } catch (err) {
-    camMsg.textContent = err.message;
+    camMsg.textContent = formatApiError(err);
     camMsg.className = "status err";
   }
 });
