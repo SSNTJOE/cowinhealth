@@ -105,17 +105,21 @@ async function startCamera() {
   }
 }
 
-function captureFrame() {
+function captureFrame(mirror = false) {
   const w = video.videoWidth || 640;
   const h = video.videoHeight || 480;
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.save();
-  ctx.translate(w, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, w, h);
-  ctx.restore();
+  if (mirror) {
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(video, 0, 0, w, h);
+  }
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
   });
@@ -378,7 +382,7 @@ async function sendRecord(extraShot) {
   body.append("symptoms", document.getElementById("symptoms").value);
   body.append("discomfort", document.getElementById("discomfort").value);
   if (extraShot) {
-    const blob = await captureFrame();
+    const blob = await captureFrame(extraShot === "face");
     if (!blob) throw new Error("無法擷取畫面");
     lastShots[extraShot] = blob;
     if (extraShot === "face") {

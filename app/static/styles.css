@@ -147,17 +147,19 @@ dialog {
   position: relative;
   width: 100%;
   max-width: 520px;
+  aspect-ratio: 3 / 4;
   margin: 8px auto 12px;
   border-radius: 12px;
   overflow: hidden;
   background: #111;
 }
 .face-grid-stage img {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
-  object-fit: contain;
-  vertical-align: top;
+  object-fit: fill;
 }
 .face-grid-overlay {
   position: absolute;
