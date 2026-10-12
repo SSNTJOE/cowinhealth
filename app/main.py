@@ -121,15 +121,68 @@ def is_profile_complete(user: dict) -> bool:
     return bool(user.get("nickname") and user.get("birth_year") and user.get("gender"))
 
 
+def _positive_float(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def compute_bmi(height, weight) -> float | None:
+    height_cm = _positive_float(height)
+    weight_kg = _positive_float(weight)
+    if height_cm is None or weight_kg is None:
+        return None
+    meters = height_cm / 100.0
+    return round(weight_kg / (meters * meters), 1)
+
+
+def bmi_category_tw(bmi: float | None) -> str | None:
+    if bmi is None:
+        return None
+    if bmi < 18.5:
+        return "過輕"
+    if bmi < 24:
+        return "健康體重"
+    if bmi < 27:
+        return "過重"
+    if bmi < 30:
+        return "輕度肥胖"
+    if bmi < 35:
+        return "中度肥胖"
+    return "重度肥胖"
+
+
+def healthy_weight_range(height) -> str | None:
+    height_cm = _positive_float(height)
+    if height_cm is None:
+        return None
+    h2 = (height_cm * height_cm) / 10000.0
+    min_kg = round(18.5 * h2, 1)
+    exclusive_kg = 24 * h2
+    max_kg = round(int(exclusive_kg * 10 + 1e-8) / 10 - 0.1, 1)
+    if min_kg <= 0 or max_kg < min_kg:
+        return None
+    return f"{min_kg:.1f}–{max_kg:.1f} kg"
+
+
 def serialize_user(user: dict, include_email: bool = False) -> dict:
+    height = float(user["height"]) if user.get("height") is not None else None
+    weight = float(user["weight"]) if user.get("weight") is not None else None
+    bmi = compute_bmi(height, weight)
     public = {
         "user_id": user.get("user_id"),
         "nickname": user.get("nickname"),
         "birth_year": user.get("birth_year"),
         "age": int(user["age"]) if user.get("age") is not None else None,
         "gender": user.get("gender"),
-        "height": float(user["height"]) if user.get("height") is not None else None,
-        "weight": float(user["weight"]) if user.get("weight") is not None else None,
+        "height": height,
+        "weight": weight,
+        "bmi": bmi,
+        "bmi_category": bmi_category_tw(bmi),
+        "healthy_bmi_range": "18.5–23.9" if _positive_float(height) else None,
+        "healthy_weight_range": healthy_weight_range(height),
         "medical_history": user.get("medical_history"),
         "profile_complete": is_profile_complete(user),
     }

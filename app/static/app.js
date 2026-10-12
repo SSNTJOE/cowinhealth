@@ -47,6 +47,7 @@ function fillProfile(user) {
   document.getElementById("weight").value = user.weight ?? "";
   document.getElementById("medical_history").value = user.medical_history ?? "";
   setBodyImage(user.gender === "female" ? "girl" : "boy");
+  if (typeof updateHomeBmi === "function") updateHomeBmi();
 }
 
 async function loadMe() {
@@ -297,5 +298,11 @@ document.getElementById("daily-form").addEventListener("submit", (e) => {
 
 document.getElementById("body-boy").addEventListener("click", () => setBodyImage("boy"));
 document.getElementById("body-girl").addEventListener("click", () => setBodyImage("girl"));
+
+const updateHomeBmi = bindBmiInputs(
+  document.getElementById("height"),
+  document.getElementById("weight"),
+  document.getElementById("bmi-live"),
+);
 
 checkMysql().then(loadMe);

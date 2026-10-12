@@ -82,6 +82,11 @@ video, canvas, img.preview {
 table { width: 100%; border-collapse: collapse; font-size: 12px; overflow-x: auto; display: block; }
 th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: center; white-space: nowrap; }
 .note { font-size: 13px; color: var(--muted); }
+.bmi-live {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  line-height: 1.5;
+}
 .advice {
   background: #fff4e5;
   border-radius: 12px;

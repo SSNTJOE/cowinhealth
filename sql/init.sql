@@ -52,5 +52,8 @@ CREATE TABLE IF NOT EXISTS health_records (
   diet_url TEXT NULL,
   acupoint_url TEXT NULL,
   pulse_json TEXT NULL,
+  face_grid_json TEXT NULL,
+  complexion_label VARCHAR(64) NULL,
+  complexion_hex VARCHAR(16) NULL,
   CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
