@@ -120,6 +120,25 @@ function formatBmiDisplay(heightCm, weightKg) {
   return ref ? line + "　" + ref : line;
 }
 
+function bodyKindFromGender(gender) {
+  const value = String(gender || "").trim().toLowerCase();
+  if (
+    value === "female" ||
+    value === "f" ||
+    value === "girl" ||
+    value === "woman" ||
+    value === "女" ||
+    value === "女生"
+  ) {
+    return "girl";
+  }
+  return "boy";
+}
+
+function bodyImageSrcFromGender(gender) {
+  return bodyKindFromGender(gender) === "girl" ? "/media/girl-body.png" : "/media/boy-body.png";
+}
+
 function bindBmiInputs(heightInput, weightInput, outputEl) {
   if (!heightInput || !weightInput || !outputEl) return () => {};
   const update = () => {

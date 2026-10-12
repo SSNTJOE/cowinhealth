@@ -8,6 +8,9 @@ const video = document.getElementById("camera");
 const canvas = document.getElementById("snap");
 const dailyDialog = document.getElementById("daily-dialog");
 const lastShots = { face: null, tongue: null };
+let lastFacePreviewUrl = null;
+let lastFaceGrid = null;
+let complexionHistory = [];
 
 const organs = [
   { key: "lung", name: "肺", score: "lung_score", pattern: "lung_pattern", spots: [{ x: 44, y: 31.5 }, { x: 56, y: 31.5 }] },
@@ -37,8 +40,14 @@ async function checkMysql() {
 
 function setBodyImage(kind) {
   currentBody = kind === "girl" ? "girl" : "boy";
-  document.getElementById("body-img").src = currentBody === "girl" ? "/media/girl-body.png" : "/media/boy-body.png";
+  const img = document.getElementById("body-img");
+  img.src = currentBody === "girl" ? "/media/girl-body.png" : "/media/boy-body.png";
+  img.alt = currentBody === "girl" ? "女生五臟六腑圖" : "男生五臟六腑圖";
   if (lastResult) drawOrgans(lastResult);
+}
+
+function applyUserBodyImage(user) {
+  setBodyImage(bodyKindFromGender(user && user.gender));
 }
 
 function fillProfile(user) {
@@ -46,7 +55,7 @@ function fillProfile(user) {
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
   document.getElementById("medical_history").value = user.medical_history ?? "";
-  setBodyImage(user.gender === "female" ? "girl" : "boy");
+  applyUserBodyImage(user);
   if (typeof updateHomeBmi === "function") updateHomeBmi();
 }
 
@@ -100,7 +109,11 @@ function captureFrame() {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.translate(w, 0);
+  ctx.scale(-1, 1);
   ctx.drawImage(video, 0, 0, w, h);
+  ctx.restore();
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
   });
@@ -131,6 +144,100 @@ function drawOrgans(result) {
       box.appendChild(label);
     });
   });
+}
+
+function cellByPosition(cells, row, col) {
+  return (cells || []).find((cell) => cell.row === row && cell.col === col);
+}
+
+function renderFaceGrid(grid, previewUrl) {
+  const wrap = document.getElementById("face-grid-wrap");
+  if (!grid || !grid.cells) {
+    wrap.classList.add("hidden");
+    return;
+  }
+  lastFaceGrid = grid;
+  wrap.classList.remove("hidden");
+  const img = document.getElementById("face-preview");
+  if (previewUrl) {
+    img.src = previewUrl;
+    img.classList.remove("hidden");
+  } else if (!img.src) {
+    img.removeAttribute("src");
+  }
+  const overlay = document.getElementById("face-grid-overlay");
+  overlay.innerHTML = "";
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      const cell = cellByPosition(grid.cells, row, col);
+      const box = document.createElement("div");
+      box.className = "face-cell" + (cell && cell.split ? " split" : "");
+      if (!cell) {
+        overlay.appendChild(box);
+        continue;
+      }
+      if (cell.split) {
+        cell.split.forEach((part) => {
+          const half = document.createElement("div");
+          half.className = "half";
+          const tag = part.part === "upper" ? "上" : "下";
+          half.innerHTML = `<strong>8${tag}</strong> ${part.organs}<br>${part.bias}`;
+          box.appendChild(half);
+        });
+      } else {
+        box.innerHTML = `<strong>${cell.id}</strong> ${cell.organs}<br>${cell.name}<br>${cell.bias || ""}`;
+      }
+      overlay.appendChild(box);
+    }
+  }
+  const complexion = grid.complexion || {};
+  const now = document.getElementById("complexion-now");
+  now.textContent = complexion.interpretation
+    ? `臉色（${complexion.hex || ""} ${complexion.bias || ""} → ${complexion.pattern || ""}）：${complexion.interpretation}`
+    : "";
+  const list = document.getElementById("face-cells-list");
+  list.innerHTML = "";
+  const ordered = [...grid.cells].sort((a, b) => a.id - b.id);
+  ordered.forEach((cell) => {
+    const card = document.createElement("div");
+    card.className = "face-cell-card";
+    const splitHtml = (cell.split || [])
+      .map((part) => {
+        const tag = part.part === "upper" ? "上段肝膽" : "下段脾胃";
+        return `<div><span class="swatch" style="background:${part.hex}"></span>${tag} ${part.hex} ${part.bias} → ${part.meaning}</div>`;
+      })
+      .join("");
+    const hsv = cell.hsv || {};
+    card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>第 ${cell.id} 格 ${cell.name}</b>（${cell.organs}）</div>
+      <div>${cell.hex}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.reading || cell.bias || ""}</div>
+      <div>${cell.interpretation || ""}</div>${splitHtml}`;
+    list.appendChild(card);
+  });
+}
+
+function renderComplexionHistory(records) {
+  complexionHistory = (records || [])
+    .filter((row) => row.complexion_label || (row.face_grid && row.face_grid.complexion))
+    .map((row) => {
+      const complexion = (row.face_grid && row.face_grid.complexion) || {};
+      return {
+        date: (row.record_date || "").toString().replace("T", " ").slice(0, 19),
+        label: row.complexion_label || complexion.bias || "",
+        hex: row.complexion_hex || complexion.hex || "",
+        pattern: complexion.pattern || "",
+      };
+    });
+  const box = document.getElementById("complexion-history");
+  if (!box) return;
+  if (!complexionHistory.length) {
+    box.textContent = "尚無臉色紀錄";
+    return;
+  }
+  const rows = complexionHistory
+    .map((item) => `<tr><td>${item.date}</td><td><span class="swatch" style="background:${item.hex};width:14px;height:14px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:6px;border:1px solid #ccc"></span>${item.hex}</td><td>${item.label}</td><td>${item.pattern}</td></tr>`)
+    .join("");
+  box.innerHTML = `<table><thead><tr><th>日期</th><th>臉色色碼</th><th>偏色</th><th>證型傾向</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderResult(result) {
@@ -165,6 +272,7 @@ function renderResult(result) {
     scores.appendChild(div);
   });
   drawOrgans(result);
+  renderFaceGrid(result.face_grid, lastFacePreviewUrl);
 }
 
 async function loadRecords() {
@@ -172,6 +280,7 @@ async function loadRecords() {
   const box = document.getElementById("records");
   if (!data.records.length) {
     box.textContent = "尚無紀錄";
+    renderComplexionHistory([]);
     return;
   }
   const latest = data.records[0];
@@ -184,8 +293,14 @@ async function loadRecords() {
     diet_url: latest.diet_url,
     acupoint_url: latest.acupoint_url,
     color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
-    disclaimer: "以下為最近一次 MySQL 紀錄。",
+    face_grid: latest.face_grid,
+    complexion: (latest.face_grid && latest.face_grid.complexion) || {
+      bias: latest.complexion_label,
+      hex: latest.complexion_hex,
+    },
+    disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
   });
+  renderComplexionHistory(data.records);
   const head = ["日期", "狀況", ...organs.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
   const rows = data.records
     .map((r) => {
@@ -206,6 +321,10 @@ async function sendRecord(extraShot) {
     const blob = await captureFrame();
     if (!blob) throw new Error("無法擷取畫面");
     lastShots[extraShot] = blob;
+    if (extraShot === "face") {
+      if (lastFacePreviewUrl) URL.revokeObjectURL(lastFacePreviewUrl);
+      lastFacePreviewUrl = URL.createObjectURL(blob);
+    }
     body.append("shot_type", extraShot);
     body.append("image", blob, `${extraShot}.jpg`);
   }
@@ -250,7 +369,7 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
 document.getElementById("profile-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    await api("/api/profile", {
+    const saved = await api("/api/profile", {
       method: "POST",
       body: formBody({
         height: document.getElementById("height").value,
@@ -258,6 +377,7 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
         medical_history: document.getElementById("medical_history").value,
       }),
     });
+    if (saved.user) fillProfile(saved.user);
     profileMsg.textContent = "已儲存";
     profileMsg.className = "status ok";
   } catch (err) {
@@ -295,9 +415,6 @@ document.getElementById("daily-form").addEventListener("submit", (e) => {
     document.getElementById("discomfort").value = document.getElementById("dialog-discomfort").value;
   }
 });
-
-document.getElementById("body-boy").addEventListener("click", () => setBodyImage("boy"));
-document.getElementById("body-girl").addEventListener("click", () => setBodyImage("girl"));
 
 const updateHomeBmi = bindBmiInputs(
   document.getElementById("height"),

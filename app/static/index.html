@@ -76,6 +76,18 @@
         <button type="button" id="btn-save" class="ghost">儲存今日紀錄（含狀況文字）</button>
       </div>
       <p id="cam-msg" class="status"></p>
+      <div id="face-grid-wrap" class="hidden">
+        <h3>臉部分區（4×3，教學示範）</h3>
+        <p class="note">縱 4 列、橫 3 欄。第 8 格再分上段肝膽／下段脾胃；第 12 格唇在最下列中央。臉色取 1、2、3、5、7、8、9、10、12 格平均（不含眼 4、6 與右腎 11）。此為教學示範，不能取代醫師診斷。</p>
+        <div class="face-grid-stage" id="face-grid-stage">
+          <img id="face-preview" alt="臉部擷取" />
+          <div id="face-grid-overlay" class="face-grid-overlay"></div>
+        </div>
+        <p id="complexion-now" class="advice"></p>
+        <div id="face-cells-list" class="face-cells-list"></div>
+        <h4>臉色歷史</h4>
+        <div id="complexion-history"></div>
+      </div>
       <p>
         主要顏色：
         <span id="color-chip" class="color-chip"></span>
@@ -87,11 +99,7 @@
       <p id="links"></p>
 
       <h3>臟腑圖（虛／實／熱／寒）</h3>
-      <p class="note">依性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
-      <div class="actions">
-        <button type="button" id="body-boy" class="ghost">男生圖</button>
-        <button type="button" id="body-girl" class="ghost">女生圖</button>
-      </div>
+      <p class="note">依基本資料的性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
       <div class="legend">
         <span class="legend-item"><img src="/media/strong-hot.png" alt="" />實證熱證</span>
         <span class="legend-item"><img src="/media/strong-cold.png" alt="" />實證寒證</span>

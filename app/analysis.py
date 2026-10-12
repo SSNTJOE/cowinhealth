@@ -173,6 +173,10 @@ def compact_hsv(stats: dict[str, float]) -> dict[str, float]:
         "white_ratio": round(stats.get("white_ratio", 0), 3),
         "pale_ratio": round(stats.get("pale_ratio", 0), 3),
         "dark_ratio": round(stats.get("dark_ratio", 0), 3),
+        "purple_ratio": round(stats.get("purple_ratio", 0), 3),
+        "r": round(stats.get("r", 0), 1),
+        "g": round(stats.get("g", 0), 1),
+        "b": round(stats.get("b", 0), 1),
     }
 
 
@@ -286,7 +290,9 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
                 interpretation = f"第8格{('上段' if part == 'upper' else '下段')}（{organs}）{bias} → {meaning}（{TEACHING_NOTE}）"
                 halves.append(
                     {
+                        "id": 8,
                         "part": part,
+                        "name": spec["name"],
                         "organs": organs,
                         "hex": hex_from_stats(part_stats),
                         "hsv": compact_hsv(part_stats),
@@ -307,7 +313,8 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
                     "hex": hex_from_stats(whole_stats),
                     "hsv": compact_hsv(whole_stats),
                     "bias": halves[0]["bias"] if halves[0]["bias"] != "中性" else halves[1]["bias"],
-                    "reading": f"上段{halves[0]['bias']}／下段{halves[1]['bias']}",
+                    "meaning": f"上{halves[0]['meaning']}／下{halves[1]['meaning']}",
+                    "reading": f"上段{halves[0]['bias']} → {halves[0]['meaning']}／下段{halves[1]['bias']} → {halves[1]['meaning']}",
                     "interpretation": "；".join(item["interpretation"] for item in halves),
                     "split": halves,
                 }
@@ -338,7 +345,8 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
                 "hex": hex_from_stats(stats),
                 "hsv": compact_hsv(stats),
                 "bias": bias,
-                "reading": bias,
+                "meaning": meaning,
+                "reading": f"{bias} → {meaning}",
                 "interpretation": interpretation,
                 "split": None,
             }
@@ -354,18 +362,64 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
     else:
         lip_color = None
     colors = {
-        "face_color": c_text,
+        "face_color": f"{c_bias}／{c_pattern}",
         "lip_color": lip_color,
         "tongue_body_color": None,
         "tongue_coat_color": None,
     }
+    measurements = []
+    for cell in cells:
+        measurements.append(
+            {
+                "cell_id": cell["id"],
+                "part": "whole",
+                "name": cell["name"],
+                "organs": cell["organs"],
+                "hex": cell["hex"],
+                "hsv": cell["hsv"],
+                "bias": cell["bias"],
+                "meaning": cell.get("meaning"),
+                "reading": cell.get("reading"),
+            }
+        )
+        for part in cell.get("split") or []:
+            measurements.append(
+                {
+                    "cell_id": 8,
+                    "part": part["part"],
+                    "name": cell["name"],
+                    "organs": part["organs"],
+                    "hex": part["hex"],
+                    "hsv": part["hsv"],
+                    "bias": part["bias"],
+                    "meaning": part["meaning"],
+                    "reading": f"{part['bias']} → {part['meaning']}",
+                }
+            )
+    complexion_hsv = compact_hsv(complexion_stats)
+    measurements.append(
+        {
+            "cell_id": 0,
+            "part": "complexion",
+            "name": "臉色平均",
+            "organs": "1,2,3,5,7,8,9,10,12",
+            "hex": hex_from_stats(complexion_stats),
+            "hsv": complexion_hsv,
+            "bias": c_bias,
+            "meaning": c_pattern,
+            "reading": c_text,
+        }
+    )
     face_grid = {
         "rows": 4,
         "cols": 3,
+        "layout": "4x3",
+        "numbering": "row4 visual 10 | 12 lips | 11",
         "cells": cells,
+        "measurements": measurements,
         "complexion": {
             "hex": hex_from_stats(complexion_stats),
-            "hsv": compact_hsv(complexion_stats),
+            "hsv": complexion_hsv,
             "bias": c_bias,
             "pattern": c_pattern,
             "interpretation": c_text,

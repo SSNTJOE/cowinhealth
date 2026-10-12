@@ -42,10 +42,10 @@ SCHEMA_SQL = [
       record_date DATETIME NOT NULL,
       symptoms TEXT NULL,
       discomfort TEXT NULL,
-      face_color VARCHAR(64) NULL,
-      lip_color VARCHAR(64) NULL,
-      tongue_body_color VARCHAR(64) NULL,
-      tongue_coat_color VARCHAR(64) NULL,
+      face_color VARCHAR(255) NULL,
+      lip_color VARCHAR(255) NULL,
+      tongue_body_color VARCHAR(255) NULL,
+      tongue_coat_color VARCHAR(255) NULL,
       heart_score INT NOT NULL,
       liver_score INT NOT NULL,
       spleen_score INT NOT NULL,
@@ -70,6 +70,11 @@ SCHEMA_SQL = [
       diet_url TEXT NULL,
       acupoint_url TEXT NULL,
       pulse_json TEXT NULL,
+      face_grid_json TEXT NULL,
+      face_measurements_json TEXT NULL,
+      complexion_label VARCHAR(128) NULL,
+      complexion_hex VARCHAR(16) NULL,
+      complexion_hsv_json TEXT NULL,
       CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
@@ -82,17 +87,30 @@ EXTRA_COLUMNS = [
     ("users", "birth_year", "INT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
-    ("health_records", "face_color", "VARCHAR(64) NULL"),
-    ("health_records", "lip_color", "VARCHAR(64) NULL"),
-    ("health_records", "tongue_body_color", "VARCHAR(64) NULL"),
-    ("health_records", "tongue_coat_color", "VARCHAR(64) NULL"),
+    ("health_records", "face_color", "VARCHAR(255) NULL"),
+    ("health_records", "lip_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_body_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_coat_color", "VARCHAR(255) NULL"),
     ("health_records", "diet_advice", "VARCHAR(80) NULL"),
     ("health_records", "diet_url", "TEXT NULL"),
     ("health_records", "acupoint_url", "TEXT NULL"),
     ("health_records", "pulse_json", "TEXT NULL"),
+    ("health_records", "face_grid_json", "TEXT NULL"),
+    ("health_records", "face_measurements_json", "TEXT NULL"),
+    ("health_records", "complexion_label", "VARCHAR(128) NULL"),
+    ("health_records", "complexion_hex", "VARCHAR(16) NULL"),
+    ("health_records", "complexion_hsv_json", "TEXT NULL"),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS
+]
+
+COLUMN_RESIZES = [
+    ("health_records", "face_color", "VARCHAR(255) NULL"),
+    ("health_records", "lip_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_body_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_coat_color", "VARCHAR(255) NULL"),
+    ("health_records", "complexion_label", "VARCHAR(128) NULL"),
 ]
 
 
@@ -158,6 +176,8 @@ def init_schema(timeout_seconds: int = 8) -> bool:
                     )
                     if cur.fetchone()["c"] == 0:
                         cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                for table, column, ddl in COLUMN_RESIZES:
+                    cur.execute(f"ALTER TABLE {table} MODIFY COLUMN {column} {ddl}")
             _schema_ready = True
             logger.info("MySQL schema ready")
             return True

@@ -73,6 +73,22 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 GENDER_VALUES = {"female", "male", "other"}
+GENDER_ALIASES = {
+    "female": "female",
+    "f": "female",
+    "girl": "female",
+    "woman": "female",
+    "女": "female",
+    "女生": "female",
+    "male": "male",
+    "m": "male",
+    "boy": "male",
+    "man": "male",
+    "男": "male",
+    "男生": "male",
+    "other": "other",
+    "其他": "other",
+}
 
 
 def allocate_user_id(cur) -> str:
@@ -107,7 +123,8 @@ def parse_birth_year(value: int | str) -> int:
 
 
 def parse_gender(gender: str) -> str:
-    value = (gender or "").strip()
+    raw = (gender or "").strip()
+    value = GENDER_ALIASES.get(raw) or GENDER_ALIASES.get(raw.lower())
     if value not in GENDER_VALUES:
         raise HTTPException(status_code=400, detail="請選擇性別")
     return value
@@ -270,8 +287,16 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         "diet_url",
         "acupoint_url",
         "pulse_json",
+        "face_grid_json",
+        "face_measurements_json",
+        "complexion_label",
+        "complexion_hex",
+        "complexion_hsv_json",
     ]
     colors = result.get("region_colors") or {}
+    complexion = result.get("complexion") or {}
+    face_grid = result.get("face_grid")
+    measurements = (face_grid or {}).get("measurements")
     values = [
         user_id,
         record_date,
@@ -287,6 +312,11 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         extra.get("diet_url"),
         extra.get("acupoint_url"),
         extra.get("pulse_json"),
+        json.dumps(face_grid, ensure_ascii=False) if face_grid else None,
+        json.dumps(measurements, ensure_ascii=False) if measurements else None,
+        complexion.get("bias") or extra.get("complexion_label"),
+        complexion.get("hex"),
+        json.dumps(complexion.get("hsv"), ensure_ascii=False) if complexion.get("hsv") else None,
     ]
     conn = connect()
     try:
@@ -583,7 +613,9 @@ def records(request: Request):
                        face_color, lip_color, tongue_body_color, tongue_coat_color,
                        {", ".join(ORGAN_KEYS)},
                        {", ".join(PATTERN_KEYS)},
-                       diet_advice, diet_url, acupoint_url
+                       diet_advice, diet_url, acupoint_url,
+                       face_grid_json, face_measurements_json,
+                       complexion_label, complexion_hex, complexion_hsv_json
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -599,4 +631,12 @@ def records(request: Request):
             key: overlay_from_pattern_label(row.get(pattern_key))
             for key, _name, _score_key, pattern_key in ORGAN_META
         }
+        raw_grid = row.get("face_grid_json")
+        if raw_grid:
+            try:
+                row["face_grid"] = json.loads(raw_grid)
+            except json.JSONDecodeError:
+                row["face_grid"] = None
+        else:
+            row["face_grid"] = None
     return {"user_id": user_id, "records": rows}
