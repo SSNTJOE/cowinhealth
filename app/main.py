@@ -292,11 +292,15 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         "complexion_label",
         "complexion_hex",
         "complexion_hsv_json",
+        "tongue_grid_json",
+        "tongue_measurements_json",
     ]
     colors = result.get("region_colors") or {}
     complexion = result.get("complexion") or {}
     face_grid = result.get("face_grid")
     measurements = (face_grid or {}).get("measurements")
+    tongue_grid = result.get("tongue_grid")
+    tongue_measurements = (tongue_grid or {}).get("measurements")
     values = [
         user_id,
         record_date,
@@ -317,6 +321,8 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         complexion.get("bias") or extra.get("complexion_label"),
         complexion.get("hex"),
         json.dumps(complexion.get("hsv"), ensure_ascii=False) if complexion.get("hsv") else None,
+        json.dumps(tongue_grid, ensure_ascii=False) if tongue_grid else None,
+        json.dumps(tongue_measurements, ensure_ascii=False) if tongue_measurements else None,
     ]
     conn = connect()
     try:
@@ -615,7 +621,8 @@ def records(request: Request):
                        {", ".join(PATTERN_KEYS)},
                        diet_advice, diet_url, acupoint_url,
                        face_grid_json, face_measurements_json,
-                       complexion_label, complexion_hex, complexion_hsv_json
+                       complexion_label, complexion_hex, complexion_hsv_json,
+                       tongue_grid_json, tongue_measurements_json
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -639,4 +646,12 @@ def records(request: Request):
                 row["face_grid"] = None
         else:
             row["face_grid"] = None
+        raw_tongue = row.get("tongue_grid_json")
+        if raw_tongue:
+            try:
+                row["tongue_grid"] = json.loads(raw_tongue)
+            except json.JSONDecodeError:
+                row["tongue_grid"] = None
+        else:
+            row["tongue_grid"] = None
     return {"user_id": user_id, "records": rows}

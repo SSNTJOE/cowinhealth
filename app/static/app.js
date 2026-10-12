@@ -9,7 +9,9 @@ const canvas = document.getElementById("snap");
 const dailyDialog = document.getElementById("daily-dialog");
 const lastShots = { face: null, tongue: null };
 let lastFacePreviewUrl = null;
+let lastTonguePreviewUrl = null;
 let lastFaceGrid = null;
+let lastTongueGrid = null;
 let complexionHistory = [];
 
 const organs = [
@@ -216,6 +218,62 @@ function renderFaceGrid(grid, previewUrl) {
   });
 }
 
+function renderTongueGrid(grid, previewUrl) {
+  const wrap = document.getElementById("tongue-grid-wrap");
+  if (!grid || !grid.cells) {
+    wrap.classList.add("hidden");
+    return;
+  }
+  lastTongueGrid = grid;
+  wrap.classList.remove("hidden");
+  const img = document.getElementById("tongue-preview");
+  if (previewUrl) {
+    img.src = previewUrl;
+    img.classList.remove("hidden");
+  } else if (!img.src) {
+    img.removeAttribute("src");
+  }
+  const overlay = document.getElementById("tongue-grid-overlay");
+  overlay.innerHTML = "";
+  (grid.cells || []).forEach((cell) => {
+    const box = document.createElement("div");
+    box.className = "tongue-zone";
+    box.style.left = (cell.left * 100) + "%";
+    box.style.top = (cell.top * 100) + "%";
+    box.style.width = ((cell.right - cell.left) * 100) + "%";
+    box.style.height = ((cell.bottom - cell.top) * 100) + "%";
+    box.innerHTML = `<strong>${cell.label}</strong> ${cell.organs}<br>${cell.anatomy}<br>${cell.bias || ""}`;
+    overlay.appendChild(box);
+  });
+  const coating = grid.coating || {};
+  const now = document.getElementById("tongue-coat-now");
+  now.textContent = coating.interpretation
+    ? `第六層舌苔（${coating.hex || ""} ${coating.bias || ""} → ${coating.meaning || ""}）：${coating.interpretation}`
+    : (grid.sixth_note || "");
+  const list = document.getElementById("tongue-cells-list");
+  list.innerHTML = "";
+  (grid.cells || []).forEach((cell) => {
+    const card = document.createElement("div");
+    card.className = "face-cell-card";
+    const hsv = cell.hsv || {};
+    card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>${cell.label} ${cell.organs}</b>（${cell.anatomy}）</div>
+      <div>${cell.hex}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.reading || cell.bias || ""}</div>
+      <div>${cell.interpretation || ""}</div>`;
+    list.appendChild(card);
+  });
+  if (coating.bias) {
+    const card = document.createElement("div");
+    card.className = "face-cell-card";
+    const hsv = coating.hsv || {};
+    card.innerHTML = `<div><span class="swatch" style="background:${coating.hex}"></span><b>第六層 舌苔</b>（胃／全舌疊加）</div>
+      <div>${coating.hex || ""}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${coating.reading || ""}</div>
+      <div>${coating.interpretation || ""}</div>`;
+    list.appendChild(card);
+  }
+}
+
 function renderComplexionHistory(records) {
   complexionHistory = (records || [])
     .filter((row) => row.complexion_label || (row.face_grid && row.face_grid.complexion))
@@ -273,6 +331,7 @@ function renderResult(result) {
   });
   drawOrgans(result);
   renderFaceGrid(result.face_grid, lastFacePreviewUrl);
+  renderTongueGrid(result.tongue_grid, lastTonguePreviewUrl);
 }
 
 async function loadRecords() {
@@ -294,6 +353,7 @@ async function loadRecords() {
     acupoint_url: latest.acupoint_url,
     color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
     face_grid: latest.face_grid,
+    tongue_grid: latest.tongue_grid,
     complexion: (latest.face_grid && latest.face_grid.complexion) || {
       bias: latest.complexion_label,
       hex: latest.complexion_hex,
@@ -324,6 +384,10 @@ async function sendRecord(extraShot) {
     if (extraShot === "face") {
       if (lastFacePreviewUrl) URL.revokeObjectURL(lastFacePreviewUrl);
       lastFacePreviewUrl = URL.createObjectURL(blob);
+    }
+    if (extraShot === "tongue") {
+      if (lastTonguePreviewUrl) URL.revokeObjectURL(lastTonguePreviewUrl);
+      lastTonguePreviewUrl = URL.createObjectURL(blob);
     }
     body.append("shot_type", extraShot);
     body.append("image", blob, `${extraShot}.jpg`);

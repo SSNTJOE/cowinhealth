@@ -64,10 +64,11 @@ def region_stats(image: Image.Image) -> dict[str, float]:
             "white_ratio": 0,
             "pale_ratio": 0,
             "dark_ratio": 0,
+            "gray_ratio": 0,
         }
 
     hues, sats, vals = [], [], []
-    red = yellow = green = purple = white = pale = dark = 0
+    red = yellow = green = purple = white = pale = dark = gray = 0
     rs = gs = bs = 0
     for r, g, b in pixels:
         h, s, v = rgb_to_hsv_pixel(r, g, b)
@@ -84,6 +85,7 @@ def region_stats(image: Image.Image) -> dict[str, float]:
         is_white = s <= 0.18 and v >= 0.72
         is_pale = s <= 0.22 and 0.55 <= v <= 0.88
         is_dark = v <= 0.28
+        is_gray = s <= 0.28 and 0.12 <= v <= 0.45
         red += int(is_red)
         yellow += int(is_yellow)
         green += int(is_green)
@@ -91,6 +93,7 @@ def region_stats(image: Image.Image) -> dict[str, float]:
         white += int(is_white)
         pale += int(is_pale)
         dark += int(is_dark)
+        gray += int(is_gray)
 
     n = float(len(pixels))
     return {
@@ -107,6 +110,7 @@ def region_stats(image: Image.Image) -> dict[str, float]:
         "white_ratio": white / n,
         "pale_ratio": pale / n,
         "dark_ratio": dark / n,
+        "gray_ratio": gray / n,
     }
 
 
@@ -173,6 +177,7 @@ def compact_hsv(stats: dict[str, float]) -> dict[str, float]:
         "white_ratio": round(stats.get("white_ratio", 0), 3),
         "pale_ratio": round(stats.get("pale_ratio", 0), 3),
         "dark_ratio": round(stats.get("dark_ratio", 0), 3),
+        "gray_ratio": round(stats.get("gray_ratio", 0), 3),
         "purple_ratio": round(stats.get("purple_ratio", 0), 3),
         "r": round(stats.get("r", 0), 1),
         "g": round(stats.get("g", 0), 1),
@@ -197,6 +202,7 @@ def average_stats(items: list[dict[str, float]]) -> dict[str, float]:
         "white_ratio",
         "pale_ratio",
         "dark_ratio",
+        "gray_ratio",
     )
     n = float(len(items))
     return {key: sum(item.get(key, 0) for item in items) / n for key in keys}
@@ -431,6 +437,152 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
     return face_grid, findings, colors
 
 
+# Photo orientation: tongue tip toward BOTTOM (lips), root toward TOP.
+# User listed 上中下左右 (5). The 6th layer is whole-tongue coating overlay,
+# not a sixth spatial tile (中 is not split into 中上/中下).
+TONGUE_ZONE_LAYOUT = [
+    {"id": "top", "label": "上", "organs": "腎", "anatomy": "舌根", "left": 0.22, "top": 0.02, "right": 0.78, "bottom": 0.30},
+    {"id": "center", "label": "中", "organs": "脾胃", "anatomy": "舌中", "left": 0.28, "top": 0.28, "right": 0.72, "bottom": 0.72},
+    {"id": "bottom", "label": "下", "organs": "心肺", "anatomy": "舌尖", "left": 0.22, "top": 0.70, "right": 0.78, "bottom": 0.98},
+    {"id": "left", "label": "左", "organs": "肝膽", "anatomy": "舌左邊", "left": 0.02, "top": 0.22, "right": 0.28, "bottom": 0.78},
+    {"id": "right", "label": "右", "organs": "肝膽", "anatomy": "舌右邊", "left": 0.72, "top": 0.22, "right": 0.98, "bottom": 0.78},
+]
+TONGUE_COAT_BOX = {"left": 0.24, "top": 0.16, "right": 0.76, "bottom": 0.74}
+TONGUE_SIXTH_NOTE = "使用者列上中下左右五塊；第六層為全舌舌苔疊加（非再切一塊空間）。中區不拆中上／中下。"
+
+
+def tongue_body_reading(stats: dict[str, float]) -> tuple[str, str]:
+    if stats["red_ratio"] > 0.18:
+        return "偏紅", "實熱證"
+    if stats["white_ratio"] > 0.22 or stats["pale_ratio"] > 0.28:
+        return "偏白", "虛寒證"
+    return "中性", "舌質未見明顯紅白偏色"
+
+
+def tongue_coat_reading(stats: dict[str, float]) -> tuple[str, str]:
+    grayish = stats.get("gray_ratio", 0) + stats.get("dark_ratio", 0)
+    if grayish > 0.16 and stats["v"] < 0.48:
+        return "黑灰苔", "實寒證"
+    if stats["yellow_ratio"] > 0.16:
+        return "黃苔", "實熱"
+    if stats["white_ratio"] < 0.12:
+        return "白苔很少", "胃虛"
+    return "苔色中性", "未見黃／黑灰／少白苔"
+
+
+def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+    findings: list[str] = []
+    zones: list[dict[str, Any]] = []
+    zone_stats: list[dict[str, float]] = []
+    for spec in TONGUE_ZONE_LAYOUT:
+        crop = crop_box(image, spec["left"], spec["top"], spec["right"], spec["bottom"])
+        stats = region_stats(crop)
+        zone_stats.append(stats)
+        bias, meaning = tongue_body_reading(stats)
+        interpretation = (
+            f"{spec['label']}（{spec['organs']}／{spec['anatomy']}）舌質{bias} → {meaning}（{TEACHING_NOTE}）"
+        )
+        if bias != "中性":
+            findings.append(interpretation)
+        zones.append(
+            {
+                "id": spec["id"],
+                "label": spec["label"],
+                "organs": spec["organs"],
+                "anatomy": spec["anatomy"],
+                "left": spec["left"],
+                "top": spec["top"],
+                "right": spec["right"],
+                "bottom": spec["bottom"],
+                "hex": hex_from_stats(stats),
+                "hsv": compact_hsv(stats),
+                "bias": bias,
+                "meaning": meaning,
+                "reading": f"舌質{bias} → {meaning}",
+                "interpretation": interpretation,
+            }
+        )
+
+    coat_crop = crop_box(
+        image,
+        TONGUE_COAT_BOX["left"],
+        TONGUE_COAT_BOX["top"],
+        TONGUE_COAT_BOX["right"],
+        TONGUE_COAT_BOX["bottom"],
+    )
+    coat_stats = region_stats(coat_crop)
+    coat_bias, coat_meaning = tongue_coat_reading(coat_stats)
+    coat_text = f"舌苔（全舌疊加）{coat_bias} → {coat_meaning}（{TEACHING_NOTE}）"
+    findings.append(coat_text)
+
+    body_stats = average_stats(zone_stats)
+    body_bias, body_meaning = tongue_body_reading(body_stats)
+    colors = {
+        "face_color": None,
+        "lip_color": None,
+        "tongue_body_color": f"{body_bias}／{body_meaning}",
+        "tongue_coat_color": f"{coat_bias}／{coat_meaning}",
+    }
+    coating = {
+        "id": "coating",
+        "label": "舌苔",
+        "organs": "胃／全舌",
+        "layer": 6,
+        "hex": hex_from_stats(coat_stats),
+        "hsv": compact_hsv(coat_stats),
+        "bias": coat_bias,
+        "meaning": coat_meaning,
+        "reading": f"{coat_bias} → {coat_meaning}",
+        "interpretation": coat_text,
+        "box": TONGUE_COAT_BOX,
+    }
+    measurements = [
+        {
+            "zone_id": zone["id"],
+            "part": "body",
+            "label": zone["label"],
+            "organs": zone["organs"],
+            "hex": zone["hex"],
+            "hsv": zone["hsv"],
+            "bias": zone["bias"],
+            "meaning": zone["meaning"],
+            "reading": zone["reading"],
+        }
+        for zone in zones
+    ]
+    measurements.append(
+        {
+            "zone_id": "coating",
+            "part": "coating",
+            "label": "舌苔",
+            "organs": "胃／全舌",
+            "hex": coating["hex"],
+            "hsv": coating["hsv"],
+            "bias": coat_bias,
+            "meaning": coat_meaning,
+            "reading": coating["reading"],
+        }
+    )
+    tongue_grid = {
+        "zones": 5,
+        "sixth": "coating_overlay",
+        "sixth_note": TONGUE_SIXTH_NOTE,
+        "orientation": "tip_at_bottom_root_at_top",
+        "layout": TONGUE_ZONE_LAYOUT,
+        "cells": zones,
+        "coating": coating,
+        "measurements": measurements,
+        "body": {
+            "hex": hex_from_stats(body_stats),
+            "hsv": compact_hsv(body_stats),
+            "bias": body_bias,
+            "meaning": body_meaning,
+        },
+        "disclaimer": TEACHING_NOTE,
+    }
+    return tongue_grid, findings, colors
+
+
 def inspect_image(image_bytes: bytes, shot_type: str) -> dict[str, Any]:
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
     dominant = dominant_color_hex(image)
@@ -444,26 +596,10 @@ def inspect_image(image_bytes: bytes, shot_type: str) -> dict[str, Any]:
     }
 
     face_grid = None
+    tongue_grid = None
     if shot_type == "tongue":
-        tip = region_stats(crop_box(image, 0.35, 0.72, 0.65, 0.95))
-        sides = region_stats(crop_box(image, 0.05, 0.25, 0.22, 0.75))
-        sides_r = region_stats(crop_box(image, 0.78, 0.25, 0.95, 0.75))
-        center = region_stats(crop_box(image, 0.3, 0.3, 0.7, 0.7))
-        root = region_stats(crop_box(image, 0.3, 0.05, 0.7, 0.28))
-        colors["tongue_body_color"] = hsv_label(tip if tip["red_ratio"] > center["red_ratio"] else center)
-        colors["tongue_coat_color"] = hsv_label(center)
-        if tip["red_ratio"] > 0.18:
-            findings.append("舌尖紅，屬心火偏旺")
-        if max(sides["purple_ratio"], sides_r["purple_ratio"]) > 0.1:
-            findings.append("舌邊青紫，屬肝瘀傾向")
-        if center["white_ratio"] > 0.25:
-            findings.append("中部苔白偏厚，屬脾濕／肺衛氣虛傾向")
-        if center["yellow_ratio"] > 0.18:
-            findings.append("舌苔偏黃，屬脾胃濕熱或膽熱")
-        if root["dark_ratio"] > 0.16 or root["purple_ratio"] > 0.1:
-            findings.append("舌根偏暗，屬腎與膀胱氣化不足")
-        if overall["pale_ratio"] > 0.28:
-            findings.append("舌質偏淡，屬氣血不足")
+        tongue_grid, grid_findings, colors = analyze_tongue_grid(image)
+        findings.extend(grid_findings)
     else:
         face_grid, grid_findings, colors = analyze_face_grid(image)
         findings.extend(grid_findings)
@@ -472,18 +608,29 @@ def inspect_image(image_bytes: bytes, shot_type: str) -> dict[str, Any]:
         findings.append("未見明顯偏色，先給中間分數 5")
 
     complexion = (face_grid or {}).get("complexion")
-    return {
-        "shot_type": shot_type,
-        "dominant_color": (complexion or {}).get("hex") or dominant,
-        "hsv": (complexion or {}).get("hsv") or {
+    tongue_body = (tongue_grid or {}).get("body")
+    coating = (tongue_grid or {}).get("coating")
+    if tongue_grid:
+        color_label = f"舌質{tongue_body.get('bias')} → {tongue_body.get('meaning')}；{coating.get('bias')} → {coating.get('meaning')}"
+        hsv_out = (tongue_body or {}).get("hsv") or compact_hsv(overall)
+        dominant_out = (tongue_body or {}).get("hex") or dominant
+    else:
+        color_label = (complexion or {}).get("interpretation") or hsv_label(overall)
+        hsv_out = (complexion or {}).get("hsv") or {
             "hue": round(overall["h"], 1),
             "saturation": round(overall["s"], 3),
             "value": round(overall["v"], 3),
-        },
-        "color_label": (complexion or {}).get("interpretation") or hsv_label(overall),
+        }
+        dominant_out = (complexion or {}).get("hex") or dominant
+    return {
+        "shot_type": shot_type,
+        "dominant_color": dominant_out,
+        "hsv": hsv_out,
+        "color_label": color_label,
         "findings": findings,
         "region_colors": colors,
         "face_grid": face_grid,
+        "tongue_grid": tongue_grid,
     }
 
 
@@ -505,6 +652,7 @@ def analyze_session(
     hsv = None
     color_label = "尚未拍照"
     face_grid = None
+    tongue_grid = None
     for report in color_reports:
         findings.extend(report["findings"])
         for key, value in report["region_colors"].items():
@@ -515,6 +663,8 @@ def analyze_session(
         color_label = report["color_label"]
         if report.get("face_grid"):
             face_grid = report["face_grid"]
+        if report.get("tongue_grid"):
+            tongue_grid = report["tongue_grid"]
 
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}")
@@ -535,6 +685,7 @@ def analyze_session(
         "patterns": patterns,
         "overlays": overlays,
         "face_grid": face_grid,
+        "tongue_grid": tongue_grid,
         "complexion": (face_grid or {}).get("complexion"),
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }

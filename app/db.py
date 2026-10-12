@@ -75,6 +75,8 @@ SCHEMA_SQL = [
       complexion_label VARCHAR(128) NULL,
       complexion_hex VARCHAR(16) NULL,
       complexion_hsv_json TEXT NULL,
+      tongue_grid_json TEXT NULL,
+      tongue_measurements_json TEXT NULL,
       CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
@@ -100,6 +102,8 @@ EXTRA_COLUMNS = [
     ("health_records", "complexion_label", "VARCHAR(128) NULL"),
     ("health_records", "complexion_hex", "VARCHAR(16) NULL"),
     ("health_records", "complexion_hsv_json", "TEXT NULL"),
+    ("health_records", "tongue_grid_json", "TEXT NULL"),
+    ("health_records", "tongue_measurements_json", "TEXT NULL"),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS
