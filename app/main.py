@@ -73,6 +73,22 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 GENDER_VALUES = {"female", "male", "other"}
+GENDER_ALIASES = {
+    "female": "female",
+    "f": "female",
+    "girl": "female",
+    "woman": "female",
+    "女": "female",
+    "女生": "female",
+    "male": "male",
+    "m": "male",
+    "boy": "male",
+    "man": "male",
+    "男": "male",
+    "男生": "male",
+    "other": "other",
+    "其他": "other",
+}
 
 
 def allocate_user_id(cur) -> str:
@@ -107,7 +123,8 @@ def parse_birth_year(value: int | str) -> int:
 
 
 def parse_gender(gender: str) -> str:
-    value = (gender or "").strip()
+    raw = (gender or "").strip()
+    value = GENDER_ALIASES.get(raw) or GENDER_ALIASES.get(raw.lower())
     if value not in GENDER_VALUES:
         raise HTTPException(status_code=400, detail="請選擇性別")
     return value
@@ -121,15 +138,68 @@ def is_profile_complete(user: dict) -> bool:
     return bool(user.get("nickname") and user.get("birth_year") and user.get("gender"))
 
 
+def _positive_float(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def compute_bmi(height, weight) -> float | None:
+    height_cm = _positive_float(height)
+    weight_kg = _positive_float(weight)
+    if height_cm is None or weight_kg is None:
+        return None
+    meters = height_cm / 100.0
+    return round(weight_kg / (meters * meters), 1)
+
+
+def bmi_category_tw(bmi: float | None) -> str | None:
+    if bmi is None:
+        return None
+    if bmi < 18.5:
+        return "過輕"
+    if bmi < 24:
+        return "健康體重"
+    if bmi < 27:
+        return "過重"
+    if bmi < 30:
+        return "輕度肥胖"
+    if bmi < 35:
+        return "中度肥胖"
+    return "重度肥胖"
+
+
+def healthy_weight_range(height) -> str | None:
+    height_cm = _positive_float(height)
+    if height_cm is None:
+        return None
+    h2 = (height_cm * height_cm) / 10000.0
+    min_kg = round(18.5 * h2, 1)
+    exclusive_kg = 24 * h2
+    max_kg = round(int(exclusive_kg * 10 + 1e-8) / 10 - 0.1, 1)
+    if min_kg <= 0 or max_kg < min_kg:
+        return None
+    return f"{min_kg:.1f}–{max_kg:.1f} kg"
+
+
 def serialize_user(user: dict, include_email: bool = False) -> dict:
+    height = float(user["height"]) if user.get("height") is not None else None
+    weight = float(user["weight"]) if user.get("weight") is not None else None
+    bmi = compute_bmi(height, weight)
     public = {
         "user_id": user.get("user_id"),
         "nickname": user.get("nickname"),
         "birth_year": user.get("birth_year"),
         "age": int(user["age"]) if user.get("age") is not None else None,
         "gender": user.get("gender"),
-        "height": float(user["height"]) if user.get("height") is not None else None,
-        "weight": float(user["weight"]) if user.get("weight") is not None else None,
+        "height": height,
+        "weight": weight,
+        "bmi": bmi,
+        "bmi_category": bmi_category_tw(bmi),
+        "healthy_bmi_range": "18.5–23.9" if _positive_float(height) else None,
+        "healthy_weight_range": healthy_weight_range(height),
         "medical_history": user.get("medical_history"),
         "profile_complete": is_profile_complete(user),
     }
@@ -217,8 +287,20 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         "diet_url",
         "acupoint_url",
         "pulse_json",
+        "face_grid_json",
+        "face_measurements_json",
+        "complexion_label",
+        "complexion_hex",
+        "complexion_hsv_json",
+        "tongue_grid_json",
+        "tongue_measurements_json",
     ]
     colors = result.get("region_colors") or {}
+    complexion = result.get("complexion") or {}
+    face_grid = result.get("face_grid")
+    measurements = (face_grid or {}).get("measurements")
+    tongue_grid = result.get("tongue_grid")
+    tongue_measurements = (tongue_grid or {}).get("measurements")
     values = [
         user_id,
         record_date,
@@ -234,6 +316,13 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         extra.get("diet_url"),
         extra.get("acupoint_url"),
         extra.get("pulse_json"),
+        json.dumps(face_grid, ensure_ascii=False) if face_grid else None,
+        json.dumps(measurements, ensure_ascii=False) if measurements else None,
+        complexion.get("bias") or extra.get("complexion_label"),
+        complexion.get("hex"),
+        json.dumps(complexion.get("hsv"), ensure_ascii=False) if complexion.get("hsv") else None,
+        json.dumps(tongue_grid, ensure_ascii=False) if tongue_grid else None,
+        json.dumps(tongue_measurements, ensure_ascii=False) if tongue_measurements else None,
     ]
     conn = connect()
     try:
@@ -530,7 +619,10 @@ def records(request: Request):
                        face_color, lip_color, tongue_body_color, tongue_coat_color,
                        {", ".join(ORGAN_KEYS)},
                        {", ".join(PATTERN_KEYS)},
-                       diet_advice, diet_url, acupoint_url
+                       diet_advice, diet_url, acupoint_url,
+                       face_grid_json, face_measurements_json,
+                       complexion_label, complexion_hex, complexion_hsv_json,
+                       tongue_grid_json, tongue_measurements_json
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -546,4 +638,20 @@ def records(request: Request):
             key: overlay_from_pattern_label(row.get(pattern_key))
             for key, _name, _score_key, pattern_key in ORGAN_META
         }
+        raw_grid = row.get("face_grid_json")
+        if raw_grid:
+            try:
+                row["face_grid"] = json.loads(raw_grid)
+            except json.JSONDecodeError:
+                row["face_grid"] = None
+        else:
+            row["face_grid"] = None
+        raw_tongue = row.get("tongue_grid_json")
+        if raw_tongue:
+            try:
+                row["tongue_grid"] = json.loads(raw_tongue)
+            except json.JSONDecodeError:
+                row["tongue_grid"] = None
+        else:
+            row["tongue_grid"] = None
     return {"user_id": user_id, "records": rows}
