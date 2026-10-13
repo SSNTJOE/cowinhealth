@@ -12,6 +12,9 @@ async function loadProfile() {
   document.getElementById("nickname").value = user.nickname || "";
   document.getElementById("birth_year").value = user.birth_year || "";
   document.getElementById("gender").value = user.gender || "";
+  document.getElementById("height").value = user.height ?? "";
+  document.getElementById("weight").value = user.weight ?? "";
+  if (typeof updateProfileBmi === "function") updateProfileBmi();
 }
 
 document.getElementById("profile-form").addEventListener("submit", async (event) => {
@@ -24,6 +27,8 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
         nickname: document.getElementById("nickname").value,
         birth_year: document.getElementById("birth_year").value,
         gender: document.getElementById("gender").value,
+        height: document.getElementById("height").value,
+        weight: document.getElementById("weight").value,
       }),
     });
     profileMsg.textContent = "已儲存";
@@ -34,6 +39,12 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
     profileMsg.className = "status err";
   }
 });
+
+const updateProfileBmi = bindBmiInputs(
+  document.getElementById("height"),
+  document.getElementById("weight"),
+  document.getElementById("bmi-live"),
+);
 
 loadProfile().catch((err) => {
   profileMsg.textContent = formatApiError(err);
