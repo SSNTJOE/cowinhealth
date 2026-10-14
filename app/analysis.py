@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from collections import Counter
 from io import BytesIO
 from typing import Any
@@ -45,6 +46,188 @@ def rgb_to_hsv_pixel(r: int, g: int, b: int) -> tuple[float, float, float]:
         hue = (60 * ((rf - gf) / diff) + 240) % 360
     sat = 0.0 if mx == 0 else diff / mx
     return hue, sat, mx
+
+
+def is_skin_hsv(h: float, s: float, v: float) -> bool:
+    """Demo skin: warm hues, skip dark hair and pale walls."""
+    hue_ok = h <= 50 or h >= 350
+    return hue_ok and 0.12 <= s <= 0.78 and 0.20 <= v <= 0.98
+
+
+def is_tongue_hsv(h: float, s: float, v: float) -> bool:
+    """Demo tongue body (pink/red) plus pale/yellow coat; drop lips-adjacent dark and room."""
+    pink = (h <= 28 or h >= 330) and s >= 0.16 and v >= 0.22
+    coat = (h <= 70 or h >= 320) and 0.04 <= s <= 0.55 and v >= 0.42
+    return v >= 0.18 and (pink or coat)
+
+
+def _largest_blob_box(mask: bytearray, width: int, height: int) -> tuple[int, int, int, int, int] | None:
+    visited = bytearray(width * height)
+    best_count = 0
+    best: tuple[int, int, int, int, int] | None = None
+    for start_y in range(height):
+        row = start_y * width
+        for start_x in range(width):
+            idx = row + start_x
+            if not mask[idx] or visited[idx]:
+                continue
+            stack = [idx]
+            visited[idx] = 1
+            count = 0
+            min_x = max_x = start_x
+            min_y = max_y = start_y
+            while stack:
+                cur = stack.pop()
+                cy, cx = divmod(cur, width)
+                count += 1
+                if cx < min_x:
+                    min_x = cx
+                elif cx > max_x:
+                    max_x = cx
+                if cy < min_y:
+                    min_y = cy
+                elif cy > max_y:
+                    max_y = cy
+                if cx > 0:
+                    left = cur - 1
+                    if mask[left] and not visited[left]:
+                        visited[left] = 1
+                        stack.append(left)
+                if cx + 1 < width:
+                    right = cur + 1
+                    if mask[right] and not visited[right]:
+                        visited[right] = 1
+                        stack.append(right)
+                if cy > 0:
+                    up = cur - width
+                    if mask[up] and not visited[up]:
+                        visited[up] = 1
+                        stack.append(up)
+                if cy + 1 < height:
+                    down = cur + width
+                    if mask[down] and not visited[down]:
+                        visited[down] = 1
+                        stack.append(down)
+            if count > best_count:
+                best_count = count
+                best = (min_x, min_y, max_x + 1, max_y + 1, count)
+    return best
+
+
+def _build_mask(small: Image.Image, shot_type: str) -> bytearray:
+    width, height = small.size
+    mask = bytearray(width * height)
+    checker = is_tongue_hsv if shot_type == "tongue" else is_skin_hsv
+    for i, (r, g, b) in enumerate(small.getdata()):
+        h, s, v = rgb_to_hsv_pixel(r, g, b)
+        if checker(h, s, v):
+            mask[i] = 1
+    return mask
+
+
+def _refine_box(
+    x0: int, y0: int, x1: int, y1: int, width: int, height: int, shot_type: str
+) -> tuple[int, int, int, int]:
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    if shot_type == "tongue":
+        pad_x = max(1, int(bw * 0.04))
+        pad_y = max(1, int(bh * 0.04))
+        x0 = max(0, x0 - pad_x)
+        y0 = max(0, y0 - pad_y)
+        x1 = min(width, x1 + pad_x)
+        y1 = min(height, y1 + pad_y)
+        return x0, y0, x1, y1
+    # Face: hairline–chin, inside the ears (inset the skin blob).
+    x0 += int(bw * 0.08)
+    x1 -= int(bw * 0.08)
+    y0 += int(bh * 0.04)
+    y1 -= int(bh * 0.10)
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    face_h = int(bw * 1.32)
+    if bh > face_h:
+        y1 = y0 + face_h
+    x0 = max(0, min(x0, width - 2))
+    y0 = max(0, min(y0, height - 2))
+    x1 = max(x0 + 2, min(x1, width))
+    y1 = max(y0 + 2, min(y1, height))
+    return x0, y0, x1, y1
+
+
+def _median_rgb(pixels: list[tuple[int, int, int]]) -> tuple[int, int, int]:
+    if not pixels:
+        return (200, 176, 160)
+    rs = sorted(p[0] for p in pixels)
+    gs = sorted(p[1] for p in pixels)
+    bs = sorted(p[2] for p in pixels)
+    mid = len(pixels) // 2
+    return rs[mid], gs[mid], bs[mid]
+
+
+def _encode_preview_png(image: Image.Image) -> str:
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def isolate_subject(image: Image.Image, shot_type: str) -> tuple[Image.Image, dict[str, Any]]:
+    """HSV largest-blob crop. Face ≈ hairline–chin / inner-ear; tongue ≈ tongue body only."""
+    rgb = image.convert("RGB")
+    full_w, full_h = rgb.size
+    max_side = 180
+    scale = min(1.0, max_side / max(full_w, full_h))
+    small_w = max(1, int(full_w * scale))
+    small_h = max(1, int(full_h * scale))
+    small = rgb.resize((small_w, small_h), Image.Resampling.BILINEAR)
+    mask = _build_mask(small, shot_type)
+    blob = _largest_blob_box(mask, small_w, small_h)
+    min_area = small_w * small_h * (0.05 if shot_type == "tongue" else 0.08)
+    if blob is None or blob[4] < min_area:
+        preview = rgb.copy()
+        return preview, {
+            "method": "passthrough",
+            "reason": "blob_too_small",
+            "box": [0.0, 0.0, 1.0, 1.0],
+            "preview": _encode_preview_png(preview),
+        }
+
+    sx0, sy0, sx1, sy1, _count = blob
+    sx0, sy0, sx1, sy1 = _refine_box(sx0, sy0, sx1, sy1, small_w, small_h, shot_type)
+    inv = 1.0 / scale if scale else 1.0
+    x0 = max(0, int(sx0 * inv))
+    y0 = max(0, int(sy0 * inv))
+    x1 = min(full_w, int(sx1 * inv))
+    y1 = min(full_h, int(sy1 * inv))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        preview = rgb.copy()
+        return preview, {
+            "method": "passthrough",
+            "reason": "box_too_small",
+            "box": [0.0, 0.0, 1.0, 1.0],
+            "preview": _encode_preview_png(preview),
+        }
+
+    cropped = rgb.crop((x0, y0, x1, y1))
+    mask_img = Image.new("L", (small_w, small_h), 0)
+    mask_img.putdata([255 if v else 0 for v in mask])
+    mask_full = mask_img.resize((full_w, full_h), Image.Resampling.NEAREST).crop((x0, y0, x1, y1))
+    fg_pixels = [pix for pix, alpha in zip(cropped.getdata(), mask_full.getdata()) if alpha]
+    fill = _median_rgb(fg_pixels)
+    out_rgb = Image.composite(cropped, Image.new("RGB", cropped.size, fill), mask_full)
+    rgba = Image.new("RGBA", cropped.size, (0, 0, 0, 0))
+    rgba.paste(cropped.convert("RGBA"), mask=mask_full)
+    return out_rgb, {
+        "method": "hsv_blob",
+        "shot_type": shot_type,
+        "box": [
+            round(x0 / full_w, 4),
+            round(y0 / full_h, 4),
+            round(x1 / full_w, 4),
+            round(y1 / full_h, 4),
+        ],
+        "preview": _encode_preview_png(rgba),
+    }
 
 
 def region_stats(image: Image.Image) -> dict[str, float]:
@@ -584,7 +767,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
 
 
 def inspect_image(image_bytes: bytes, shot_type: str) -> dict[str, Any]:
-    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    image, crop_info = isolate_subject(raw_image, shot_type)
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []
@@ -631,6 +815,8 @@ def inspect_image(image_bytes: bytes, shot_type: str) -> dict[str, Any]:
         "region_colors": colors,
         "face_grid": face_grid,
         "tongue_grid": tongue_grid,
+        "crop": crop_info,
+        "preview": crop_info.get("preview"),
     }
 
 
@@ -653,6 +839,9 @@ def analyze_session(
     color_label = "尚未拍照"
     face_grid = None
     tongue_grid = None
+    face_preview = None
+    tongue_preview = None
+    crops: dict[str, Any] = {}
     for report in color_reports:
         findings.extend(report["findings"])
         for key, value in report["region_colors"].items():
@@ -665,6 +854,12 @@ def analyze_session(
             face_grid = report["face_grid"]
         if report.get("tongue_grid"):
             tongue_grid = report["tongue_grid"]
+        if report.get("crop"):
+            crops[report["shot_type"]] = {k: v for k, v in report["crop"].items() if k != "preview"}
+        if report["shot_type"] == "face" and report.get("preview"):
+            face_preview = report["preview"]
+        if report["shot_type"] == "tongue" and report.get("preview"):
+            tongue_preview = report["preview"]
 
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}")
@@ -687,5 +882,8 @@ def analyze_session(
         "face_grid": face_grid,
         "tongue_grid": tongue_grid,
         "complexion": (face_grid or {}).get("complexion"),
+        "face_preview": face_preview,
+        "tongue_preview": tongue_preview,
+        "crop": crops,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }

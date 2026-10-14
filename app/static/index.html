@@ -67,8 +67,12 @@
       </div>
 
       <h3>相機擷取</h3>
-      <p class="note">請允許瀏覽器使用相機。按鈕會擷取當下那一幀，轉成圖片後用 fetch 送到 Python。</p>
-      <video id="camera" autoplay playsinline></video>
+      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：只取舌體）。伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
+      <div class="camera-stage" id="camera-stage">
+        <video id="camera" autoplay playsinline></video>
+        <div id="align-frame" class="align-frame is-face"></div>
+        <p id="align-hint" class="align-hint">對準臉：髮際以下～下巴，兩耳以內</p>
+      </div>
       <canvas id="snap" class="hidden"></canvas>
       <div class="actions">
         <button type="button" id="btn-face">拍臉 / 眼 / 唇</button>

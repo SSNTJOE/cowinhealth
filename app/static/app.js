@@ -10,6 +10,16 @@ const dailyDialog = document.getElementById("daily-dialog");
 const lastShots = { face: null, tongue: null };
 let lastFacePreviewUrl = null;
 let lastTonguePreviewUrl = null;
+/** Matches .align-frame.is-face / .is-tongue (fractions of #camera-stage). Capture crops this rect. */
+const ALIGN_FRAMES = {
+  face: { left: 0.22, top: 0.12, width: 0.56, height: 0.78 },
+  tongue: { left: 0.30, top: 0.16, width: 0.40, height: 0.64 },
+};
+const ALIGN_HINTS = {
+  face: "對準臉：髮際以下～下巴，兩耳以內",
+  tongue: "對準舌：只把舌體放進黃框（不要嘴唇／房間）",
+};
+let alignMode = "face";
 let lastFaceGrid = null;
 let lastTongueGrid = null;
 let complexionHistory = [];
@@ -97,31 +107,67 @@ async function startCamera() {
       audio: false,
     });
     video.srcObject = stream;
-    camMsg.textContent = "相機已開啟，對準後按按鈕擷取";
+    camMsg.textContent = "相機已開啟。請對準黃框後再拍照";
     camMsg.className = "status ok";
+    setAlignMode("face");
   } catch (err) {
     camMsg.textContent = "無法開啟相機：" + formatApiError(err);
     camMsg.className = "status err";
   }
 }
 
-function captureFrame(mirror = false) {
-  const w = video.videoWidth || 640;
-  const h = video.videoHeight || 480;
+function setAlignMode(mode) {
+  alignMode = mode === "tongue" ? "tongue" : "face";
+  const frame = document.getElementById("align-frame");
+  const hint = document.getElementById("align-hint");
+  if (frame) {
+    frame.classList.toggle("is-face", alignMode === "face");
+    frame.classList.toggle("is-tongue", alignMode === "tongue");
+  }
+  if (hint) hint.textContent = ALIGN_HINTS[alignMode];
+}
+
+function coverDest(vw, vh, sw, sh) {
+  const videoAspect = vw / vh;
+  const stageAspect = sw / sh;
+  if (videoAspect > stageAspect) {
+    const dh = sh;
+    const dw = vw * (sh / vh);
+    return { dx: (sw - dw) / 2, dy: 0, dw, dh };
+  }
+  const dw = sw;
+  const dh = vh * (sw / vw);
+  return { dx: 0, dy: (sh - dh) / 2, dw, dh };
+}
+
+function captureFrame(kind) {
+  const mode = kind === "tongue" ? "tongue" : "face";
+  setAlignMode(mode);
+  const stage = document.getElementById("camera-stage") || video;
+  const sw = Math.max(1, stage.clientWidth || video.clientWidth || 640);
+  const sh = Math.max(1, stage.clientHeight || video.clientHeight || 480);
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  const { dx, dy, dw, dh } = coverDest(vw, vh, sw, sh);
+  const full = document.createElement("canvas");
+  full.width = sw;
+  full.height = sh;
+  const fctx = full.getContext("2d");
+  fctx.save();
+  fctx.translate(sw, 0);
+  fctx.scale(-1, 1);
+  fctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+  fctx.restore();
+  const frame = ALIGN_FRAMES[mode];
+  const x = Math.round(frame.left * sw);
+  const y = Math.round(frame.top * sh);
+  const w = Math.max(1, Math.round(frame.width * sw));
+  const h = Math.max(1, Math.round(frame.height * sh));
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (mirror) {
-    ctx.save();
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0, w, h);
-    ctx.restore();
-  } else {
-    ctx.drawImage(video, 0, 0, w, h);
-  }
+  canvas.getContext("2d").drawImage(full, x, y, w, h, 0, 0, w, h);
   return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
   });
 }
 
@@ -334,6 +380,8 @@ function renderResult(result) {
     scores.appendChild(div);
   });
   drawOrgans(result);
+  if (result.face_preview) lastFacePreviewUrl = result.face_preview;
+  if (result.tongue_preview) lastTonguePreviewUrl = result.tongue_preview;
   renderFaceGrid(result.face_grid, lastFacePreviewUrl);
   renderTongueGrid(result.tongue_grid, lastTonguePreviewUrl);
 }
@@ -382,15 +430,15 @@ async function sendRecord(extraShot) {
   body.append("symptoms", document.getElementById("symptoms").value);
   body.append("discomfort", document.getElementById("discomfort").value);
   if (extraShot) {
-    const blob = await captureFrame(extraShot === "face");
+    const blob = await captureFrame(extraShot);
     if (!blob) throw new Error("無法擷取畫面");
     lastShots[extraShot] = blob;
     if (extraShot === "face") {
-      if (lastFacePreviewUrl) URL.revokeObjectURL(lastFacePreviewUrl);
+      if (lastFacePreviewUrl && lastFacePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(lastFacePreviewUrl);
       lastFacePreviewUrl = URL.createObjectURL(blob);
     }
     if (extraShot === "tongue") {
-      if (lastTonguePreviewUrl) URL.revokeObjectURL(lastTonguePreviewUrl);
+      if (lastTonguePreviewUrl && lastTonguePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(lastTonguePreviewUrl);
       lastTonguePreviewUrl = URL.createObjectURL(blob);
     }
     body.append("shot_type", extraShot);
@@ -454,6 +502,8 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
   }
 });
 
+document.getElementById("btn-face").addEventListener("pointerenter", () => setAlignMode("face"));
+document.getElementById("btn-tongue").addEventListener("pointerenter", () => setAlignMode("tongue"));
 document.getElementById("btn-face").addEventListener("click", async () => {
   try { await sendRecord("face"); } catch (err) {
     camMsg.textContent = formatApiError(err);
