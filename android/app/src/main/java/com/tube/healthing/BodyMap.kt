@@ -63,7 +63,9 @@ fun applyBodyOverlays(
                 img.adjustViewBounds = true
                 img.setBackgroundColor(Color.TRANSPARENT)
                 if (Build.VERSION.SDK_INT >= 29) {
-                    img.blendMode = BlendMode.SCREEN
+                    val paint = android.graphics.Paint()
+                    paint.blendMode = BlendMode.SCREEN
+                    img.setLayerType(ImageView.LAYER_TYPE_HARDWARE, paint)
                 }
                 val lp = FrameLayout.LayoutParams(size, size)
                 img.x = w * spot.x - size / 2f
