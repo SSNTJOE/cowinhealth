@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Size
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -12,7 +13,10 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.tube.healthing.databinding.ActivityMainBinding
 import org.json.JSONObject
@@ -81,13 +85,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
+        // ScrollView + SurfaceView makes the emulator scale a tiny camera buffer into blocks.
+        binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        val selector = cameraResolution()
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(binding.preview.surfaceProvider)
-            }
-            imageCapture = ImageCapture.Builder().build()
+            val preview = Preview.Builder()
+                .setResolutionSelector(selector)
+                .build()
+                .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+            imageCapture = ImageCapture.Builder()
+                .setResolutionSelector(selector)
+                .build()
             provider.unbindAll()
             provider.bindToLifecycle(
                 this,
@@ -96,6 +106,17 @@ class MainActivity : AppCompatActivity() {
                 imageCapture
             )
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun cameraResolution(): ResolutionSelector {
+        return ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    Size(1280, 720),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                )
+            )
+            .build()
     }
 
     private fun capture(kind: String) {

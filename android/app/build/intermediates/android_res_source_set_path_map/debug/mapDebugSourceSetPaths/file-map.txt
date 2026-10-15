@@ -1,0 +1,8 @@
+com.tube.healthing.app-pngs-0 C:\Tube\Health-ing\android\app\build\generated\res\pngs\debug
+com.tube.healthing.app-updated_navigation_xml-1 C:\Tube\Health-ing\android\app\build\generated\updated_navigation_xml\debug
+com.tube.healthing.app-packageDebugResources-2 C:\Tube\Health-ing\android\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.tube.healthing.app-packageDebugResources-3 C:\Tube\Health-ing\android\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.tube.healthing.app-debug-4 C:\Tube\Health-ing\android\app\build\intermediates\merged_res\debug\mergeDebugResources
+com.tube.healthing.app-debug-5 C:\Tube\Health-ing\android\app\src\debug\res
+com.tube.healthing.app-main-6 C:\Tube\Health-ing\android\app\src\main\res
+gradleHome-0 C:\Users\Joe\.gradle
