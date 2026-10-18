@@ -32,6 +32,8 @@ SCHEMA_SQL = [
       age INT NULL,
       gender VARCHAR(20) NULL,
       medical_history TEXT NULL,
+      conditions_json TEXT NULL,
+      allergies_json TEXT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -87,6 +89,8 @@ EXTRA_COLUMNS = [
     ("users", "password_hash", "VARCHAR(255) NULL"),
     ("users", "nickname", "VARCHAR(64) NULL"),
     ("users", "birth_year", "INT NULL"),
+    ("users", "conditions_json", "TEXT NULL"),
+    ("users", "allergies_json", "TEXT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
     ("health_records", "face_color", "VARCHAR(255) NULL"),

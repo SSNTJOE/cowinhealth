@@ -1,9 +1,7 @@
 package com.tube.healthing
 
 import android.graphics.BitmapFactory
-import android.graphics.BlendMode
 import android.graphics.Color
-import android.os.Build
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -62,11 +60,6 @@ fun applyBodyOverlays(
                 img.setImageBitmap(bmp)
                 img.adjustViewBounds = true
                 img.setBackgroundColor(Color.TRANSPARENT)
-                if (Build.VERSION.SDK_INT >= 29) {
-                    val paint = android.graphics.Paint()
-                    paint.blendMode = BlendMode.SCREEN
-                    img.setLayerType(ImageView.LAYER_TYPE_HARDWARE, paint)
-                }
                 val lp = FrameLayout.LayoutParams(size, size)
                 img.x = w * spot.x - size / 2f
                 img.y = h * spot.y - size / 2f

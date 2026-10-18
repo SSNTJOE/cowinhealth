@@ -49,8 +49,12 @@
           </div>
         </div>
         <p id="bmi-live" class="bmi-live note"></p>
-        <label>病史</label>
-        <textarea id="medical_history" rows="2"></textarea>
+        <h3>特殊疾病（可複選）</h3>
+        <p class="note">教學示範用，用來篩選食療與穴道搜尋方向，不是診斷或用藥建議。</p>
+        <div id="conditions-group" class="check-grid"></div>
+        <h3>過敏（可複選）</h3>
+        <p class="note">搜尋食譜時會避開這些食材。</p>
+        <div id="allergies-group" class="check-grid"></div>
         <div class="actions">
           <button type="submit">儲存身體資料</button>
         </div>
@@ -82,7 +86,7 @@
       <p id="cam-msg" class="status"></p>
       <div id="face-grid-wrap" class="hidden">
         <h3>臉部分區（4×3，教學示範）</h3>
-        <p class="note">縱 4 列、橫 3 欄。第 8 格再分上段肝膽／下段脾胃；第 12 格唇在最下列中央。臉色取 1、2、3、5、7、8、9、10、12 格平均（不含眼 4、6 與右腎 11）。此為教學示範，不能取代醫師診斷。</p>
+        <p class="note">縱 4 列、橫 3 欄。基本色是第 1、2、3、5、7、8、9、10、11 格的平均。各區先對照色域：實熱 R160–220／G20–50／B20–50、實寒 R80–130／G40–80／B70–110、虛熱 R220–255／G90–140／B110–150、虛寒 R210–240／G170–200／B170–200；沒入色域再跟基本色比，較紅為實熱、較黃為濕氣較重、較黑為實寒、較白為虛寒。第 8 格是鼻子。第 4、5 格是眼睛，正常以白與黑為主；落入實熱為肝實熱、虛熱為肝虛熱，較黃為濕氣較重。第 12 格取較紅的區塊當嘴唇，用同一套色域。此為教學示範，不能取代醫師診斷。</p>
         <div class="face-grid-stage" id="face-grid-stage">
           <img id="face-preview" alt="臉部擷取" />
           <div id="face-grid-overlay" class="face-grid-overlay"></div>
@@ -119,6 +123,7 @@
         <span class="legend-item"><img src="/media/strong-cold.png" alt="" />實證寒證</span>
         <span class="legend-item"><img src="/media/weak-hot.png" alt="" />虛證熱證</span>
         <span class="legend-item"><img src="/media/weak-cold.png" alt="" />虛證寒證</span>
+        <span class="legend-item"><img src="/media/mositure.png" alt="" />濕氣較重</span>
       </div>
       <div class="body-map" id="body-map">
         <img id="body-img" alt="五臟六腑圖" src="/media/boy-body.png" />
@@ -126,6 +131,13 @@
       </div>
       <div id="scores" class="scores"></div>
       <p class="note" id="disclaimer"></p>
+
+      <h3>臟腑分數趨勢</h3>
+      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（5 未定）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
+      <div class="trend-wrap">
+        <canvas id="trend-chart"></canvas>
+      </div>
+      <p id="trend-empty" class="note hidden">尚無足夠紀錄可畫趨勢。</p>
 
       <h3>歷史紀錄</h3>
       <div id="records"></div>
@@ -147,6 +159,7 @@
     </form>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>
 </body>

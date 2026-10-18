@@ -55,6 +55,52 @@ function formBody(obj) {
   return body;
 }
 
+const CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
+const ALLERGY_OPTIONS = ["蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+
+function renderCheckboxes(container, options, selected) {
+  if (!container) return;
+  const picked = new Set(Array.isArray(selected) ? selected : []);
+  container.innerHTML = options
+    .map((label) => {
+      const checked = picked.has(label) ? " checked" : "";
+      return (
+        '<label class="check"><input type="checkbox" value="' +
+        label +
+        '"' +
+        checked +
+        "> " +
+        label +
+        "</label>"
+      );
+    })
+    .join("");
+}
+
+function fillHealthFlags(root, user) {
+  const scope = root || document;
+  renderCheckboxes(
+    scope.querySelector("#conditions-group"),
+    CONDITION_OPTIONS,
+    user && user.conditions,
+  );
+  renderCheckboxes(
+    scope.querySelector("#allergies-group"),
+    ALLERGY_OPTIONS,
+    user && user.allergies,
+  );
+}
+
+function selectedHealthFlags(root) {
+  const scope = root || document;
+  const read = (selector) =>
+    [...scope.querySelectorAll(selector + ' input[type="checkbox"]:checked')].map((el) => el.value);
+  return {
+    conditions_json: JSON.stringify(read("#conditions-group")),
+    allergies_json: JSON.stringify(read("#allergies-group")),
+  };
+}
+
 const HEALTHY_BMI_MIN = 18.5;
 const HEALTHY_BMI_MAX = 24;
 const HEALTHY_BMI_MAX_DISPLAY = 23.9;

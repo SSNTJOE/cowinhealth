@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from .syndrome import apply_color_findings, apply_pulse, apply_text, empty_evidence, finalize
+from .syndrome import ORGAN_META, add, apply_color_findings, apply_pulse, apply_text, empty_evidence, finalize
 
 
 def clamp(value: float, low: int = 1, high: int = 10) -> int:
@@ -323,23 +323,72 @@ def hsv_label(stats: dict[str, float]) -> str:
 
 
 # 4 rows × 3 columns. Row 4 visual order is 10 | 12 lips (center) | 11.
+# Cells 4 and 5 are the eyes. Cell 8 is the nose. Cell 12 lips use the redder pixels only.
 FACE_CELL_LAYOUT = [
-    {"id": 1, "row": 0, "col": 0, "name": "左側面", "organs": "左臉"},
-    {"id": 2, "row": 0, "col": 1, "name": "額頭", "organs": "咽喉／肺"},
-    {"id": 3, "row": 0, "col": 2, "name": "右側面", "organs": "右臉"},
-    {"id": 4, "row": 1, "col": 0, "name": "左眼", "organs": "肝"},
-    {"id": 5, "row": 1, "col": 1, "name": "心區", "organs": "心"},
-    {"id": 6, "row": 1, "col": 2, "name": "右眼", "organs": "肝"},
-    {"id": 7, "row": 2, "col": 0, "name": "左頰", "organs": "小腸／大腸"},
-    {"id": 8, "row": 2, "col": 1, "name": "鼻準區", "organs": "上段肝膽／下段脾胃", "split": True},
-    {"id": 9, "row": 2, "col": 2, "name": "右頰", "organs": "小腸／大腸"},
-    {"id": 10, "row": 3, "col": 0, "name": "左下頜", "organs": "生殖器／腎"},
-    {"id": 12, "row": 3, "col": 1, "name": "唇", "organs": "脾"},
-    {"id": 11, "row": 3, "col": 2, "name": "右下頜", "organs": "生殖器／腎"},
+    {"id": 1, "row": 0, "col": 0, "name": "左側面", "organs": "左臉", "targets": []},
+    {"id": 2, "row": 0, "col": 1, "name": "額頭", "organs": "咽喉／肺", "targets": ["lung"]},
+    {"id": 3, "row": 0, "col": 2, "name": "右側面", "organs": "右臉", "targets": []},
+    {"id": 4, "row": 1, "col": 0, "name": "左眼", "organs": "肝", "targets": ["liver"], "kind": "eye"},
+    {"id": 5, "row": 1, "col": 1, "name": "眼", "organs": "肝", "targets": ["liver"], "kind": "eye"},
+    {"id": 6, "row": 1, "col": 2, "name": "右側面", "organs": "右臉", "targets": []},
+    {"id": 7, "row": 2, "col": 0, "name": "左頰", "organs": "小腸／大腸", "targets": ["small_intestine", "large_intestine"]},
+    {"id": 8, "row": 2, "col": 1, "name": "鼻子", "organs": "肺", "targets": ["lung"]},
+    {"id": 9, "row": 2, "col": 2, "name": "右頰", "organs": "小腸／大腸", "targets": ["small_intestine", "large_intestine"]},
+    {"id": 10, "row": 3, "col": 0, "name": "左下頜", "organs": "腎", "targets": ["kidney"]},
+    {"id": 12, "row": 3, "col": 1, "name": "唇", "organs": "脾", "targets": ["spleen"], "kind": "lip"},
+    {"id": 11, "row": 3, "col": 2, "name": "右下頜", "organs": "腎", "targets": ["kidney"]},
 ]
-COMPLEXION_CELL_IDS = (1, 2, 3, 5, 7, 8, 9, 10, 12)
-COMPLEXION_EXCLUDED_IDS = (4, 6, 11)
+COMPLEXION_CELL_IDS = (1, 2, 3, 5, 7, 8, 9, 10, 11)
+COMPLEXION_EXCLUDED_IDS = (4, 6, 12)
 TEACHING_NOTE = "教學示範，非中醫診斷"
+DAMP_OVERLAY = "mositure.png"
+# Shared face and lip color table.
+SYNDROME_RANGES = (
+    {
+        "meaning": "實熱",
+        "look": "鮮紅、深紅、乾焦",
+        "r": (160, 220),
+        "g": (20, 50),
+        "b": (20, 50),
+        "example": "#B82323",
+        "overlay": "strong-hot.png",
+        "targets": ["large_intestine", "spleen"],
+        "patterns": (("實證", 1.6), ("熱證", 1.8)),
+    },
+    {
+        "meaning": "實寒",
+        "look": "青紫、暗黑、滯暗",
+        "r": (80, 130),
+        "g": (40, 80),
+        "b": (70, 110),
+        "example": "#6A425A",
+        "overlay": "strong-cold.png",
+        "targets": ["heart", "lung"],
+        "patterns": (("實證", 1.6), ("寒證", 1.8)),
+    },
+    {
+        "meaning": "虛熱",
+        "look": "嫩紅、顴紅唇赤、少津",
+        "r": (220, 255),
+        "g": (90, 140),
+        "b": (110, 150),
+        "example": "#E87D8E",
+        "overlay": "weak-hot.png",
+        "targets": ["spleen"],
+        "patterns": (("虛證", 1.6), ("熱證", 1.8)),
+    },
+    {
+        "meaning": "虛寒",
+        "look": "淡白、無血色、多液",
+        "r": (210, 240),
+        "g": (170, 200),
+        "b": (170, 200),
+        "example": "#E3B5B5",
+        "overlay": "weak-cold.png",
+        "targets": ["spleen"],
+        "patterns": (("虛證", 1.6), ("寒證", 1.8)),
+    },
+)
 
 
 def hex_from_stats(stats: dict[str, float]) -> str:
@@ -401,201 +450,296 @@ def crop_cell(image: Image.Image, row: int, col: int, half: str | None = None) -
     return crop_box(image, left, top, right, bottom)
 
 
-def complexion_reading(stats: dict[str, float]) -> tuple[str, str, str]:
-    if stats.get("green_ratio", 0) > 0.12 or (80 <= stats["h"] <= 160 and stats["s"] >= 0.16 and stats["v"] <= 0.78):
-        return "偏綠", "寒證", f"臉色偏綠，屬寒證（{TEACHING_NOTE}）"
-    if stats["red_ratio"] > 0.18:
-        return "偏紅", "熱證", f"臉色偏紅，屬熱證（{TEACHING_NOTE}）"
-    if stats["yellow_ratio"] > 0.16:
-        return "偏黃", "濕證", f"臉色偏黃，屬濕證（{TEACHING_NOTE}）"
-    if stats["white_ratio"] > 0.22 or stats["pale_ratio"] > 0.28:
-        return "偏白", "虛證", f"臉色偏白，屬虛證（{TEACHING_NOTE}）"
-    return "中性", "未定", f"臉色接近中性（{TEACHING_NOTE}）"
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    raw = value.lstrip("#")
+    return int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
 
 
-def cell8_reading(stats: dict[str, float]) -> tuple[str, str]:
-    if stats["dark_ratio"] > 0.16 or stats["v"] < 0.32:
-        return "偏深色", "胃不好"
-    if stats["yellow_ratio"] > 0.16:
-        return "偏黃", "濕熱"
-    if stats["white_ratio"] > 0.22 or stats["pale_ratio"] > 0.3:
-        return "偏白", "血虛"
-    if stats["red_ratio"] > 0.18:
-        return "偏紅熱", "肺和皮實熱"
-    return "中性", "未見明顯偏色"
+def _color_scores(cell: dict[str, float], base: dict[str, float]) -> dict[str, float]:
+    dr = cell["r"] - base["r"]
+    dg = cell["g"] - base["g"]
+    db = cell["b"] - base["b"]
+    return {
+        "red": dr - max(dg, db),
+        "yellow": min(dr, dg) - db,
+        "black": -((dr + dg + db) / 3.0),
+        "white": (dr + dg + db) / 3.0,
+    }
 
 
-def lips_reading(stats: dict[str, float]) -> tuple[str, str]:
-    if stats["white_ratio"] > 0.2 or stats["pale_ratio"] > 0.28 or (stats["s"] < 0.22 and stats["v"] >= 0.58):
-        return "偏白", "氣血虛"
-    if stats["red_ratio"] > 0.2:
-        return "偏紅", "實熱證"
-    return "中性", "唇色接近中性"
+def compare_to_base(cell: dict[str, float], base: dict[str, float], kind: str) -> dict[str, Any]:
+    """Difference from the baseline complexion. Eyes only flag red or yellow."""
+    scores = _color_scores(cell, base)
+    if kind == "eye":
+        if scores["red"] >= 12 and scores["red"] >= scores["yellow"]:
+            return {
+                "bias": "較紅",
+                "meaning": "肝實熱",
+                "overlay": "strong-hot.png",
+                "patterns": (("實證", 1.6), ("熱證", 1.8)),
+                "score": scores["red"],
+            }
+        if scores["yellow"] >= 12:
+            return {
+                "bias": "較黃",
+                "meaning": "濕氣較重",
+                "overlay": DAMP_OVERLAY,
+                "patterns": (("實證", 1.4),),
+                "score": scores["yellow"],
+            }
+        return {
+            "bias": "白／黑",
+            "meaning": "眼色以白與黑為主",
+            "overlay": None,
+            "patterns": (),
+            "score": 0.0,
+        }
+
+    choices = (
+        ("較紅", "實熱", "strong-hot.png", (("實證", 1.6), ("熱證", 1.8)), scores["red"]),
+        ("較黃", "濕氣較重", DAMP_OVERLAY, (("實證", 1.4),), scores["yellow"]),
+        ("較黑", "實寒", "strong-cold.png", (("實證", 1.6), ("寒證", 1.8)), scores["black"]),
+        ("較白", "虛寒", "weak-cold.png", (("虛證", 1.6), ("寒證", 1.8)), scores["white"]),
+    )
+    bias, meaning, overlay, patterns, score = max(choices, key=lambda item: item[4])
+    if score < 12:
+        return {
+            "bias": "接近基本色",
+            "meaning": "未見明顯色差",
+            "overlay": None,
+            "patterns": (),
+            "score": score,
+        }
+    return {"bias": bias, "meaning": meaning, "overlay": overlay, "patterns": patterns, "score": score}
 
 
-def eyes_reading(stats: dict[str, float]) -> tuple[str, str]:
-    swollen = stats["red_ratio"] > 0.12 and stats["s"] >= 0.22
-    if swollen or stats["red_ratio"] > 0.14:
-        return "偏紅／腫脹傾向", "肝"
-    return "中性", "眼部未見明顯紅腫"
+def reddish_lip_rgb(image: Image.Image) -> tuple[tuple[int, int, int], dict[str, float]]:
+    """Cell 12's redder pixels are the lips; fall back to the whole cell."""
+    picked = [pixel for pixel in image.getdata() if pixel[0] >= 90 and pixel[0] >= pixel[1] + 12 and pixel[0] >= pixel[2] + 12]
+    if len(picked) < 12:
+        stats = region_stats(image)
+        return (int(stats["r"]), int(stats["g"]), int(stats["b"])), stats
+    count = float(len(picked))
+    rgb = tuple(int(round(sum(pixel[i] for pixel in picked) / count)) for i in range(3))
+    swatch = Image.new("RGB", (1, 1), rgb)
+    return rgb, region_stats(swatch)
 
 
-def generic_organ_reading(stats: dict[str, float], organs: str) -> tuple[str, str]:
-    if stats.get("green_ratio", 0) > 0.12:
-        return "偏綠", f"{organs}寒象傾向"
-    if stats["red_ratio"] > 0.18:
-        return "偏紅", f"{organs}熱象傾向"
-    if stats["yellow_ratio"] > 0.16:
-        return "偏黃", f"{organs}濕象傾向"
-    if stats["white_ratio"] > 0.22 or stats["pale_ratio"] > 0.28:
-        return "偏白", f"{organs}虛象傾向"
-    if stats["dark_ratio"] > 0.16:
-        return "偏深", f"{organs}不足傾向"
-    return "中性", f"{organs}未見明顯偏色"
+def _range_gap(value: int, low: int, high: int) -> int:
+    if value < low:
+        return low - value
+    if value > high:
+        return value - high
+    return 0
+
+
+def match_lip_color(rgb: tuple[int, int, int], slack: int = 24) -> dict[str, Any]:
+    """Match lip RGB to the 實熱／實寒／虛熱／虛寒 ranges. Inside a range wins."""
+    inside = []
+    nearest = None
+    nearest_gap = 10**9
+    for spec in SYNDROME_RANGES:
+        gap = (
+            _range_gap(rgb[0], *spec["r"])
+            + _range_gap(rgb[1], *spec["g"])
+            + _range_gap(rgb[2], *spec["b"])
+        )
+        example = _hex_to_rgb(spec["example"])
+        dist = sum((channel - ref) ** 2 for channel, ref in zip(rgb, example)) ** 0.5
+        if gap == 0:
+            inside.append((dist, spec))
+        if gap < nearest_gap or (gap == nearest_gap and nearest and dist < nearest[0]):
+            nearest_gap = gap
+            nearest = (dist, spec)
+    if inside:
+        _dist, spec = min(inside, key=lambda item: item[0])
+        matched = True
+        gap = 0
+    else:
+        _dist, spec = nearest
+        matched = nearest_gap <= slack
+        gap = nearest_gap
+    if not matched:
+        return {
+            "bias": "未入色域",
+            "meaning": "未落入實熱、實寒、虛熱、虛寒色域",
+            "overlay": None,
+            "patterns": (),
+            "targets": [],
+            "score": 0.0,
+            "reference": spec["example"],
+            "distance": gap,
+            "look": spec["look"],
+        }
+    return {
+        "bias": spec["meaning"],
+        "meaning": f"{spec['meaning']}（{spec['look']}）",
+        "overlay": spec["overlay"],
+        "patterns": spec["patterns"],
+        "targets": spec["targets"],
+        "score": max(1.0, 80.0 - gap),
+        "reference": spec["example"],
+        "distance": gap,
+        "look": spec["look"],
+    }
+
+
+def classify_face_color(stats: dict[str, float], base: dict[str, float], kind: str) -> dict[str, Any]:
+    """Prefer the 實熱／實寒／虛熱／虛寒 ranges; otherwise compare with the baseline."""
+    rgb = (int(round(stats["r"])), int(round(stats["g"])), int(round(stats["b"])))
+    ranged = match_lip_color(rgb, slack=0)
+    if ranged.get("overlay"):
+        meaning = ranged["bias"]
+        if kind == "eye":
+            if meaning == "實熱":
+                return {
+                    "bias": "實熱",
+                    "meaning": "肝實熱（鮮紅、深紅、乾焦）",
+                    "overlay": "strong-hot.png",
+                    "patterns": (("實證", 1.6), ("熱證", 1.8)),
+                    "score": ranged["score"],
+                    "reference": ranged["reference"],
+                    "source": "色域",
+                }
+            if meaning == "虛熱":
+                return {
+                    "bias": "虛熱",
+                    "meaning": "肝虛熱（嫩紅、少津）",
+                    "overlay": "weak-hot.png",
+                    "patterns": (("虛證", 1.6), ("熱證", 1.8)),
+                    "score": ranged["score"],
+                    "reference": ranged["reference"],
+                    "source": "色域",
+                }
+            return {
+                "bias": "白／黑",
+                "meaning": "眼色以白與黑為主",
+                "overlay": None,
+                "patterns": (),
+                "score": 0.0,
+                "reference": ranged["reference"],
+                "source": "色域",
+            }
+        ranged["source"] = "色域"
+        return ranged
+    reading = compare_to_base(stats, base, kind)
+    reading["source"] = "基本色"
+    reading["reference"] = None
+    return reading
 
 
 def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
     findings: list[str] = []
     cells: list[dict[str, Any]] = []
     stats_by_id: dict[int, dict[str, float]] = {}
+    crops: dict[int, Image.Image] = {}
 
     for spec in FACE_CELL_LAYOUT:
-        cell_id = spec["id"]
-        row, col = spec["row"], spec["col"]
-        if spec.get("split"):
-            upper_img = crop_cell(image, row, col, "upper")
-            lower_img = crop_cell(image, row, col, "lower")
-            whole = crop_cell(image, row, col)
-            upper_stats = region_stats(upper_img)
-            lower_stats = region_stats(lower_img)
-            whole_stats = region_stats(whole)
-            stats_by_id[cell_id] = whole_stats
-            halves = []
-            for part, part_stats, organs in (
-                ("upper", upper_stats, "肝膽"),
-                ("lower", lower_stats, "脾胃"),
-            ):
-                bias, meaning = cell8_reading(part_stats)
-                interpretation = f"第8格{('上段' if part == 'upper' else '下段')}（{organs}）{bias} → {meaning}（{TEACHING_NOTE}）"
-                halves.append(
-                    {
-                        "id": 8,
-                        "part": part,
-                        "name": spec["name"],
-                        "organs": organs,
-                        "hex": hex_from_stats(part_stats),
-                        "hsv": compact_hsv(part_stats),
-                        "bias": bias,
-                        "meaning": meaning,
-                        "interpretation": interpretation,
-                    }
-                )
-                if bias != "中性":
-                    findings.append(interpretation)
-            cells.append(
-                {
-                    "id": cell_id,
-                    "row": row,
-                    "col": col,
-                    "name": spec["name"],
-                    "organs": spec["organs"],
-                    "hex": hex_from_stats(whole_stats),
-                    "hsv": compact_hsv(whole_stats),
-                    "bias": halves[0]["bias"] if halves[0]["bias"] != "中性" else halves[1]["bias"],
-                    "meaning": f"上{halves[0]['meaning']}／下{halves[1]['meaning']}",
-                    "reading": f"上段{halves[0]['bias']} → {halves[0]['meaning']}／下段{halves[1]['bias']} → {halves[1]['meaning']}",
-                    "interpretation": "；".join(item["interpretation"] for item in halves),
-                    "split": halves,
-                }
-            )
-            continue
+        crop = crop_cell(image, spec["row"], spec["col"])
+        crops[spec["id"]] = crop
+        stats_by_id[spec["id"]] = region_stats(crop)
 
-        crop = crop_cell(image, row, col)
-        stats = region_stats(crop)
-        stats_by_id[cell_id] = stats
-        if cell_id in (4, 6):
-            bias, meaning = eyes_reading(stats)
-            interpretation = f"第{cell_id}格{spec['name']}（{spec['organs']}）{bias} → {meaning}（{TEACHING_NOTE}）"
-        elif cell_id == 12:
-            bias, meaning = lips_reading(stats)
-            interpretation = f"第12格唇（脾）{bias} → {meaning}（{TEACHING_NOTE}）"
+    complexion_stats = average_stats([stats_by_id[i] for i in COMPLEXION_CELL_IDS if i in stats_by_id])
+    base_hex = hex_from_stats(complexion_stats)
+    c_text = (
+        f"基本色取第 1、2、3、5、7、8、9、10、11 格平均 {base_hex}，"
+        f"各區先對照實熱、實寒、虛熱、虛寒色域，沒入色域再跟基本色比色差（{TEACHING_NOTE}）"
+    )
+    findings.append(c_text)
+
+    best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
+
+    def remember(targets: list[str], reading: dict[str, Any]) -> None:
+        overlay = reading.get("overlay")
+        if not overlay:
+            return
+        for organ in targets:
+            previous = best_overlay.get(organ)
+            if previous is None or reading["score"] > previous[0]:
+                best_overlay[organ] = (reading["score"], overlay, reading["patterns"])
+
+    lip_color = None
+    for spec in FACE_CELL_LAYOUT:
+        cell_id = spec["id"]
+        kind = spec.get("kind")
+        if kind == "lip":
+            rgb, stats = reddish_lip_rgb(crops[cell_id])
+            stats_by_id[cell_id] = stats
+            reading = match_lip_color(rgb)
+            targets = reading["targets"]
+            interpretation = (
+                f"第12格唇較紅區域 {hex_from_stats(stats)} "
+                f"對照色域，參考 {reading['reference']} → {reading['meaning']}（{TEACHING_NOTE}）"
+            )
+            lip_color = f"唇{reading['meaning']}（參考 {reading['reference']}）"
         else:
-            bias, meaning = generic_organ_reading(stats, spec["organs"])
-            interpretation = f"第{cell_id}格{spec['name']}（{spec['organs']}）{bias} → {meaning}（{TEACHING_NOTE}）"
-        if bias != "中性":
+            stats = stats_by_id[cell_id]
+            reading = classify_face_color(stats, complexion_stats, kind or "face")
+            targets = spec["targets"] if reading.get("overlay") else []
+            how = "落入色域" if reading.get("source") == "色域" else "相對基本色"
+            ref = f"，參考 {reading['reference']}" if reading.get("reference") else ""
+            interpretation = (
+                f"第{cell_id}格{spec['name']}（{spec['organs']}）{hex_from_stats(stats)} "
+                f"{how}{reading['bias']}{ref} → {reading['meaning']}（{TEACHING_NOTE}）"
+            )
+        if reading["meaning"] not in ("未見明顯色差", "眼色以白與黑為主"):
             findings.append(interpretation)
+        remember(targets, reading)
         cells.append(
             {
                 "id": cell_id,
-                "row": row,
-                "col": col,
+                "row": spec["row"],
+                "col": spec["col"],
                 "name": spec["name"],
                 "organs": spec["organs"],
-                "hex": hex_from_stats(stats),
-                "hsv": compact_hsv(stats),
-                "bias": bias,
-                "meaning": meaning,
-                "reading": f"{bias} → {meaning}",
+                "hex": hex_from_stats(stats_by_id[cell_id]),
+                "hsv": compact_hsv(stats_by_id[cell_id]),
+                "bias": reading["bias"],
+                "meaning": reading["meaning"],
+                "reading": f"{reading['bias']} → {reading['meaning']}",
                 "interpretation": interpretation,
+                "overlay": reading.get("overlay"),
                 "split": None,
             }
         )
 
-    complexion_stats = average_stats([stats_by_id[i] for i in COMPLEXION_CELL_IDS if i in stats_by_id])
-    c_bias, c_pattern, c_text = complexion_reading(complexion_stats)
-    findings.insert(0, c_text)
-    lip_stats = stats_by_id.get(12)
-    if lip_stats:
-        lip_bias, lip_meaning = lips_reading(lip_stats)
-        lip_color = f"唇{lip_bias} → {lip_meaning}"
-    else:
-        lip_color = None
+    organ_overlays = {organ: filename for organ, (_score, filename, _patterns) in best_overlay.items()}
+    marks = [
+        {"organ": organ, "pattern": name, "weight": weight}
+        for organ, (_score, _filename, patterns) in best_overlay.items()
+        for name, weight in patterns
+    ]
     colors = {
-        "face_color": f"{c_bias}／{c_pattern}",
+        "face_color": f"基本色 {base_hex}",
         "lip_color": lip_color,
         "tongue_body_color": None,
         "tongue_coat_color": None,
     }
-    measurements = []
-    for cell in cells:
-        measurements.append(
-            {
-                "cell_id": cell["id"],
-                "part": "whole",
-                "name": cell["name"],
-                "organs": cell["organs"],
-                "hex": cell["hex"],
-                "hsv": cell["hsv"],
-                "bias": cell["bias"],
-                "meaning": cell.get("meaning"),
-                "reading": cell.get("reading"),
-            }
-        )
-        for part in cell.get("split") or []:
-            measurements.append(
-                {
-                    "cell_id": 8,
-                    "part": part["part"],
-                    "name": cell["name"],
-                    "organs": part["organs"],
-                    "hex": part["hex"],
-                    "hsv": part["hsv"],
-                    "bias": part["bias"],
-                    "meaning": part["meaning"],
-                    "reading": f"{part['bias']} → {part['meaning']}",
-                }
-            )
+    measurements = [
+        {
+            "cell_id": cell["id"],
+            "part": "whole",
+            "name": cell["name"],
+            "organs": cell["organs"],
+            "hex": cell["hex"],
+            "hsv": cell["hsv"],
+            "bias": cell["bias"],
+            "meaning": cell.get("meaning"),
+            "reading": cell.get("reading"),
+        }
+        for cell in cells
+    ]
     complexion_hsv = compact_hsv(complexion_stats)
     measurements.append(
         {
             "cell_id": 0,
             "part": "complexion",
-            "name": "臉色平均",
-            "organs": "1,2,3,5,7,8,9,10,12",
-            "hex": hex_from_stats(complexion_stats),
+            "name": "基本色",
+            "organs": "1,2,3,5,7,8,9,10,11",
+            "hex": base_hex,
             "hsv": complexion_hsv,
-            "bias": c_bias,
-            "meaning": c_pattern,
+            "bias": "基本色",
+            "meaning": "各區色差的比較基準",
             "reading": c_text,
         }
     )
@@ -606,11 +750,13 @@ def analyze_face_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], di
         "numbering": "row4 visual 10 | 12 lips | 11",
         "cells": cells,
         "measurements": measurements,
+        "marks": marks,
+        "organ_overlays": organ_overlays,
         "complexion": {
-            "hex": hex_from_stats(complexion_stats),
+            "hex": base_hex,
             "hsv": complexion_hsv,
-            "bias": c_bias,
-            "pattern": c_pattern,
+            "bias": "基本色",
+            "pattern": "色差基準",
             "interpretation": c_text,
             "included_cells": list(COMPLEXION_CELL_IDS),
             "excluded_cells": list(COMPLEXION_EXCLUDED_IDS),
@@ -864,8 +1010,16 @@ def analyze_session(
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}")
     apply_color_findings(evidence, findings)
+    for mark in (face_grid or {}).get("marks") or []:
+        add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     pulse_notes = apply_pulse(evidence, pulse)
     scores, patterns, overlays = finalize(evidence)
+    for organ, filename in ((face_grid or {}).get("organ_overlays") or {}).items():
+        overlays[organ] = filename
+        if filename == DAMP_OVERLAY:
+            for key, _name, _score_key, pattern_key in ORGAN_META:
+                if key == organ:
+                    patterns[pattern_key] = "濕氣較重"
     all_findings = findings + text_notes + pulse_notes
     if not all_findings:
         all_findings = ["資料不足，各臟腑先記 5 分（未定），不放置證型圖"]

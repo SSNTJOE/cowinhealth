@@ -21,7 +21,19 @@ from .advice import build_advice
 from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
+from .health_flags import (
+    ALLERGY_SET,
+    CONDITION_SET,
+    ALLERGY_OPTIONS,
+    CONDITION_OPTIONS,
+    dumps_labels,
+    history_summary,
+    parse_label_list,
+    user_allergies,
+    user_conditions,
+)
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, overlay_from_pattern_label
+from .trend import build_trend, iso_time
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MEDIA_ALIASES = {
@@ -35,6 +47,8 @@ MEDIA_ALIASES = {
     "strong-cold.pgn": "strong-cold.png",
     "weak-hot.pgn": "weak-hot.png",
     "weak-cold.pgn": "weak-cold.png",
+    "moisture.png": "mositure.png",
+    "mositure.png": "mositure.png",
 }
 signer = TimestampSigner(SECRET_KEY)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -201,6 +215,8 @@ def serialize_user(user: dict, include_email: bool = False) -> dict:
         "healthy_bmi_range": "18.5–23.9" if _positive_float(height) else None,
         "healthy_weight_range": healthy_weight_range(height),
         "medical_history": user.get("medical_history"),
+        "conditions": user_conditions(user),
+        "allergies": user_allergies(user),
         "profile_complete": is_profile_complete(user),
     }
     if include_email:
@@ -248,7 +264,8 @@ def fetch_user(user_id: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT user_id, email, nickname, birth_year, height, weight, age, gender, medical_history
+                SELECT user_id, email, nickname, birth_year, height, weight, age, gender,
+                       medical_history, conditions_json, allergies_json
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -484,6 +501,8 @@ def update_profile(
     weight: float | None = Form(default=None),
     gender: str | None = Form(default=None),
     medical_history: str | None = Form(default=None),
+    conditions_json: str | None = Form(default=None),
+    allergies_json: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     current = fetch_user(user_id)
@@ -500,7 +519,24 @@ def update_profile(
     next_age = age_from_birth_year(next_birth) if next_birth else current.get("age")
     next_height = height if height is not None else current.get("height")
     next_weight = weight if weight is not None else current.get("weight")
-    next_history = medical_history if medical_history is not None else current.get("medical_history")
+    if conditions_json is not None:
+        next_conditions = parse_label_list(
+            conditions_json, CONDITION_SET, CONDITION_OPTIONS, "conditions_json"
+        )
+    else:
+        next_conditions = user_conditions(current)
+    if allergies_json is not None:
+        next_allergies = parse_label_list(
+            allergies_json, ALLERGY_SET, ALLERGY_OPTIONS, "allergies_json"
+        )
+    else:
+        next_allergies = user_allergies(current)
+    if conditions_json is not None or allergies_json is not None:
+        next_history = history_summary(next_conditions, next_allergies)
+    elif medical_history is not None:
+        next_history = medical_history
+    else:
+        next_history = current.get("medical_history")
 
     conn = connect()
     try:
@@ -509,7 +545,8 @@ def update_profile(
                 """
                 UPDATE users
                 SET nickname = %s, birth_year = %s, height = %s, weight = %s,
-                    age = %s, gender = %s, medical_history = %s
+                    age = %s, gender = %s, medical_history = %s,
+                    conditions_json = %s, allergies_json = %s
                 WHERE user_id = %s
                 """,
                 (
@@ -520,6 +557,8 @@ def update_profile(
                     next_age,
                     next_gender,
                     next_history,
+                    dumps_labels(next_conditions),
+                    dumps_labels(next_allergies),
                     user_id,
                 ),
             )
@@ -594,7 +633,14 @@ async def analyze(
             raise HTTPException(status_code=400, detail="pulse_json 不是合法 JSON") from exc
 
     result = analyze_session(images, symptoms or "", discomfort or "", pulse)
-    advice = build_advice(result["findings"], symptoms or "", discomfort or "")
+    profile = fetch_user(user_id) or {}
+    advice = build_advice(
+        result["findings"],
+        symptoms or "",
+        discomfort or "",
+        conditions=user_conditions(profile),
+        allergies=user_allergies(profile),
+    )
     extra = {
         "symptoms": symptoms,
         "discomfort": discomfort,
@@ -626,7 +672,7 @@ def records(request: Request):
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
-                LIMIT 20
+                LIMIT 50
                 """,
                 (user_id,),
             )
@@ -634,6 +680,7 @@ def records(request: Request):
     finally:
         conn.close()
     for row in rows:
+        row["record_date"] = iso_time(row.get("record_date"))
         row["overlays"] = {
             key: overlay_from_pattern_label(row.get(pattern_key))
             for key, _name, _score_key, pattern_key in ORGAN_META
@@ -654,4 +701,4 @@ def records(request: Request):
                 row["tongue_grid"] = None
         else:
             row["tongue_grid"] = None
-    return {"user_id": user_id, "records": rows}
+    return {"user_id": user_id, "records": rows, "trend": build_trend(rows)}

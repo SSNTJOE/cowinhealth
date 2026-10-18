@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Size
+import android.text.method.LinkMovementMethod
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -52,7 +53,24 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        HealthFlags.inflate(binding.conditionsGroup, HealthFlags.CONDITIONS)
+        HealthFlags.inflate(binding.allergiesGroup, HealthFlags.ALLERGIES)
+        binding.result.movementMethod = LinkMovementMethod.getInstance()
+
         binding.login.setOnClickListener { Thread { login() }.start() }
+        binding.register.setOnClickListener { Thread { register() }.start() }
+        binding.saveProfile.setOnClickListener {
+            val nickname = binding.nickname.text.toString()
+            val birthYear = binding.birthYear.text.toString()
+            val gender = selectedGender()
+            val height = binding.height.text.toString()
+            val weight = binding.weight.text.toString()
+            val conditions = HealthFlags.selectedJson(binding.conditionsGroup)
+            val allergies = HealthFlags.selectedJson(binding.allergiesGroup)
+            Thread {
+                saveProfile(nickname, birthYear, gender, height, weight, conditions, allergies)
+            }.start()
+        }
         binding.shotFace.setOnClickListener { capture("face") }
         binding.shotTongue.setOnClickListener { capture("tongue") }
         binding.openPulse.setOnClickListener {
@@ -68,19 +86,71 @@ class MainActivity : AppCompatActivity() {
     private fun login() {
         try {
             api.setBaseUrl(binding.server.text.toString())
-            val json = api.login(
+            api.login(
                 binding.email.text.toString(),
                 binding.password.text.toString()
             )
             val me = api.me()
-            val user = me.optJSONObject("user")
-            female = user?.optString("gender") == "female"
             runOnUiThread {
-                binding.anon.text = "匿名 ID：" + json.getString("user_id")
-                loadBodyImage()
+                applyUser(me.optJSONObject("user"))
+                Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
             }
+            refreshTrend()
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun register() {
+        try {
+            api.setBaseUrl(binding.server.text.toString())
+            val json = api.register(
+                binding.email.text.toString(),
+                binding.password.text.toString()
+            )
+            val me = api.me()
+            runOnUiThread {
+                applyUser(me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")))
+                Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
+            }
+            refreshTrend()
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun applyUser(user: JSONObject?) {
+        if (user == null) return
+        binding.anon.text = "匿名 ID：" + user.optString("user_id")
+        binding.nickname.setText(jsonText(user, "nickname"))
+        binding.birthYear.setText(jsonText(user, "birth_year"))
+        binding.height.setText(jsonText(user, "height"))
+        binding.weight.setText(jsonText(user, "weight"))
+        when (jsonText(user, "gender")) {
+            "female" -> binding.genderFemale.isChecked = true
+            "male" -> binding.genderMale.isChecked = true
+            "other" -> binding.genderOther.isChecked = true
+            else -> binding.genderGroup.clearCheck()
+        }
+        HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
+        HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
+        female = jsonText(user, "gender") == "female"
+        loadBodyImage()
+    }
+
+    private fun jsonText(user: JSONObject, key: String): String {
+        if (!user.has(key) || user.isNull(key)) return ""
+        val value = user.opt(key) ?: return ""
+        val text = value.toString()
+        return if (text == "null") "" else text
+    }
+
+    private fun selectedGender(): String {
+        return when (binding.genderGroup.checkedRadioButtonId) {
+            binding.genderFemale.id -> "female"
+            binding.genderMale.id -> "male"
+            binding.genderOther.id -> "other"
+            else -> ""
         }
     }
 
@@ -138,6 +208,28 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun saveProfile(
+        nickname: String,
+        birthYear: String,
+        gender: String,
+        height: String,
+        weight: String,
+        conditionsJson: String,
+        allergiesJson: String
+    ) {
+        try {
+            api.setBaseUrl(binding.server.text.toString())
+            api.updateProfile(nickname, birthYear, gender, height, weight, conditionsJson, allergiesJson)
+            val me = api.me()
+            runOnUiThread {
+                applyUser(me.optJSONObject("user"))
+                Toast.makeText(this, "已寫入 MySQL，網站與 App 會看到同一份資料", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
     private fun save() {
         try {
             val json = api.submit(
@@ -149,6 +241,7 @@ class MainActivity : AppCompatActivity() {
             )
             runOnUiThread {
                 binding.result.text = pretty(json)
+                refreshTrend()
                 binding.bodyImage.post {
                     Thread {
                         applyBodyOverlays(
@@ -182,11 +275,23 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun refreshTrend() {
+        Thread {
+            try {
+                val data = api.records()
+                runOnUiThread { TrendCharts.bind(binding.trendChart, data.optJSONObject("trend")) }
+            } catch (_: Exception) {
+            }
+        }.start()
+    }
+
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
-        return "匿名紀錄已寫入 MySQL\n" +
+        return "匿名紀錄已寫入 MySQL（教學參考，非診斷）\n" +
             "食療：" + json.optString("diet_advice") + "\n" +
+            "食療搜尋：" + json.optString("diet_url") + "\n" +
+            "穴道搜尋：" + json.optString("acupoint_url") + "\n" +
             "分數：" + scores + "\n" +
             "證型：" + patterns
     }

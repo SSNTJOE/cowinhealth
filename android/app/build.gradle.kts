@@ -34,4 +34,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 }

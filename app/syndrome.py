@@ -215,5 +215,6 @@ def overlay_from_pattern_label(label: str | None) -> str | None:
         "實證寒證": "strong-cold.png",
         "虛證熱證": "weak-hot.png",
         "虛證寒證": "weak-cold.png",
+        "濕氣較重": "mositure.png",
     }
     return mapping.get(label or "")

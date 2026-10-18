@@ -38,6 +38,19 @@ const organs = [
 ];
 let currentBody = "boy";
 let lastResult = null;
+let trendChart = null;
+const TREND_POINT_STYLE = {
+  circle: "circle",
+  triangle: "triangle",
+  square: "rect",
+  diamond: "rectRot",
+  x: "cross",
+  star: "star",
+  plus: "crossRot",
+  rounded: "rectRounded",
+  dash: "dash",
+  line: "line",
+};
 
 async function checkMysql() {
   try {
@@ -62,11 +75,13 @@ function applyUserBodyImage(user) {
   setBodyImage(bodyKindFromGender(user && user.gender));
 }
 
+fillHealthFlags(document, {});
+
 function fillProfile(user) {
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
-  document.getElementById("medical_history").value = user.medical_history ?? "";
+  fillHealthFlags(document, user);
   applyUserBodyImage(user);
   if (typeof updateHomeBmi === "function") updateHomeBmi();
 }
@@ -389,6 +404,7 @@ function renderResult(result) {
 async function loadRecords() {
   const data = await api("/api/records");
   const box = document.getElementById("records");
+  renderTrend(data.trend);
   if (!data.records.length) {
     box.textContent = "尚無紀錄";
     renderComplexionHistory([]);
@@ -422,6 +438,56 @@ async function loadRecords() {
     })
     .join("");
   box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderTrend(trend) {
+  const empty = document.getElementById("trend-empty");
+  const canvas = document.getElementById("trend-chart");
+  const organs = (trend && trend.organs) || [];
+  const hasPoints = organs.some((org) => (org.points || []).length);
+  if (empty) empty.classList.toggle("hidden", hasPoints);
+  if (typeof Chart === "undefined" || !canvas) return;
+  if (trendChart) {
+    trendChart.destroy();
+    trendChart = null;
+  }
+  if (!hasPoints) return;
+  const labels = (organs[0].points || []).map((pt) => (pt.t || "").replace("T", " ").slice(0, 16));
+  trendChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: organs.map((org) => ({
+        label: org.label,
+        data: (org.points || []).map((pt) => pt.y),
+        borderColor: org.color,
+        backgroundColor: org.color,
+        pointStyle: TREND_POINT_STYLE[org.marker] || "circle",
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        borderWidth: 2,
+        tension: 0.15,
+        spanGaps: true,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: "bottom", labels: { usePointStyle: true, boxWidth: 10 } },
+        title: { display: true, text: trend.y_label || "分數趨勢" },
+      },
+      scales: {
+        x: { title: { display: true, text: "時間" } },
+        y: {
+          min: trend.y_min || 1,
+          max: trend.y_max || 10,
+          ticks: { stepSize: 1 },
+          title: { display: true, text: "分數" },
+        },
+      },
+    },
+  });
 }
 
 async function sendRecord(extraShot) {
@@ -490,7 +556,7 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
       body: formBody({
         height: document.getElementById("height").value,
         weight: document.getElementById("weight").value,
-        medical_history: document.getElementById("medical_history").value,
+        ...selectedHealthFlags(document),
       }),
     });
     if (saved.user) fillProfile(saved.user);

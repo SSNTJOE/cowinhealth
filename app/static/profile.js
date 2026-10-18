@@ -1,4 +1,5 @@
 const profileMsg = document.getElementById("profile-msg");
+fillHealthFlags(document, {});
 
 async function loadProfile() {
   const data = await api("/api/me?include_email=true");
@@ -14,6 +15,7 @@ async function loadProfile() {
   document.getElementById("gender").value = user.gender || "";
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
+  fillHealthFlags(document, user);
   if (typeof updateProfileBmi === "function") updateProfileBmi();
 }
 
@@ -29,6 +31,7 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
         gender: document.getElementById("gender").value,
         height: document.getElementById("height").value,
         weight: document.getElementById("weight").value,
+        ...selectedHealthFlags(document),
       }),
     });
     profileMsg.textContent = "已儲存";

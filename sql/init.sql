@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS users (
   age INT NULL,
   gender VARCHAR(20) NULL,
   medical_history TEXT NULL,
+  conditions_json TEXT NULL,
+  allergies_json TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
