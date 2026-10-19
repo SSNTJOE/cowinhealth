@@ -8,6 +8,9 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
@@ -15,6 +18,7 @@ import androidx.annotation.Nullable;
 import androidx.camera.view.PreviewView;
 import androidx.viewbinding.ViewBinding;
 import androidx.viewbinding.ViewBindings;
+import com.github.mikephil.charting.charts.CombinedChart;
 import com.tube.healthing.R;
 import java.lang.NullPointerException;
 import java.lang.Override;
@@ -25,7 +29,13 @@ public final class ActivityMainBinding implements ViewBinding {
   private final ScrollView rootView;
 
   @NonNull
+  public final LinearLayout allergiesGroup;
+
+  @NonNull
   public final TextView anon;
+
+  @NonNull
+  public final EditText birthYear;
 
   @NonNull
   public final ImageView bodyImage;
@@ -34,13 +44,34 @@ public final class ActivityMainBinding implements ViewBinding {
   public final FrameLayout bodyMap;
 
   @NonNull
+  public final LinearLayout conditionsGroup;
+
+  @NonNull
   public final EditText discomfort;
 
   @NonNull
   public final EditText email;
 
   @NonNull
+  public final RadioButton genderFemale;
+
+  @NonNull
+  public final RadioGroup genderGroup;
+
+  @NonNull
+  public final RadioButton genderMale;
+
+  @NonNull
+  public final RadioButton genderOther;
+
+  @NonNull
+  public final EditText height;
+
+  @NonNull
   public final Button login;
+
+  @NonNull
+  public final EditText nickname;
 
   @NonNull
   public final Button openPulse;
@@ -52,10 +83,16 @@ public final class ActivityMainBinding implements ViewBinding {
   public final PreviewView preview;
 
   @NonNull
+  public final Button register;
+
+  @NonNull
   public final TextView result;
 
   @NonNull
   public final Button save;
+
+  @NonNull
+  public final Button saveProfile;
 
   @NonNull
   public final EditText server;
@@ -69,28 +106,52 @@ public final class ActivityMainBinding implements ViewBinding {
   @NonNull
   public final EditText symptoms;
 
-  private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull TextView anon,
-      @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap, @NonNull EditText discomfort,
-      @NonNull EditText email, @NonNull Button login, @NonNull Button openPulse,
-      @NonNull EditText password, @NonNull PreviewView preview, @NonNull TextView result,
-      @NonNull Button save, @NonNull EditText server, @NonNull Button shotFace,
-      @NonNull Button shotTongue, @NonNull EditText symptoms) {
+  @NonNull
+  public final CombinedChart trendChart;
+
+  @NonNull
+  public final EditText weight;
+
+  private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull LinearLayout allergiesGroup,
+      @NonNull TextView anon, @NonNull EditText birthYear, @NonNull ImageView bodyImage,
+      @NonNull FrameLayout bodyMap, @NonNull LinearLayout conditionsGroup,
+      @NonNull EditText discomfort, @NonNull EditText email, @NonNull RadioButton genderFemale,
+      @NonNull RadioGroup genderGroup, @NonNull RadioButton genderMale,
+      @NonNull RadioButton genderOther, @NonNull EditText height, @NonNull Button login,
+      @NonNull EditText nickname, @NonNull Button openPulse, @NonNull EditText password,
+      @NonNull PreviewView preview, @NonNull Button register, @NonNull TextView result,
+      @NonNull Button save, @NonNull Button saveProfile, @NonNull EditText server,
+      @NonNull Button shotFace, @NonNull Button shotTongue, @NonNull EditText symptoms,
+      @NonNull CombinedChart trendChart, @NonNull EditText weight) {
     this.rootView = rootView;
+    this.allergiesGroup = allergiesGroup;
     this.anon = anon;
+    this.birthYear = birthYear;
     this.bodyImage = bodyImage;
     this.bodyMap = bodyMap;
+    this.conditionsGroup = conditionsGroup;
     this.discomfort = discomfort;
     this.email = email;
+    this.genderFemale = genderFemale;
+    this.genderGroup = genderGroup;
+    this.genderMale = genderMale;
+    this.genderOther = genderOther;
+    this.height = height;
     this.login = login;
+    this.nickname = nickname;
     this.openPulse = openPulse;
     this.password = password;
     this.preview = preview;
+    this.register = register;
     this.result = result;
     this.save = save;
+    this.saveProfile = saveProfile;
     this.server = server;
     this.shotFace = shotFace;
     this.shotTongue = shotTongue;
     this.symptoms = symptoms;
+    this.trendChart = trendChart;
+    this.weight = weight;
   }
 
   @Override
@@ -120,9 +181,21 @@ public final class ActivityMainBinding implements ViewBinding {
     // This is done to optimize the compiled bytecode for size and performance.
     int id;
     missingId: {
+      id = R.id.allergiesGroup;
+      LinearLayout allergiesGroup = ViewBindings.findChildViewById(rootView, id);
+      if (allergiesGroup == null) {
+        break missingId;
+      }
+
       id = R.id.anon;
       TextView anon = ViewBindings.findChildViewById(rootView, id);
       if (anon == null) {
+        break missingId;
+      }
+
+      id = R.id.birthYear;
+      EditText birthYear = ViewBindings.findChildViewById(rootView, id);
+      if (birthYear == null) {
         break missingId;
       }
 
@@ -138,6 +211,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.conditionsGroup;
+      LinearLayout conditionsGroup = ViewBindings.findChildViewById(rootView, id);
+      if (conditionsGroup == null) {
+        break missingId;
+      }
+
       id = R.id.discomfort;
       EditText discomfort = ViewBindings.findChildViewById(rootView, id);
       if (discomfort == null) {
@@ -150,9 +229,45 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.genderFemale;
+      RadioButton genderFemale = ViewBindings.findChildViewById(rootView, id);
+      if (genderFemale == null) {
+        break missingId;
+      }
+
+      id = R.id.genderGroup;
+      RadioGroup genderGroup = ViewBindings.findChildViewById(rootView, id);
+      if (genderGroup == null) {
+        break missingId;
+      }
+
+      id = R.id.genderMale;
+      RadioButton genderMale = ViewBindings.findChildViewById(rootView, id);
+      if (genderMale == null) {
+        break missingId;
+      }
+
+      id = R.id.genderOther;
+      RadioButton genderOther = ViewBindings.findChildViewById(rootView, id);
+      if (genderOther == null) {
+        break missingId;
+      }
+
+      id = R.id.height;
+      EditText height = ViewBindings.findChildViewById(rootView, id);
+      if (height == null) {
+        break missingId;
+      }
+
       id = R.id.login;
       Button login = ViewBindings.findChildViewById(rootView, id);
       if (login == null) {
+        break missingId;
+      }
+
+      id = R.id.nickname;
+      EditText nickname = ViewBindings.findChildViewById(rootView, id);
+      if (nickname == null) {
         break missingId;
       }
 
@@ -174,6 +289,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.register;
+      Button register = ViewBindings.findChildViewById(rootView, id);
+      if (register == null) {
+        break missingId;
+      }
+
       id = R.id.result;
       TextView result = ViewBindings.findChildViewById(rootView, id);
       if (result == null) {
@@ -183,6 +304,12 @@ public final class ActivityMainBinding implements ViewBinding {
       id = R.id.save;
       Button save = ViewBindings.findChildViewById(rootView, id);
       if (save == null) {
+        break missingId;
+      }
+
+      id = R.id.saveProfile;
+      Button saveProfile = ViewBindings.findChildViewById(rootView, id);
+      if (saveProfile == null) {
         break missingId;
       }
 
@@ -210,9 +337,22 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
-      return new ActivityMainBinding((ScrollView) rootView, anon, bodyImage, bodyMap, discomfort,
-          email, login, openPulse, password, preview, result, save, server, shotFace, shotTongue,
-          symptoms);
+      id = R.id.trendChart;
+      CombinedChart trendChart = ViewBindings.findChildViewById(rootView, id);
+      if (trendChart == null) {
+        break missingId;
+      }
+
+      id = R.id.weight;
+      EditText weight = ViewBindings.findChildViewById(rootView, id);
+      if (weight == null) {
+        break missingId;
+      }
+
+      return new ActivityMainBinding((ScrollView) rootView, allergiesGroup, anon, birthYear,
+          bodyImage, bodyMap, conditionsGroup, discomfort, email, genderFemale, genderGroup,
+          genderMale, genderOther, height, login, nickname, openPulse, password, preview, register,
+          result, save, saveProfile, server, shotFace, shotTongue, symptoms, trendChart, weight);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

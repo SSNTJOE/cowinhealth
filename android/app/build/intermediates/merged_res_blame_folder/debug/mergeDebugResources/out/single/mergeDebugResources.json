@@ -4,7 +4,11 @@
         "source": "com.tube.healthing.app-main-5:/layout/activity_main.xml"
     },
     {
-        "merged": "com.tube.healthing.app-debug-3:/layout_activity_pulse.xml.flat",
-        "source": "com.tube.healthing.app-main-5:/layout/activity_pulse.xml"
+        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\layout_activity_main.xml.flat",
+        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\layout\\activity_main.xml"
+    },
+    {
+        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\layout_activity_pulse.xml.flat",
+        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\layout\\activity_pulse.xml"
     }
 ]

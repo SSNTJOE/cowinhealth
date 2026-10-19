@@ -6,6 +6,7 @@ import android.os.CountDownTimer
 import android.util.Size
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -22,6 +23,7 @@ import kotlin.math.abs
 class PulseActivity : AppCompatActivity() {
     private lateinit var binding: ActivityPulseBinding
     private val executor = Executors.newSingleThreadExecutor()
+    private var camera: Camera? = null
     private val results = JSONObject()
     private var beats = 0
     private var lastLuma = 0.0
@@ -30,7 +32,7 @@ class PulseActivity : AppCompatActivity() {
     private var step = 0
 
     private val steps = listOf(
-        Triple("left_cun_light", "左手寸、輕按（小腸）", "請把前置鏡頭靠近左手寸部，先輕放。"),
+        Triple("left_cun_light", "左手寸、輕按（小腸）", "請把後置鏡頭與 LED 貼在左手寸部，先輕放。"),
         Triple("left_cun_heavy", "左手寸、重按（心）", "同一位置稍微用力下壓。"),
         Triple("left_guan_light", "左手關、輕按（膽）", "移到左手關部，先輕放。"),
         Triple("left_guan_heavy", "左手關、重按（肝）", "關部加重。"),
@@ -55,7 +57,7 @@ class PulseActivity : AppCompatActivity() {
 
     private fun showStep() {
         val item = steps[step]
-        binding.guide.text = "步驟 ${step + 1}/12\n${item.second}\n${item.third}\n15 秒超過 23 次為熱/實，少於 14 次為寒/虛。"
+        binding.guide.text = "步驟 ${step + 1}/12\n${item.second}\n${item.third}\n後置鏡頭會打開 LED。把鏡頭貼在該側手腕的寸、關或尺上。15 秒超過 23 次為熱/實，少於 14 次為寒/虛。"
         binding.count.text = "0 次"
     }
 
@@ -100,8 +102,23 @@ class PulseActivity : AppCompatActivity() {
                 image.close()
             }
             provider.unbindAll()
-            provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
+            val bound = provider.bindToLifecycle(
+                this,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                analysis
+            )
+            camera = bound
+            if (bound.cameraInfo.hasFlashUnit()) {
+                bound.cameraControl.enableTorch(true)
+            }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    override fun onDestroy() {
+        camera?.cameraControl?.enableTorch(false)
+        executor.shutdown()
+        super.onDestroy()
     }
 
     private fun startMeasure() {

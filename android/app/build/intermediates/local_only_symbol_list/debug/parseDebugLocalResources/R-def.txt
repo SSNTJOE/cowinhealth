@@ -1,24 +1,37 @@
 R_DEF: Internal format may change without notice
 local
+id allergiesGroup
 id anon
+id birthYear
 id bodyImage
 id bodyMap
+id conditionsGroup
 id count
 id diagram
 id discomfort
 id email
+id genderFemale
+id genderGroup
+id genderMale
+id genderOther
 id guide
+id height
 id login
+id nickname
 id openPulse
 id password
 id preview
+id register
 id result
 id save
+id saveProfile
 id server
 id shotFace
 id shotTongue
 id start
 id symptoms
+id trendChart
+id weight
 layout activity_main
 layout activity_pulse
 string app_name

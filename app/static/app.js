@@ -468,7 +468,10 @@ async function loadRecords() {
   const rows = data.records
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
-      const cells = organs.map((o) => `<td>${r[o.score]} ${r[o.pattern] || ""}</td>`).join("");
+      const cells = organs.map((o) => {
+        const pattern = Number(r[o.score]) === 5 && r[o.pattern] === "未定" ? "待觀察" : (r[o.pattern] || "");
+        return `<td>${r[o.score]} ${pattern}</td>`;
+      }).join("");
       return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
     })
     .join("");

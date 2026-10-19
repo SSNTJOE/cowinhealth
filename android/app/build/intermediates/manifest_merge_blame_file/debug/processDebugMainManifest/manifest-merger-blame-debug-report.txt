@@ -24,139 +24,145 @@
 15-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:19-57
 16        android:required="true" />
 16-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:58-81
-17
-18    <permission
-18-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:22:5-24:47
-19        android:name="com.tube.healthing.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-19-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:23:9-81
-20        android:protectionLevel="signature" />
-20-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:24:9-44
-21
-22    <uses-permission android:name="com.tube.healthing.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
-22-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:26:5-97
-22-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:26:22-94
-23
-24    <application
-24-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:7:5-21:19
-25        android:allowBackup="true"
-25-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:9-35
-26        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-26-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:28:18-86
-27        android:debuggable="true"
-28        android:extractNativeLibs="false"
-28-->INJECTED
-29        android:label="Health-ing"
-29-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:9-35
-30        android:testOnly="true"
-31        android:theme="@style/Theme.Material3.DayNight.NoActionBar"
-31-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:11:9-68
-32        android:usesCleartextTraffic="true" >
-32-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:9-44
-33        <activity
-33-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:12:9-19:20
-34            android:name="com.tube.healthing.MainActivity"
-34-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:13:13-41
-35            android:exported="true" >
-35-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:14:13-36
-36            <intent-filter>
-36-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:15:13-18:29
-37                <action android:name="android.intent.action.MAIN" />
-37-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:16:17-69
-37-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:16:25-66
-38
-39                <category android:name="android.intent.category.LAUNCHER" />
-39-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:17-77
-39-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:27-74
-40            </intent-filter>
-41        </activity>
-42        <activity
-42-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:20:9-76
-43            android:name="com.tube.healthing.PulseActivity"
-43-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:20:19-48
-44            android:exported="false" />
-44-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:20:49-73
-45
-46        <service
-46-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:24:9-33:19
-47            android:name="androidx.camera.core.impl.MetadataHolderService"
-47-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:25:13-75
-48            android:enabled="false"
-48-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:26:13-36
-49            android:exported="false" >
-49-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:27:13-37
-50            <meta-data
-50-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:30:13-32:89
-51                android:name="androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER"
-51-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:31:17-103
-52                android:value="androidx.camera.camera2.Camera2Config$DefaultProvider" />
-52-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:32:17-86
-53        </service>
-54
-55        <provider
-55-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:24:9-32:20
-56            android:name="androidx.startup.InitializationProvider"
-56-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:25:13-67
-57            android:authorities="com.tube.healthing.androidx-startup"
-57-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:26:13-68
-58            android:exported="false" >
-58-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:27:13-37
-59            <meta-data
-59-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:29:13-31:52
-60                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-60-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:30:17-75
-61                android:value="androidx.startup" />
-61-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:31:17-49
+17    <uses-feature
+17-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:5-91
+18        android:name="android.hardware.camera.flash"
+18-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:19-63
+19        android:required="false" />
+19-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:64-88
+20
+21    <permission
+21-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:22:5-24:47
+22        android:name="com.tube.healthing.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+22-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:23:9-81
+23        android:protectionLevel="signature" />
+23-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:24:9-44
+24
+25    <uses-permission android:name="com.tube.healthing.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+25-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:26:5-97
+25-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:26:22-94
+26
+27    <application
+27-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:5-22:19
+28        android:allowBackup="true"
+28-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:9-35
+29        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+29-->[androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:28:18-86
+30        android:debuggable="true"
+31        android:extractNativeLibs="false"
+31-->INJECTED
+32        android:label="Health-ing"
+32-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:9-35
+33        android:testOnly="true"
+34        android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+34-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:12:9-68
+35        android:usesCleartextTraffic="true" >
+35-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:11:9-44
+36        <activity
+36-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:13:9-20:20
+37            android:name="com.tube.healthing.MainActivity"
+37-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:14:13-41
+38            android:exported="true" >
+38-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:15:13-36
+39            <intent-filter>
+39-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:16:13-19:29
+40                <action android:name="android.intent.action.MAIN" />
+40-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:17-69
+40-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:25-66
+41
+42                <category android:name="android.intent.category.LAUNCHER" />
+42-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:18:17-77
+42-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:18:27-74
+43            </intent-filter>
+44        </activity>
+45        <activity
+45-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:9-76
+46            android:name="com.tube.healthing.PulseActivity"
+46-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:19-48
+47            android:exported="false" />
+47-->C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:49-73
+48
+49        <service
+49-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:24:9-33:19
+50            android:name="androidx.camera.core.impl.MetadataHolderService"
+50-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:25:13-75
+51            android:enabled="false"
+51-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:26:13-36
+52            android:exported="false" >
+52-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:27:13-37
+53            <meta-data
+53-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:30:13-32:89
+54                android:name="androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER"
+54-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:31:17-103
+55                android:value="androidx.camera.camera2.Camera2Config$DefaultProvider" />
+55-->[androidx.camera:camera-camera2:1.4.1] C:\Users\Joe\.gradle\caches\9.6.0\transforms\1e5f86c9bf8814ec974851993a9be6f2\transformed\camera-camera2-1.4.1\AndroidManifest.xml:32:17-86
+56        </service>
+57
+58        <provider
+58-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:24:9-32:20
+59            android:name="androidx.startup.InitializationProvider"
+59-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:25:13-67
+60            android:authorities="com.tube.healthing.androidx-startup"
+60-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:26:13-68
+61            android:exported="false" >
+61-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:27:13-37
 62            <meta-data
-62-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:29:13-31:52
-63                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-63-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:30:17-78
+62-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:29:13-31:52
+63                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+63-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:30:17-75
 64                android:value="androidx.startup" />
-64-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:31:17-49
+64-->[androidx.emoji2:emoji2:1.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\74056c6fbf2d78d62369c59afbade8fd\transformed\emoji2-1.3.0\AndroidManifest.xml:31:17-49
 65            <meta-data
-65-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:29:13-31:52
-66                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
-66-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:30:17-85
+65-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:29:13-31:52
+66                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+66-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:30:17-78
 67                android:value="androidx.startup" />
-67-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:31:17-49
-68        </provider>
-69
-70        <receiver
-70-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:34:9-52:20
-71            android:name="androidx.profileinstaller.ProfileInstallReceiver"
-71-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:35:13-76
-72            android:directBootAware="false"
-72-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:36:13-44
-73            android:enabled="true"
-73-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:37:13-35
-74            android:exported="true"
-74-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:38:13-36
-75            android:permission="android.permission.DUMP" >
-75-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:39:13-57
-76            <intent-filter>
-76-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:40:13-42:29
-77                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
-77-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:17-91
-77-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:25-88
-78            </intent-filter>
+67-->[androidx.lifecycle:lifecycle-process:2.6.2] C:\Users\Joe\.gradle\caches\9.6.0\transforms\526b2f5bccd2b5bd1ce9fed1e4616226\transformed\lifecycle-process-2.6.2\AndroidManifest.xml:31:17-49
+68            <meta-data
+68-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:29:13-31:52
+69                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+69-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:30:17-85
+70                android:value="androidx.startup" />
+70-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:31:17-49
+71        </provider>
+72
+73        <receiver
+73-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:34:9-52:20
+74            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+74-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:35:13-76
+75            android:directBootAware="false"
+75-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:36:13-44
+76            android:enabled="true"
+76-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:37:13-35
+77            android:exported="true"
+77-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:38:13-36
+78            android:permission="android.permission.DUMP" >
+78-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:39:13-57
 79            <intent-filter>
-79-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:43:13-45:29
-80                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
-80-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:17-85
-80-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:25-82
+79-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:40:13-42:29
+80                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+80-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:17-91
+80-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:25-88
 81            </intent-filter>
 82            <intent-filter>
-82-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:46:13-48:29
-83                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
-83-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:17-88
-83-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:25-85
+82-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:43:13-45:29
+83                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+83-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:17-85
+83-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:25-82
 84            </intent-filter>
 85            <intent-filter>
-85-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:49:13-51:29
-86                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
-86-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:17-95
-86-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:25-92
+85-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:46:13-48:29
+86                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+86-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:17-88
+86-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:25-85
 87            </intent-filter>
-88        </receiver>
-89    </application>
-90
-91</manifest>
+88            <intent-filter>
+88-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:49:13-51:29
+89                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+89-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:17-95
+89-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\b9540cc804c09dfc50fa3ad53c7ebe30\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:25-92
+90            </intent-filter>
+91        </receiver>
+92    </application>
+93
+94</manifest>

@@ -42,6 +42,6 @@ def build_trend(rows: list[dict]) -> dict:
     return {
         "y_min": 1,
         "y_max": 10,
-        "y_label": "健康度（臉+舌質+舌苔[+脈]平均；5 未定，愈接近 1 偏移愈明確）",
+        "y_label": "健康度（臉+舌質+舌苔[+脈]平均；5 待觀察，愈接近 1 偏移愈明確）",
         "organs": organs,
     }

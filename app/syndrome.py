@@ -218,7 +218,7 @@ def overlay_from_weights(weights: dict[str, float]) -> tuple[str, int, str | Non
     xu, shi, re, han = weights["虛證"], weights["實證"], weights["熱證"], weights["寒證"]
     strongest = max(xu, shi, re, han)
     if strongest < 0.9:
-        return "未定", 5, None
+        return "待觀察", 5, None
     if xu >= shi:
         xu_shi = "虛證"
         xs_w = xu
