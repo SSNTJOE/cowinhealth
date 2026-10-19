@@ -42,10 +42,18 @@ PULSE_ORGAN_NOTE = (
     "right_guan_heavy=脾, right_guan_light=脾(胃); "
     "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
 )
+COLOR_HEALTH_FORMULA = (
+    "臉色／舌質／舌苔：各張照片（或舌質、舌苔分組）對基本色算 CIE76 ΔE；"
+    "score=round(10-9*(d-d_min)/(d_max-d_min))，clamp 1–10。"
+    "d_min=集合最小ΔE（≈0 即近基本色→10），d_max=最大ΔE（最偏色區塊→1）；"
+    "十等分線性。span<1 或全相等則全 10。7–10 健康。"
+    "有個人 Lab（眼／膚）用該基本色，否則用既有圖內 Lab 基準。"
+)
 HEALTH_FORMULA = (
     "臟腑健康度=round(mean(可用來源分數))；來源為臉色Lab、舌質Lab、舌苔Lab，"
-    "Android 另加寸關尺15秒脈頻。來源缺席不列入平均；來源在場但該臟無偏色則記5。"
-    "單源分數沿用 overlay_from_weights：證據<0.9→5，否則 clamp(1,10, round(5-min(最強,4)))。"
+    "Android 另加寸關尺15秒脈頻。來源缺席不列入平均；臉／舌來源在場但該臟無對應色塊則記10（近基本色）。"
+    + COLOR_HEALTH_FORMULA
+    + "脈仍用 overlay_from_weights：證據<0.9→5，否則 clamp(1,10, round(5-min(最強,4)))。"
     "脈：15秒>23→熱/實，<14→寒/虛，14–23→5。"
 )
 
@@ -277,10 +285,26 @@ def evidence_from_marks(marks: list[dict[str, Any]] | None) -> dict[str, dict[st
     return evidence
 
 
+def organ_scores_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[str, int]:
+    """Worst (lowest) relative 1–10 score among blocks mapped to each organ; default 10."""
+    scores = {score_key: 10 for _key, _name, score_key, _pk in ORGAN_META}
+    for block in blocks or []:
+        try:
+            health = int(block.get("health_score"))
+        except (TypeError, ValueError):
+            continue
+        health = max(1, min(10, health))
+        for organ in block.get("organs") or []:
+            for key, _name, score_key, _pk in ORGAN_META:
+                if key == organ:
+                    scores[score_key] = min(scores[score_key], health)
+    return scores
+
+
 def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
 ) -> tuple[dict[str, int], dict[str, Any]]:
-    """Mean of present sources per organ. Missing source omitted; present+empty = 5."""
+    """Mean of present sources per organ. Missing source omitted; present+empty color = 10."""
     composites: dict[str, int] = {}
     breakdown: dict[str, Any] = {}
     for key, name, score_key, _pattern_key in ORGAN_META:
@@ -290,7 +314,8 @@ def compose_organ_health(
             if scores is None:
                 parts[source] = None
                 continue
-            value = int(scores.get(score_key, 5))
+            missing_default = 5 if source == "pulse" else 10
+            value = int(scores.get(score_key, missing_default))
             parts[source] = value
             values.append(value)
         if values:
@@ -314,6 +339,7 @@ def serialize_organ_health(
 ) -> dict[str, Any]:
     return {
         "formula": HEALTH_FORMULA,
+        "color_formula": COLOR_HEALTH_FORMULA,
         "pulse_organ_map": dict(PULSE_TO_ORGAN),
         "pulse_organ_note": PULSE_ORGAN_NOTE,
         "source_keys": source_keys,

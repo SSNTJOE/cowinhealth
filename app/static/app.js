@@ -10,10 +10,10 @@ const dailyDialog = document.getElementById("daily-dialog");
 const lastShots = { face: null, tongue: null };
 let lastFacePreviewUrl = null;
 let lastTonguePreviewUrl = null;
-/** Matches .align-frame.is-face / .is-tongue (fractions of #camera-stage). Capture crops this rect. */
+/** Matches --align-* on #camera-stage (fractions of the stage). Video, yellow frame, dim hole, and capture share this box. */
 const ALIGN_FRAMES = {
-  face: { left: 0.22, top: 0.12, width: 0.56, height: 0.78 },
-  tongue: { left: 0.30, top: 0.16, width: 0.40, height: 0.64 },
+  face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80 },
+  tongue: { left: 0.32, top: 0.18, width: 0.36, height: 0.64 },
 };
 const ALIGN_HINTS = {
   face: "對準臉：髮際以下～下巴，兩耳以內",
@@ -110,36 +110,141 @@ async function loadMe() {
   }
 }
 
+function cameraErrorMessage(err) {
+  const name = (err && err.name) || "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "無法開啟相機：瀏覽器已拒絕相機權限。請允許本網站使用相機後再試。";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "無法開啟相機：找不到攝影機。";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "無法開啟相機：相機正被其他程式占用。";
+  }
+  if (name === "SecurityError") {
+    return "無法開啟相機：目前網址不是安全來源。請用 http://127.0.0.1 開啟。";
+  }
+  const extra = (err && (err.message || err.name)) || formatApiError(err);
+  return extra ? "無法開啟相機：" + extra : "無法開啟相機";
+}
+
+function cameraIsLive() {
+  const stream = video && video.srcObject;
+  if (!stream || typeof stream.getVideoTracks !== "function") return false;
+  return stream.getVideoTracks().some((track) => track.readyState === "live");
+}
+
+async function waitForVideoMeta(timeoutMs = 2500) {
+  if (video.readyState >= 1 && video.videoWidth > 0) return;
+  await new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener("loadedmetadata", done);
+      resolve();
+    };
+    video.addEventListener("loadedmetadata", done);
+    setTimeout(done, timeoutMs);
+  });
+}
+
+async function attachCameraStream(stream) {
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  if (video.srcObject && video.srcObject !== stream) {
+    video.srcObject.getTracks().forEach((track) => track.stop());
+  }
+  video.srcObject = stream;
+  await waitForVideoMeta();
+  try {
+    await video.play();
+    if (video.paused) await video.play();
+    setAlignMode(alignMode || "face");
+  } catch (playErr) {
+    camMsg.textContent = "相機已連上但畫面未播放：" + ((playErr && playErr.message) || "請再按一次拍臉");
+    camMsg.className = "status err";
+    throw playErr;
+  }
+}
+
 async function startCamera() {
+  if (!video) return;
+  if (cameraIsLive()) {
+    try { await video.play(); } catch (_) { /* already live */ }
+    setAlignMode(alignMode || "face");
+    return;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     camMsg.textContent = "此瀏覽器不支援相機";
     camMsg.className = "status err";
     return;
   }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    video.srcObject = stream;
-    camMsg.textContent = "相機已開啟。請對準黃框後再拍照";
-    camMsg.className = "status ok";
-    setAlignMode("face");
-  } catch (err) {
-    camMsg.textContent = "無法開啟相機：" + formatApiError(err);
-    camMsg.className = "status err";
+  const attempts = [
+    { video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+    { video: { facingMode: "user" }, audio: false },
+    { video: true, audio: false },
+  ];
+  let lastErr = null;
+  for (const constraints of attempts) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      await attachCameraStream(stream);
+      camMsg.textContent = "相機已開啟。請對準黃框後再拍照";
+      camMsg.className = "status ok";
+      setAlignMode(alignMode || "face");
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")) break;
+    }
   }
+  camMsg.textContent = cameraErrorMessage(lastErr);
+  camMsg.className = "status err";
 }
 
 function setAlignMode(mode) {
   alignMode = mode === "tongue" ? "tongue" : "face";
+  const stage = document.getElementById("camera-stage");
   const frame = document.getElementById("align-frame");
+  const dim = document.getElementById("align-dim");
   const hint = document.getElementById("align-hint");
+  if (stage) {
+    stage.classList.toggle("is-face", alignMode === "face");
+    stage.classList.toggle("is-tongue", alignMode === "tongue");
+  }
   if (frame) {
     frame.classList.toggle("is-face", alignMode === "face");
     frame.classList.toggle("is-tongue", alignMode === "tongue");
   }
+  if (dim) {
+    dim.classList.toggle("is-face", alignMode === "face");
+    dim.classList.toggle("is-tongue", alignMode === "tongue");
+  }
   if (hint) hint.textContent = ALIGN_HINTS[alignMode];
+  syncAlignMask();
+  requestAnimationFrame(syncAlignMask);
+}
+
+function syncAlignMask() {
+  const stage = document.getElementById("camera-stage");
+  const frame = document.getElementById("align-frame");
+  const dim = document.getElementById("align-dim");
+  if (!stage || !frame || !dim) return;
+  const sr = stage.getBoundingClientRect();
+  const fr = frame.getBoundingClientRect();
+  if (sr.width < 2 || sr.height < 2 || fr.width < 2 || fr.height < 2) return;
+  const left = Math.max(0, fr.left - sr.left);
+  const top = Math.max(0, fr.top - sr.top);
+  const size = `100% 100%, ${fr.width}px ${fr.height}px`;
+  const pos = `0 0, ${left}px ${top}px`;
+  dim.style.webkitMaskSize = size;
+  dim.style.maskSize = size;
+  dim.style.webkitMaskPosition = pos;
+  dim.style.maskPosition = pos;
 }
 
 function coverDest(vw, vh, sw, sh) {
@@ -161,26 +266,20 @@ function captureFrame(kind) {
   const stage = document.getElementById("camera-stage") || video;
   const sw = Math.max(1, stage.clientWidth || video.clientWidth || 640);
   const sh = Math.max(1, stage.clientHeight || video.clientHeight || 480);
+  const frame = ALIGN_FRAMES[mode];
+  const destW = Math.max(1, Math.round(frame.width * sw));
+  const destH = Math.max(1, Math.round(frame.height * sh));
   const vw = video.videoWidth || 640;
   const vh = video.videoHeight || 480;
-  const { dx, dy, dw, dh } = coverDest(vw, vh, sw, sh);
-  const full = document.createElement("canvas");
-  full.width = sw;
-  full.height = sh;
-  const fctx = full.getContext("2d");
-  fctx.save();
-  fctx.translate(sw, 0);
-  fctx.scale(-1, 1);
-  fctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
-  fctx.restore();
-  const frame = ALIGN_FRAMES[mode];
-  const x = Math.round(frame.left * sw);
-  const y = Math.round(frame.top * sh);
-  const w = Math.max(1, Math.round(frame.width * sw));
-  const h = Math.max(1, Math.round(frame.height * sh));
-  canvas.width = w;
-  canvas.height = h;
-  canvas.getContext("2d").drawImage(full, x, y, w, h, 0, 0, w, h);
+  const { dx, dy, dw, dh } = coverDest(vw, vh, destW, destH);
+  canvas.width = destW;
+  canvas.height = destH;
+  const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.translate(destW, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+  ctx.restore();
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
   });
@@ -291,6 +390,7 @@ function renderFaceGrid(grid, previewUrl) {
     const labCell = cell.lab || {};
     card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>第 ${cell.id} 格 ${cell.name}</b>（${cell.organs}）</div>
       <div>${cell.hex}　${cell.lab_text || `L${labCell.L ?? "–"} a${labCell.a ?? "–"} b${labCell.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.health_score != null ? `色差健康分 ${cell.health_score}（ΔE ${cell.delta_e ?? "–"}）` : ""}</div>
       <div>${cell.reading || cell.bias || ""}</div>
       <div>${cell.interpretation || ""}</div>${splitHtml}`;
     list.appendChild(card);
@@ -357,6 +457,7 @@ function renderTongueGrid(grid, previewUrl) {
     const lab = cell.lab || {};
     card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>${cell.label} ${cell.organs}</b>（${cell.anatomy}）</div>
       <div>${cell.hex}　${cell.lab_text || `L${lab.L ?? "–"} a${lab.a ?? "–"} b${lab.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.health_score != null ? `舌質健康分 ${cell.health_score}（ΔE ${cell.delta_e ?? "–"}）；苔 ${cell.coat_health_score ?? "–"}（ΔE ${cell.coat_delta_e ?? "–"}）` : ""}</div>
       <div>${cell.reading || cell.bias || ""}</div>
       <div>${cell.interpretation || ""}</div>`;
     list.appendChild(card);
@@ -368,6 +469,7 @@ function renderTongueGrid(grid, previewUrl) {
     const lab = coating.lab || {};
     card.innerHTML = `<div><span class="swatch" style="background:${coating.hex}"></span><b>第六層 舌苔</b>（胃／膽／大腸疊加）</div>
       <div>${coating.hex || ""}　${coating.lab_text || `L${lab.L ?? "–"} a${lab.a ?? "–"} b${lab.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${coating.health_score != null ? `舌苔健康分 ${coating.health_score}（ΔE ${coating.delta_e ?? "–"}）` : ""}</div>
       <div>${coating.reading || ""}</div>
       <div>${coating.interpretation || ""}</div>`;
     list.appendChild(card);
@@ -469,7 +571,9 @@ async function loadRecords() {
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
       const cells = organs.map((o) => {
-        const pattern = Number(r[o.score]) === 5 && r[o.pattern] === "未定" ? "待觀察" : (r[o.pattern] || "");
+        const pattern = Number(r[o.score]) >= 7 && (r[o.pattern] === "未定" || r[o.pattern] === "待觀察")
+          ? "健康"
+          : Number(r[o.score]) === 5 && r[o.pattern] === "未定" ? "待觀察" : (r[o.pattern] || "");
         return `<td>${r[o.score]} ${pattern}</td>`;
       }).join("");
       return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
@@ -606,16 +710,37 @@ document.getElementById("profile-form").addEventListener("submit", async (e) => 
   }
 });
 
+window.addEventListener("resize", syncAlignMask);
+if (typeof ResizeObserver !== "undefined") {
+  const stageEl = document.getElementById("camera-stage");
+  if (stageEl) new ResizeObserver(syncAlignMask).observe(stageEl);
+}
+if (video) {
+  video.addEventListener("loadedmetadata", syncAlignMask);
+  video.addEventListener("resize", syncAlignMask);
+}
+setAlignMode(alignMode);
+
 document.getElementById("btn-face").addEventListener("pointerenter", () => setAlignMode("face"));
 document.getElementById("btn-tongue").addEventListener("pointerenter", () => setAlignMode("tongue"));
 document.getElementById("btn-face").addEventListener("click", async () => {
-  try { await sendRecord("face"); } catch (err) {
+  try {
+    setAlignMode("face");
+    await startCamera();
+    if (!cameraIsLive()) return;
+    await sendRecord("face");
+  } catch (err) {
     camMsg.textContent = formatApiError(err);
     camMsg.className = "status err";
   }
 });
 document.getElementById("btn-tongue").addEventListener("click", async () => {
-  try { await sendRecord("tongue"); } catch (err) {
+  try {
+    setAlignMode("tongue");
+    await startCamera();
+    if (!cameraIsLive()) return;
+    await sendRecord("tongue");
+  } catch (err) {
     camMsg.textContent = formatApiError(err);
     camMsg.className = "status err";
   }

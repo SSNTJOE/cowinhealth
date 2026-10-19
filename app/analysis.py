@@ -15,8 +15,8 @@ from .syndrome import (
     apply_text,
     compose_organ_health,
     empty_evidence,
-    evidence_from_marks,
     finalize,
+    organ_scores_from_color_blocks,
     pulse_is_present,
     serialize_organ_health,
 )
@@ -24,6 +24,93 @@ from .syndrome import (
 
 def clamp(value: float, low: int = 1, high: int = 10) -> int:
     return max(low, min(high, int(round(value))))
+
+
+COLOR_DELTA_TINY = 1.0
+FACE_ZH_TO_ORGAN = {
+    "小腸": "small_intestine",
+    "大腸": "large_intestine",
+    "肺": "lung",
+    "肝": "liver",
+    "膽": "gallbladder",
+    "脾": "spleen",
+    "胃": "spleen",
+    "心": "heart",
+    "腎": "kidney",
+}
+
+
+def organs_from_zh(text: str) -> list[str]:
+    organs: list[str] = []
+    blob = (text or "").replace("／", "、")
+    for zh in sorted(FACE_ZH_TO_ORGAN, key=len, reverse=True):
+        if zh in blob:
+            key = FACE_ZH_TO_ORGAN[zh]
+            if key not in organs:
+                organs.append(key)
+    return organs
+
+
+def _lab_channels(stats: dict[str, float]) -> tuple[float, float, float]:
+    a_val = stats.get("a_star")
+    if a_val is None:
+        a_val = stats.get("a") or 0
+    b_val = stats.get("b_star")
+    if b_val is None:
+        b_val = stats.get("b") or 0
+    return float(stats.get("L") or 0), float(a_val), float(b_val)
+
+
+def lab_cie76(sample: dict[str, float], base: dict[str, float]) -> float:
+    s_l, s_a, s_b = _lab_channels(sample)
+    b_l, b_a, b_b = _lab_channels(base)
+    return ((s_l - b_l) ** 2 + (s_a - b_a) ** 2 + (s_b - b_b) ** 2) ** 0.5
+
+
+def relative_delta_health_score(
+    delta_e: float,
+    d_min: float,
+    d_max: float,
+    tiny: float = COLOR_DELTA_TINY,
+) -> int:
+    span = d_max - d_min
+    if span < tiny:
+        return 10
+    return clamp(10 - 9 * (delta_e - d_min) / span)
+
+
+def apply_relative_color_scores(
+    blocks: list[dict[str, Any]],
+    tiny: float = COLOR_DELTA_TINY,
+) -> dict[str, Any]:
+    """Min-max / equal-interval 1–10 health from ΔE vs 基本色 across a photo's blocks."""
+    deltas = [float(block.get("delta_e") or 0) for block in blocks]
+    d_min = min(deltas) if deltas else 0.0
+    d_max = max(deltas) if deltas else 0.0
+    for block in blocks:
+        block["health_score"] = relative_delta_health_score(
+            float(block.get("delta_e") or 0), d_min, d_max, tiny
+        )
+    return {
+        "formula": (
+            "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；"
+            "近基本色→10，集合內最大ΔE→1；span<1 則全 10。7–10 健康。"
+        ),
+        "d_min": round(d_min, 3),
+        "d_max": round(d_max, 3),
+        "tiny": tiny,
+        "n_blocks": len(blocks),
+        "organ_scores": organ_scores_from_color_blocks(blocks),
+        "blocks": [
+            {
+                "label": block.get("label"),
+                "organs": block.get("organs") or [],
+                "delta_e": block.get("delta_e"),
+                "health_score": block.get("health_score"),
+            }
+            for block in blocks
+        ],
+    }
 
 
 def crop_box(image: Image.Image, left: float, top: float, right: float, bottom: float) -> Image.Image:
@@ -1297,6 +1384,7 @@ def analyze_face_grid(
     findings.append(c_text)
 
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
+    face_blocks: list[dict[str, Any]] = []
 
     def remember(targets: list[str], reading: dict[str, Any]) -> None:
         overlay = reading.get("overlay")
@@ -1341,6 +1429,13 @@ def analyze_face_grid(
                 reading["targets"] = ["spleen"]
             lip_color = f"唇{reading['meaning']}"
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
+            face_blocks.append(
+                {
+                    "label": f"face-{cell_id}",
+                    "organs": spec["targets"] or targets,
+                    "delta_e": round(lab_cie76(stats, lab_base), 2),
+                }
+            )
         elif kind == "nose":
             upper_crop = crop_cell(image, spec["row"], spec["col"], "upper")
             lower_crop = crop_cell(image, spec["row"], spec["col"], "lower")
@@ -1380,6 +1475,20 @@ def analyze_face_grid(
             ]
             remember(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []), upper_read)
             remember(lower_read.get("targets") or (["spleen"] if lower_read.get("overlay") else []), lower_read)
+            face_blocks.append(
+                {
+                    "label": f"face-{cell_id}-upper",
+                    "organs": organs_from_zh("鼻上／肺") or ["lung"],
+                    "delta_e": round(lab_cie76(upper_stats, lab_base), 2),
+                }
+            )
+            face_blocks.append(
+                {
+                    "label": f"face-{cell_id}-lower",
+                    "organs": organs_from_zh("鼻頭／脾胃") or ["spleen"],
+                    "delta_e": round(lab_cie76(lower_stats, lab_base), 2),
+                }
+            )
         elif kind == "eye" and spec.get("side") in ("left", "right"):
             stats = stats_by_id[cell_id]
             subregions, reading, eye_notes = analyze_eye_subregions(crops[cell_id], lab_base, spec["side"], cell_id)
@@ -1404,10 +1513,25 @@ def analyze_face_grid(
                     fake["overlay"] = DAMP_OVERLAY
                     fake["patterns"] = (("實證", 1.5),)
                 remember(organs, fake)
+                if not part.get("uncertain"):
+                    face_blocks.append(
+                        {
+                            "label": f"face-{cell_id}-{part.get('id')}",
+                            "organs": organs,
+                            "delta_e": round(lab_cie76(part.get("lab") or {}, lab_base), 2),
+                        }
+                    )
         else:
             stats = stats_by_id[cell_id]
             base = cheek_base if kind == "cheek" else lab_base
             reading = read_cell(stats, base, kind, crops[cell_id])
+            face_blocks.append(
+                {
+                    "label": f"face-{cell_id}",
+                    "organs": spec["targets"] or [],
+                    "delta_e": round(lab_cie76(stats, lab_base), 2),
+                }
+            )
             if cell_id == 2 and reading["bias"] == "實熱":
                 reading["meaning"] = "額頭實熱 → 心火（區塊對應第2格；使用者所稱區塊3為本格右側面）"
                 reading["targets"] = ["heart"]
@@ -1448,6 +1572,34 @@ def analyze_face_grid(
         )
 
     by_id = {cell["id"]: cell for cell in cells}
+    color_health = apply_relative_color_scores(face_blocks)
+    score_by_label = {block["label"]: block for block in face_blocks}
+
+    def attach_face_health(cell: dict[str, Any]) -> None:
+        whole = score_by_label.get(f"face-{cell['id']}")
+        if whole:
+            cell["delta_e"] = whole["delta_e"]
+            cell["health_score"] = whole["health_score"]
+        for part in cell.get("split") or []:
+            item = score_by_label.get(f"face-{cell['id']}-{part.get('part')}")
+            if item:
+                part["delta_e"] = item["delta_e"]
+                part["health_score"] = item["health_score"]
+        for part in cell.get("subregions") or []:
+            item = score_by_label.get(f"face-{cell['id']}-{part.get('id')}")
+            if item:
+                part["delta_e"] = item["delta_e"]
+                part["health_score"] = item["health_score"]
+        extras = [
+            part.get("health_score")
+            for part in (cell.get("split") or []) + (cell.get("subregions") or [])
+            if part.get("health_score") is not None
+        ]
+        if cell.get("health_score") is None and extras:
+            cell["health_score"] = min(extras)
+
+    for cell in cells:
+        attach_face_health(cell)
 
     def bias_of(cell_id: int, half: str | None = None) -> str:
         cell = by_id.get(cell_id) or {}
@@ -1535,6 +1687,8 @@ def analyze_face_grid(
             "bias": cell["bias"],
             "meaning": cell.get("meaning"),
             "reading": cell.get("reading"),
+            "delta_e": cell.get("delta_e"),
+            "health_score": cell.get("health_score"),
         }
         for cell in cells
     ]
@@ -1579,6 +1733,7 @@ def analyze_face_grid(
             "baseline_source": base_source,
             "thresholds": FACE_LAB_THRESHOLDS,
         },
+        "color_health": color_health,
         "disclaimer": TEACHING_NOTE,
     }
     return face_grid, findings, colors
@@ -2028,6 +2183,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         }
 
     packed: dict[str, dict[str, Any]] = {spec["id"]: zone_layers(spec) for spec in TONGUE_ZONE_LAYOUT}
+    body_blocks: list[dict[str, Any]] = []
+    coat_blocks: list[dict[str, Any]] = []
     peer_coats = [packed[zid]["coat"] for zid in ("top", "left", "right", "bottom") if zid in packed]
     peer = average_stats(peer_coats) if peer_coats else seg["all_stats"]
     center_coat = packed["center"]["coat"]
@@ -2227,6 +2384,21 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                 remember(TONGUE_ZONE_TARGETS[spec["id"]], "weak-cold.png", (("虛證", 1.4), ("寒證", 1.5)), 5.0)
 
         findings.extend(zone_findings)
+        zone_organs = list(TONGUE_ZONE_TARGETS.get(spec["id"]) or organs_from_zh(spec["organs"]))
+        body_blocks.append(
+            {
+                "label": spec["id"],
+                "organs": zone_organs,
+                "delta_e": round(lab_cie76(body_stats, baseline), 2),
+            }
+        )
+        coat_blocks.append(
+            {
+                "label": spec["id"],
+                "organs": zone_organs,
+                "delta_e": round(lab_cie76(coat_stats, baseline), 2),
+            }
+        )
         total_px = max(1.0, layers["all"].get("pixel_count", 1))
         zones.append(
             {
@@ -2317,6 +2489,34 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         },
         "box": TONGUE_COAT_BOX,
     }
+    coat_blocks.append(
+        {
+            "label": "coating",
+            "organs": ["spleen", "gallbladder", "large_intestine"],
+            "delta_e": round(lab_cie76(coat_box_stats, baseline), 2),
+        }
+    )
+    body_color_health = apply_relative_color_scores(body_blocks)
+    coat_color_health = apply_relative_color_scores(coat_blocks)
+    body_by_label = {block["label"]: block for block in body_blocks}
+    coat_by_label = {block["label"]: block for block in coat_blocks}
+    for zone in zones:
+        body_hit = body_by_label.get(zone["id"])
+        coat_hit = coat_by_label.get(zone["id"])
+        if body_hit:
+            zone["delta_e"] = body_hit["delta_e"]
+            zone["health_score"] = body_hit["health_score"]
+            zone["body"]["delta_e"] = body_hit["delta_e"]
+            zone["body"]["health_score"] = body_hit["health_score"]
+        if coat_hit:
+            zone["coat_delta_e"] = coat_hit["delta_e"]
+            zone["coat_health_score"] = coat_hit["health_score"]
+            zone["coat"]["delta_e"] = coat_hit["delta_e"]
+            zone["coat"]["health_score"] = coat_hit["health_score"]
+    coat_hit = coat_by_label.get("coating")
+    if coat_hit:
+        coating["delta_e"] = coat_hit["delta_e"]
+        coating["health_score"] = coat_hit["health_score"]
     measurements = []
     for zone in zones:
         measurements.append(
@@ -2331,6 +2531,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                 "bias": zone["bias"],
                 "meaning": zone["meaning"],
                 "reading": zone["reading"],
+                "delta_e": zone.get("delta_e"),
+                "health_score": zone.get("health_score"),
             }
         )
         measurements.append(
@@ -2343,6 +2545,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                 "hsv": zone["coat"]["hsv"],
                 "lab": zone["coat"]["lab"],
                 "S": zone["coat"]["S"],
+                "delta_e": zone.get("coat_delta_e"),
+                "health_score": zone.get("coat_health_score"),
             }
         )
     measurements.append(
@@ -2358,6 +2562,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
             "bias": coat_bias,
             "meaning": coat_meaning,
             "reading": coating["reading"],
+            "delta_e": coating.get("delta_e"),
+            "health_score": coating.get("health_score"),
         }
     )
     organ_overlays = {organ: filename for organ, (_score, filename, _patterns) in best_overlay.items()}
@@ -2411,6 +2617,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         "tip_speckle_ratio": round(speckle, 3),
         "baseline": compact_lab(seg["all_stats"]),
         "thresholds": thresh,
+        "body_color_health": body_color_health,
+        "coat_color_health": coat_color_health,
         "disclaimer": TEACHING_NOTE,
     }
     return tongue_grid, findings, colors
@@ -2443,7 +2651,7 @@ def inspect_image(
         findings.extend(grid_findings)
 
     if not findings:
-        findings.append("未見明顯偏色，先給中間分數 5")
+        findings.append("未見明顯偏色，相對基本色健康分接近 10")
 
     complexion = (face_grid or {}).get("complexion")
     tongue_body = (tongue_grid or {}).get("body")
@@ -2529,18 +2737,9 @@ def analyze_session(
     pulse_notes = apply_pulse(evidence, pulse)
     _combined_scores, patterns, overlays = finalize(evidence)
 
-    face_scores = finalize(evidence_from_marks((face_grid or {}).get("marks")))[0] if face_grid else None
-    tongue_marks = (tongue_grid or {}).get("marks") or []
-    body_scores = (
-        finalize(evidence_from_marks([m for m in tongue_marks if m.get("source", "body") != "coat"]))[0]
-        if tongue_grid
-        else None
-    )
-    coat_scores = (
-        finalize(evidence_from_marks([m for m in tongue_marks if m.get("source") == "coat"]))[0]
-        if tongue_grid
-        else None
-    )
+    face_scores = ((face_grid or {}).get("color_health") or {}).get("organ_scores") if face_grid else None
+    body_scores = ((tongue_grid or {}).get("body_color_health") or {}).get("organ_scores") if tongue_grid else None
+    coat_scores = ((tongue_grid or {}).get("coat_color_health") or {}).get("organ_scores") if tongue_grid else None
     pulse_scores = None
     if pulse_is_present(pulse):
         pulse_only = empty_evidence()

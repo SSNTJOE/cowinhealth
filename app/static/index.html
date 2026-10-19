@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam4" />
 </head>
 <body>
   <div class="wrap">
@@ -72,8 +72,9 @@
 
       <h3>相機擷取</h3>
       <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：只取舌體）。伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
-      <div class="camera-stage" id="camera-stage">
-        <video id="camera" autoplay playsinline></video>
+      <div class="camera-stage is-face" id="camera-stage">
+        <video id="camera" autoplay muted playsinline webkit-playsinline></video>
+        <div id="align-dim" class="align-dim is-face" aria-hidden="true"></div>
         <div id="align-frame" class="align-frame is-face"></div>
         <p id="align-hint" class="align-hint">對準臉：髮際以下～下巴，兩耳以內</p>
       </div>
@@ -132,10 +133,11 @@
         <div id="organ-pins"></div>
       </div>
       <div id="scores" class="scores"></div>
+      <p class="note">臉色／舌質／舌苔：相對基本色 ΔE 十等分，近基本色 10、色差最大區塊 1；<strong>7–10 健康</strong>。臟腑分為臉＋舌質＋舌苔（Android 另加脈）平均。</p>
       <p class="note" id="disclaimer"></p>
 
       <h3>臟腑分數趨勢</h3>
-      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（5 待觀察）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
+      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（近基本色 10，最大色差 1；7–10 健康）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
       <div class="trend-wrap">
         <canvas id="trend-chart"></canvas>
       </div>
@@ -162,7 +164,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/common.js?v=cam4"></script>
+  <script src="/static/app.js?v=cam4"></script>
 </body>
 </html>

@@ -5,7 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
-import android.util.Size
+import android.text.Editable
+import android.text.TextWatcher
 import android.text.method.LinkMovementMethod
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,8 +15,6 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -56,6 +55,16 @@ class MainActivity : AppCompatActivity() {
         HealthFlags.inflate(binding.conditionsGroup, HealthFlags.CONDITIONS)
         HealthFlags.inflate(binding.allergiesGroup, HealthFlags.ALLERGIES)
         binding.result.movementMethod = LinkMovementMethod.getInstance()
+        val bmiWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                refreshBmi()
+            }
+        }
+        binding.height.addTextChangedListener(bmiWatcher)
+        binding.weight.addTextChangedListener(bmiWatcher)
+        refreshBmi()
 
         binding.login.setOnClickListener { Thread { login() }.start() }
         binding.register.setOnClickListener { Thread { register() }.start() }
@@ -136,6 +145,14 @@ class MainActivity : AppCompatActivity() {
         HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
         female = jsonText(user, "gender") == "female"
         loadBodyImage()
+        refreshBmi()
+    }
+
+    private fun refreshBmi() {
+        binding.bmiLive.text = Bmi.formatDisplay(
+            binding.height.text.toString(),
+            binding.weight.text.toString()
+        )
     }
 
     private fun jsonText(user: JSONObject, key: String): String {
@@ -157,36 +174,35 @@ class MainActivity : AppCompatActivity() {
     private fun startCamera() {
         // ScrollView + SurfaceView makes the emulator scale a tiny camera buffer into blocks.
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-        val selector = cameraResolution()
+        val selector = CameraBind.resolution()
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
-            val provider = providerFuture.get()
-            val preview = Preview.Builder()
-                .setResolutionSelector(selector)
-                .build()
-                .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
-            imageCapture = ImageCapture.Builder()
-                .setResolutionSelector(selector)
-                .build()
-            provider.unbindAll()
-            provider.bindToLifecycle(
-                this,
-                CameraSelector.DEFAULT_FRONT_CAMERA,
-                preview,
-                imageCapture
-            )
+            try {
+                val provider = providerFuture.get()
+                val preview = Preview.Builder()
+                    .setResolutionSelector(selector)
+                    .build()
+                    .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+                imageCapture = ImageCapture.Builder()
+                    .setResolutionSelector(selector)
+                    .build()
+                val capture = imageCapture
+                if (capture == null || CameraBind.bind(
+                        this,
+                        provider,
+                        CameraSelector.DEFAULT_FRONT_CAMERA,
+                        preview,
+                        capture
+                    ) == null
+                ) {
+                    imageCapture = null
+                    Toast.makeText(this, "模擬器沒有可用鏡頭，請把 Camera 設成 VirtualScene 或 Webcam", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                imageCapture = null
+                Toast.makeText(this, e.message ?: "無法開啟鏡頭", Toast.LENGTH_LONG).show()
+            }
         }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun cameraResolution(): ResolutionSelector {
-        return ResolutionSelector.Builder()
-            .setResolutionStrategy(
-                ResolutionStrategy(
-                    Size(1280, 720),
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                )
-            )
-            .build()
     }
 
     private fun capture(kind: String) {

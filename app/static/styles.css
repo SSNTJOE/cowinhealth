@@ -81,45 +81,78 @@ video, canvas, img.preview {
   object-fit: cover;
 }
 .camera-stage {
+  --align-left: 27.5%;
+  --align-top: 10%;
+  --align-width: 45%;
+  --align-height: 80%;
+  --align-radius: 18px;
   position: relative;
-  width: 100%;
+  isolation: isolate;
+  width: min(100%, 560px);
   aspect-ratio: 4 / 3;
   max-height: 420px;
   background: #111;
   border-radius: 12px;
   overflow: hidden;
-  margin: 8px 0 4px;
+  margin: 8px auto 4px;
+}
+.camera-stage.is-tongue {
+  --align-left: 32%;
+  --align-top: 18%;
+  --align-width: 36%;
+  --align-height: 64%;
+  --align-radius: 46% / 40%;
 }
 .camera-stage video {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
+  right: auto;
+  bottom: auto;
+  z-index: 0;
   max-height: none;
   object-fit: cover;
+  object-position: 50% 50%;
   transform: scaleX(-1);
-  border-radius: 0;
+  border-radius: var(--align-radius);
   display: block;
+  opacity: 1;
+  visibility: visible;
+  background: #111;
+}
+.align-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-repeat: no-repeat;
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-repeat: no-repeat;
+  /* Percent mask-position is not the same as left/top; 50% 50% centers the hole
+     (both face and tongue frames are centered). JS also pins hole in px. */
+  -webkit-mask-size: 100% 100%, var(--align-width) var(--align-height);
+  -webkit-mask-position: 0 0, 50% 50%;
+  -webkit-mask-composite: xor;
+  mask-size: 100% 100%, var(--align-width) var(--align-height);
+  mask-position: 0 0, 50% 50%;
+  mask-composite: exclude;
 }
 .align-frame {
   position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
   box-sizing: border-box;
   border: 3px solid #ffcc00;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38);
+  background: transparent;
   pointer-events: none;
   z-index: 2;
-}
-.align-frame.is-face {
-  left: 22%;
-  top: 12%;
-  width: 56%;
-  height: 78%;
-  border-radius: 18px;
-}
-.align-frame.is-tongue {
-  left: 30%;
-  top: 16%;
-  width: 40%;
-  height: 64%;
-  border-radius: 46% / 40%;
+  border-radius: var(--align-radius);
 }
 .align-hint {
   position: absolute;

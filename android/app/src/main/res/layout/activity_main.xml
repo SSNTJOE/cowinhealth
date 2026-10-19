@@ -26,6 +26,13 @@
         </RadioGroup>
         <EditText android:id="@+id/height" android:hint="身高 (cm)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/weight" android:hint="體重 (kg)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/bmiLive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text=""
+            android:textSize="14sp"/>
         <TextView android:text="特殊疾病（可複選）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
         <LinearLayout
             android:id="@+id/conditionsGroup"
@@ -51,7 +58,7 @@
         </LinearLayout>
         <Button android:id="@+id/openPulse" android:text="寸關尺脈診（各 15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/save" android:text="送出今日紀錄" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <TextView android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <TextView android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄；7–10 健康）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
         <com.github.mikephil.charting.charts.CombinedChart
             android:id="@+id/trendChart"
             android:layout_width="match_parent"

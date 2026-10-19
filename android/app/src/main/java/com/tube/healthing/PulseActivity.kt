@@ -3,15 +3,12 @@ package com.tube.healthing
 import android.content.Intent
 import android.os.Bundle
 import android.os.CountDownTimer
-import android.util.Size
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -65,52 +62,49 @@ class PulseActivity : AppCompatActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            val provider = future.get()
-            val preview = Preview.Builder()
-                .setResolutionSelector(
-                    ResolutionSelector.Builder()
-                        .setResolutionStrategy(
-                            ResolutionStrategy(
-                                Size(1280, 720),
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                            )
-                        )
-                        .build()
-                )
-                .build()
-                .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-            analysis.setAnalyzer(executor) { image ->
-                if (measuring) {
-                    val plane = image.planes[0]
-                    val buffer = plane.buffer
-                    val data = ByteArray(buffer.remaining())
-                    buffer.get(data)
-                    var sum = 0L
-                    for (b in data) sum += (b.toInt() and 0xFF)
-                    val luma = sum.toDouble() / data.size
-                    val now = System.currentTimeMillis()
-                    if (abs(luma - lastLuma) > 4 && now - lastBeatAt > 280) {
-                        beats += 1
-                        lastBeatAt = now
-                        runOnUiThread { binding.count.text = "$beats 次" }
+            try {
+                val provider = future.get()
+                val preview = Preview.Builder()
+                    .setResolutionSelector(CameraBind.resolution())
+                    .build()
+                    .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+                val analysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                analysis.setAnalyzer(executor) { image ->
+                    if (measuring) {
+                        val plane = image.planes[0]
+                        val buffer = plane.buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
+                        var sum = 0L
+                        for (b in data) sum += (b.toInt() and 0xFF)
+                        val luma = sum.toDouble() / data.size
+                        val now = System.currentTimeMillis()
+                        if (abs(luma - lastLuma) > 4 && now - lastBeatAt > 280) {
+                            beats += 1
+                            lastBeatAt = now
+                            runOnUiThread { binding.count.text = "$beats 次" }
+                        }
+                        lastLuma = luma
                     }
-                    lastLuma = luma
+                    image.close()
                 }
-                image.close()
-            }
-            provider.unbindAll()
-            val bound = provider.bindToLifecycle(
-                this,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis
-            )
-            camera = bound
-            if (bound.cameraInfo.hasFlashUnit()) {
-                bound.cameraControl.enableTorch(true)
+                val bound = CameraBind.bind(
+                    this,
+                    provider,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis
+                )
+                camera = bound
+                if (bound == null) {
+                    Toast.makeText(this, "模擬器沒有可用鏡頭，請把 Camera 設成 VirtualScene 或 Webcam", Toast.LENGTH_LONG).show()
+                } else if (bound.cameraInfo.hasFlashUnit()) {
+                    bound.cameraControl.enableTorch(true)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, e.message ?: "無法開啟鏡頭", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(this))
     }
