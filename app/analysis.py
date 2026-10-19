@@ -16,7 +16,9 @@ from .syndrome import (
     compose_organ_health,
     empty_evidence,
     finalize,
+    organ_patterns_from_color_blocks,
     organ_scores_from_color_blocks,
+    overlay_from_pattern_label,
     pulse_is_present,
     serialize_organ_health,
 )
@@ -27,6 +29,8 @@ def clamp(value: float, low: int = 1, high: int = 10) -> int:
 
 
 COLOR_DELTA_TINY = 1.0
+DELTA_E_REF = 20.0
+TONGUE_COAT_DELTA_E_REF = 24.0
 FACE_ZH_TO_ORGAN = {
     "小腸": "small_intestine",
     "大腸": "large_intestine",
@@ -79,37 +83,177 @@ def relative_delta_health_score(
     return clamp(10 - 9 * (delta_e - d_min) / span)
 
 
+def delta_e_ref_health_score(delta_e: float, ref: float = DELTA_E_REF) -> int:
+    """10 at ΔE≈0 vs teaching normal; 1 at ΔE_ref (face/舌質 20, 厚膩苔可用 24)."""
+    if ref <= 0:
+        return 10
+    return clamp(10 - 9 * max(0.0, float(delta_e)) / ref)
+
+
 def apply_relative_color_scores(
     blocks: list[dict[str, Any]],
     tiny: float = COLOR_DELTA_TINY,
+    ref: float = DELTA_E_REF,
+    mode: str = "ref",
 ) -> dict[str, Any]:
-    """Min-max / equal-interval 1–10 health from ΔE vs 基本色 across a photo's blocks."""
+    """1–10 health from ΔE vs teaching normal (ref) or min-max across blocks."""
     deltas = [float(block.get("delta_e") or 0) for block in blocks]
     d_min = min(deltas) if deltas else 0.0
     d_max = max(deltas) if deltas else 0.0
     for block in blocks:
-        block["health_score"] = relative_delta_health_score(
-            float(block.get("delta_e") or 0), d_min, d_max, tiny
-        )
+        delta = float(block.get("delta_e") or 0)
+        if mode == "minmax":
+            block["health_score"] = relative_delta_health_score(delta, d_min, d_max, tiny)
+        else:
+            block["health_score"] = delta_e_ref_health_score(delta, ref)
     return {
         "formula": (
-            "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；"
-            "近基本色→10，集合內最大ΔE→1；span<1 則全 10。7–10 健康。"
+            "score=clamp(round(10-9*ΔE/ΔE_ref),1,10)；ΔE=0→10，ΔE_ref→1；7–10 健康。"
+            if mode != "minmax"
+            else "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；近基準→10，最大ΔE→1。"
         ),
+        "mode": mode,
+        "ref": ref,
         "d_min": round(d_min, 3),
         "d_max": round(d_max, 3),
         "tiny": tiny,
         "n_blocks": len(blocks),
         "organ_scores": organ_scores_from_color_blocks(blocks),
+        "organ_patterns": organ_patterns_from_color_blocks(blocks),
         "blocks": [
             {
                 "label": block.get("label"),
                 "organs": block.get("organs") or [],
                 "delta_e": block.get("delta_e"),
                 "health_score": block.get("health_score"),
+                "class_label": block.get("class_label"),
+                "api_pattern": block.get("api_pattern"),
             }
             for block in blocks
         ],
+    }
+
+
+def nearest_face_class(stats: dict[str, float]) -> dict[str, Any]:
+    best = FACE_COLOR_CLASSES[0]
+    best_d = lab_cie76(stats, best["centroid"])
+    for spec in FACE_COLOR_CLASSES[1:]:
+        dist = lab_cie76(stats, spec["centroid"])
+        if dist < best_d:
+            best = spec
+            best_d = dist
+    return {**best, "centroid_delta_e": round(best_d, 2)}
+
+
+def make_face_block(label: str, stats: dict[str, float], organs: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    delta = round(lab_cie76(stats, FACE_NORMAL_LAB), 2)
+    hit = nearest_face_class(stats)
+    health = delta_e_ref_health_score(delta, DELTA_E_REF)
+    overlay = hit["overlay"] if health < 7 and hit["id"] != "normal" else None
+    return {
+        "label": label,
+        "organs": list(organs or []),
+        "delta_e": delta,
+        "class_id": hit["id"],
+        "class_label": hit["label"],
+        "bias": hit["bias"],
+        "api_pattern": "健康" if hit["id"] == "normal" or health >= 7 else hit["api_pattern"],
+        "overlay": overlay,
+        "patterns": hit["patterns"] if overlay else (),
+        "look": hit["look"],
+        "centroid_delta_e": hit["centroid_delta_e"],
+    }
+
+
+def tongue_coating_ratio(seg: dict[str, Any]) -> float:
+    body_n = float((seg.get("body_stats") or {}).get("pixel_count") or 0)
+    coat_n = float((seg.get("coat_stats") or {}).get("pixel_count") or 0)
+    return coat_n / max(1.0, body_n + coat_n)
+
+
+def classify_tongue_bianzheng(
+    body: dict[str, float],
+    coat: dict[str, float],
+    coating_ratio: float,
+    surface: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Three core logics: 實熱/虛熱 by coat vs peel; 實寒/虛寒 by L*; 濕 primarily coat."""
+    body = body or {}
+    coat = coat or {}
+    coat_n = float(coat.get("pixel_count") or 0)
+    body_de = lab_cie76(body, TONGUE_BODY_NORMAL)
+    if coat_n >= TONGUE_LAB_THRESHOLDS["min_mask_pixels"]:
+        coat_de = lab_cie76(coat, TONGUE_COAT_NORMAL)
+    elif coating_ratio < TONGUE_MIRROR_COAT_MAX:
+        coat_de = 8.0 + 12.0 * max(0.0, (TONGUE_MIRROR_COAT_MAX - coating_ratio) / TONGUE_MIRROR_COAT_MAX)
+    else:
+        coat_de = lab_cie76(coat, TONGUE_COAT_NORMAL)
+    da_b = float(body.get("a_star") or 0) - TONGUE_BODY_NORMAL["a_star"]
+    dL_b = float(body.get("L") or 0) - TONGUE_BODY_NORMAL["L"]
+    db_c = float(coat.get("b_star") or 0) - TONGUE_COAT_NORMAL["b_star"]
+    dL_c = float(coat.get("L") or 0) - TONGUE_COAT_NORMAL["L"]
+    heat = da_b >= 2.0
+    ischemic = da_b <= -6.0
+    mirror = coating_ratio < TONGUE_MIRROR_COAT_MAX
+    yellow_thick = db_c >= 10.0 and dL_c <= -2.0
+    pale_bright = dL_b >= 7.0
+    dark_stasis = dL_b <= -8.0
+    damp_coat = dL_c <= -10.0 and db_c >= 14.0
+    greasy = False
+    if surface:
+        greasy = surface.get("energy", 0) >= 0.35 and surface.get("highlight", 1) <= 0.03
+    label = "正常"
+    reason = "近淡紅舌、薄白苔"
+    if heat and mirror:
+        label, reason = "虛熱", "舌質 a* 升且 coating_ratio<0.20（少苔／鏡面）→ 陰虛火旺"
+    elif heat and yellow_thick:
+        label, reason = "實熱", "舌質 a* 升且苔 b* 升、苔 L* 降（厚黃）→ 邪熱熾盛"
+    elif ischemic and pale_bright:
+        label, reason = "虛寒", "舌質 a* 降且 L* 升（淡白晄白）→ 陽虛血虛"
+    elif ischemic and dark_stasis:
+        label, reason = "實寒", "舌質 a* 降且 L* 降（青紫）→ 寒邪凝滯"
+    elif damp_coat and body_de <= 6.0:
+        label, reason = "濕症", "苔 L* 降且 b* 升（厚膩）→ 痰濕／濕熱"
+        if greasy:
+            reason += "；膩苔（GLCM 能量高、高光少）"
+    elif heat and coating_ratio < 0.28:
+        label, reason = "虛熱", "舌質偏紅、苔偏少"
+    elif heat:
+        label, reason = "實熱", "舌質偏紅"
+    elif ischemic and dL_b > 0:
+        label, reason = "虛寒", "舌質淡而偏亮"
+    elif ischemic:
+        label, reason = "實寒", "舌質暗淡缺血"
+    elif damp_coat or (db_c >= 14 and greasy):
+        label, reason = "濕症", "苔厚膩偏黃"
+    meta = TONGUE_CLASS_META[label]
+    body_health = delta_e_ref_health_score(body_de, DELTA_E_REF)
+    coat_health = delta_e_ref_health_score(coat_de, TONGUE_COAT_DELTA_E_REF)
+    overlay = meta["overlay"] if min(body_health, coat_health) < 7 and label != "正常" else None
+    return {
+        "label": label,
+        "bias": meta["bias"],
+        "meaning": reason,
+        "api_pattern": "健康" if label == "正常" or min(body_health, coat_health) >= 7 else meta["api_pattern"],
+        "overlay": overlay,
+        "patterns": meta["patterns"],
+        "targets": meta["targets"],
+        "body_delta_e": round(body_de, 2),
+        "coat_delta_e": round(coat_de, 2),
+        "body_health": body_health,
+        "coat_health": coat_health,
+        "coating_ratio": round(coating_ratio, 3),
+        "coating_ratio_def": TONGUE_COATING_RATIO_DEF,
+        "discriminators": {
+            "heat_body_da": round(da_b, 1),
+            "mirror_coat": mirror,
+            "yellow_thick_coat": yellow_thick,
+            "ischemic_low_a": ischemic,
+            "vacuity_cold_high_L": pale_bright,
+            "excess_cold_low_L": dark_stasis,
+            "damp_coat_low_L_high_b": damp_coat,
+            "greasy_texture": greasy,
+        },
     }
 
 
@@ -551,6 +695,148 @@ FACE_LAB_THRESHOLDS = {
 }
 TEACHING_NOTE = "教學示範，非中醫診斷"
 DAMP_OVERLAY = "mositure.png"
+FACE_NORMAL_LAB = {"L": 65.0, "a_star": 12.0, "b_star": 20.0, "hex": "#E2AC8A", "look": "紅黃隱隱，明潤含蓄"}
+FACE_COLOR_CLASSES = (
+    {
+        "id": "normal",
+        "label": "正常",
+        "bias": "接近基本色",
+        "api_pattern": "健康",
+        "look": "紅黃隱隱，明潤含蓄",
+        "hex": "#E2AC8A",
+        "centroid": {"L": 65.0, "a_star": 12.0, "b_star": 20.0},
+        "delta_e_typical": (0.0, 3.0),
+        "overlay": None,
+        "patterns": (),
+        "damp_family": None,
+    },
+    {
+        "id": "damp_heat",
+        "label": "濕熱",
+        "bias": "濕熱",
+        "api_pattern": "濕熱證",
+        "look": "黃而鮮明如橘，油垢毛孔粗",
+        "hex": "#CFA060",
+        "centroid": {"L": 58.5, "a_star": 16.0, "b_star": 29.0},
+        "delta_e_typical": (8.0, 14.0),
+        "overlay": DAMP_OVERLAY,
+        "patterns": (("實證", 1.5), ("熱證", 1.2)),
+        "damp_family": "濕熱",
+    },
+    {
+        "id": "phlegm_damp",
+        "label": "寒濕",
+        "bias": "寒濕",
+        "api_pattern": "寒濕證",
+        "look": "黃而晦暗或晄白虛浮",
+        "hex": "#A8906F",
+        "centroid": {"L": 54.0, "a_star": 8.0, "b_star": 24.0},
+        "delta_e_typical": (9.0, 15.0),
+        "overlay": DAMP_OVERLAY,
+        "patterns": (("實證", 1.4), ("寒證", 1.2)),
+        "damp_family": "寒濕",
+    },
+    {
+        "id": "excess_heat",
+        "label": "實熱",
+        "bias": "實熱",
+        "api_pattern": "實證熱證",
+        "look": "全臉充血純紅熱",
+        "hex": "#C87058",
+        "centroid": {"L": 57.5, "a_star": 21.5, "b_star": 20.0},
+        "delta_e_typical": (8.0, 15.0),
+        "overlay": "strong-hot.png",
+        "patterns": (("實證", 1.6), ("熱證", 1.8)),
+        "damp_family": None,
+    },
+    {
+        "id": "vacuity_heat",
+        "label": "虛熱",
+        "bias": "虛熱",
+        "api_pattern": "虛證熱證",
+        "look": "底色白兩顴潮紅",
+        "hex": "#EAB09E",
+        "centroid": {"L": 65.5, "a_star": 18.0, "b_star": 16.5},
+        "delta_e_typical": (4.0, 8.0),
+        "overlay": "weak-hot.png",
+        "patterns": (("虛證", 1.6), ("熱證", 1.8)),
+        "damp_family": None,
+    },
+    {
+        "id": "excess_cold",
+        "label": "實寒",
+        "bias": "實寒",
+        "api_pattern": "實證寒證",
+        "look": "青紫缺氧",
+        "hex": "#A2938A",
+        "centroid": {"L": 50.0, "a_star": 5.0, "b_star": 10.0},
+        "delta_e_typical": (12.0, 20.0),
+        "overlay": "strong-cold.png",
+        "patterns": (("實證", 1.6), ("寒證", 1.8)),
+        "damp_family": None,
+    },
+    {
+        "id": "vacuity_cold",
+        "label": "虛寒",
+        "bias": "虛寒",
+        "api_pattern": "虛證寒證",
+        "look": "死白無華",
+        "hex": "#F2D1BD",
+        "centroid": {"L": 76.0, "a_star": 6.0, "b_star": 14.0},
+        "delta_e_typical": (10.0, 16.0),
+        "overlay": "weak-cold.png",
+        "patterns": (("虛證", 1.6), ("寒證", 1.8)),
+        "damp_family": None,
+    },
+)
+TONGUE_BODY_NORMAL = {"L": 53.0, "a_star": 23.0, "b_star": 12.0, "hex": "#C86868", "look": "淡紅舌，紅潤適中"}
+TONGUE_COAT_NORMAL = {"L": 70.0, "a_star": 4.0, "b_star": 8.0, "hex": "#D2C8C2", "look": "薄白苔，半透明白"}
+TONGUE_MIRROR_COAT_MAX = 0.20
+TONGUE_COATING_RATIO_DEF = "coating_ratio = coat_pixels / (body_pixels + coat_pixels)；舌面有苔比例，不含裁切空白"
+TONGUE_CLASS_META = {
+    "正常": {
+        "bias": "接近正常",
+        "api_pattern": "健康",
+        "overlay": None,
+        "patterns": (),
+        "targets": (),
+    },
+    "實熱": {
+        "bias": "實熱",
+        "api_pattern": "實證熱證",
+        "overlay": "strong-hot.png",
+        "patterns": (("實證", 1.6), ("熱證", 1.8)),
+        "targets": ("spleen", "large_intestine", "heart"),
+    },
+    "虛熱": {
+        "bias": "虛熱",
+        "api_pattern": "虛證熱證",
+        "overlay": "weak-hot.png",
+        "patterns": (("虛證", 1.6), ("熱證", 1.8)),
+        "targets": ("heart", "kidney", "spleen"),
+    },
+    "實寒": {
+        "bias": "實寒",
+        "api_pattern": "實證寒證",
+        "overlay": "strong-cold.png",
+        "patterns": (("實證", 1.6), ("寒證", 1.8)),
+        "targets": ("heart", "kidney"),
+    },
+    "虛寒": {
+        "bias": "虛寒",
+        "api_pattern": "虛證寒證",
+        "overlay": "weak-cold.png",
+        "patterns": (("虛證", 1.6), ("寒證", 1.8)),
+        "targets": ("spleen", "kidney"),
+    },
+    "濕症": {
+        "bias": "濕症",
+        "api_pattern": "濕氣較重",
+        "overlay": DAMP_OVERLAY,
+        "patterns": (("實證", 1.5),),
+        "targets": ("spleen",),
+    },
+}
 # Shared face and lip color table.
 SYNDROME_RANGES = (
     {
@@ -1016,9 +1302,10 @@ def classify_face_lab(
     kind: str,
     uneven: float = 0.0,
 ) -> dict[str, Any]:
-    """CIELAB vs personal / intra-face baseline. Teaching demo, not diagnosis."""
+    """CIELAB vs teaching normal L*65 a*12 b*20; eyes still vs personal/intra baseline."""
     t = FACE_LAB_THRESHOLDS
-    d = _lab_delta(stats, base)
+    ref = FACE_NORMAL_LAB if kind != "eye" else base
+    d = _lab_delta(stats, ref)
     dL, da, db, dS = d["dL"], d["da"], d["db"], d["dS"]
     damp = dL <= t["damp_dL"] and db >= t["damp_db"] and (dS <= t["damp_dS"] or uneven >= t["damp_uneven"])
     shi_re = dL <= t["shi_re_dL"] and da >= t["shi_re_da"]
@@ -1052,17 +1339,12 @@ def classify_face_lab(
             return pack("濕氣", "濕氣較重（b* 上升、明度下降）", DAMP_OVERLAY, (("實證", 1.4),), db)
         return pack("白／黑", "眼色以白與黑為主", None, (), 0.0)
 
-    if damp:
-        return pack("濕氣", "濕氣（L* 沉悶下降、b* 升、S 低或色不均）", DAMP_OVERLAY, (("實證", 1.5),), abs(db) + abs(dL))
-    if shi_re:
-        return pack("實熱", "實熱（L* 略降、a* 明顯上升，陽盛化火）", "strong-hot.png", (("實證", 1.6), ("熱證", 1.8)), da - dL)
-    if shi_han:
-        return pack("實寒", "實寒（L* 明顯下降，偏青紫）", "strong-cold.png", (("實證", 1.6), ("寒證", 1.8)), -dL)
-    if xu_han:
-        return pack("虛寒", "虛寒（L* 大升、a*／b* 低，枯白）", "weak-cold.png", (("虛證", 1.6), ("寒證", 1.8)), dL)
-    if xu_re:
-        return pack("虛熱", "虛熱（L* 不降、a* 局部上升，陰虛火旺）", "weak-hot.png", (("虛證", 1.6), ("熱證", 1.8)), da)
-    return pack("接近基本色", "未見明顯色差", None, (), 0.0)
+    hit = nearest_face_class(stats)
+    delta = lab_cie76(stats, FACE_NORMAL_LAB)
+    health = delta_e_ref_health_score(delta, DELTA_E_REF)
+    overlay = hit["overlay"] if health < 7 and hit["id"] != "normal" else None
+    meaning = f"{hit['look']}（近 {hit['hex']}，ΔE* {delta:.1f} vs L*65 a*12 b*20）"
+    return pack(hit["bias"], meaning, overlay, hit["patterns"] if overlay else (), delta)
 
 
 def _eye_box(spec: dict[str, Any], side: str) -> dict[str, float]:
@@ -1378,8 +1660,8 @@ def analyze_face_grid(
     base_hex = hex_from_stats(complexion_stats)
     _base_y, base_cb, base_cr = rgb_to_ycrcb(complexion_stats["r"], complexion_stats["g"], complexion_stats["b"])
     c_text = (
-        f"基本色取第 1、2、3、5、7、8、9、10、11 格平均 {base_hex}，"
-        f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。各區只跟這張臉的 Cr／Cb 比，亮度不進判定（{TEACHING_NOTE}）"
+        f"教學正常值 L*65 a*12 b*20 #E2AC8A（紅黃隱隱）。本圖平均 {base_hex}，"
+        f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。臉色分數 ΔE*/20 → 1–10（7–10 健康）（{TEACHING_NOTE}）"
     )
     findings.append(c_text)
 
@@ -1429,13 +1711,7 @@ def analyze_face_grid(
                 reading["targets"] = ["spleen"]
             lip_color = f"唇{reading['meaning']}"
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
-            face_blocks.append(
-                {
-                    "label": f"face-{cell_id}",
-                    "organs": spec["targets"] or targets,
-                    "delta_e": round(lab_cie76(stats, lab_base), 2),
-                }
-            )
+            face_blocks.append(make_face_block(f"face-{cell_id}", stats, spec["targets"] or targets))
         elif kind == "nose":
             upper_crop = crop_cell(image, spec["row"], spec["col"], "upper")
             lower_crop = crop_cell(image, spec["row"], spec["col"], "lower")
@@ -1475,20 +1751,8 @@ def analyze_face_grid(
             ]
             remember(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []), upper_read)
             remember(lower_read.get("targets") or (["spleen"] if lower_read.get("overlay") else []), lower_read)
-            face_blocks.append(
-                {
-                    "label": f"face-{cell_id}-upper",
-                    "organs": organs_from_zh("鼻上／肺") or ["lung"],
-                    "delta_e": round(lab_cie76(upper_stats, lab_base), 2),
-                }
-            )
-            face_blocks.append(
-                {
-                    "label": f"face-{cell_id}-lower",
-                    "organs": organs_from_zh("鼻頭／脾胃") or ["spleen"],
-                    "delta_e": round(lab_cie76(lower_stats, lab_base), 2),
-                }
-            )
+            face_blocks.append(make_face_block(f"face-{cell_id}-upper", upper_stats, organs_from_zh("鼻上／肺") or ["lung"]))
+            face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, organs_from_zh("鼻頭／脾胃") or ["spleen"]))
         elif kind == "eye" and spec.get("side") in ("left", "right"):
             stats = stats_by_id[cell_id]
             subregions, reading, eye_notes = analyze_eye_subregions(crops[cell_id], lab_base, spec["side"], cell_id)
@@ -1519,19 +1783,15 @@ def analyze_face_grid(
                             "label": f"face-{cell_id}-{part.get('id')}",
                             "organs": organs,
                             "delta_e": round(lab_cie76(part.get("lab") or {}, lab_base), 2),
+                            "class_label": part.get("bias"),
+                            "api_pattern": part.get("bias"),
                         }
                     )
         else:
             stats = stats_by_id[cell_id]
             base = cheek_base if kind == "cheek" else lab_base
             reading = read_cell(stats, base, kind, crops[cell_id])
-            face_blocks.append(
-                {
-                    "label": f"face-{cell_id}",
-                    "organs": spec["targets"] or [],
-                    "delta_e": round(lab_cie76(stats, lab_base), 2),
-                }
-            )
+            face_blocks.append(make_face_block(f"face-{cell_id}", stats, spec["targets"] or []))
             if cell_id == 2 and reading["bias"] == "實熱":
                 reading["meaning"] = "額頭實熱 → 心火（區塊對應第2格；使用者所稱區塊3為本格右側面）"
                 reading["targets"] = ["heart"]
@@ -1580,11 +1840,14 @@ def analyze_face_grid(
         if whole:
             cell["delta_e"] = whole["delta_e"]
             cell["health_score"] = whole["health_score"]
+            cell["class_label"] = whole.get("class_label")
+            cell["api_pattern"] = whole.get("api_pattern")
         for part in cell.get("split") or []:
             item = score_by_label.get(f"face-{cell['id']}-{part.get('part')}")
             if item:
                 part["delta_e"] = item["delta_e"]
                 part["health_score"] = item["health_score"]
+                part["class_label"] = item.get("class_label")
         for part in cell.get("subregions") or []:
             item = score_by_label.get(f"face-{cell['id']}-{part.get('id')}")
             if item:
@@ -1630,7 +1893,8 @@ def analyze_face_grid(
         flags.append({"id": "spleen_kidney_yang", "cells": [10, 11], "pattern": "虛寒", "text": "下頜枯白 → 脾腎陽虛"})
         remember(["spleen", "kidney"], {"overlay": "weak-cold.png", "patterns": (("虛證", 1.8), ("寒證", 1.6)), "score": 8.0})
         findings.append(f"第10、11格下頜枯白 → 脾腎陽虛（{TEACHING_NOTE}）")
-    if nose_lower == "濕氣" and bias_of(7) == "濕氣" and bias_of(9) == "濕氣":
+    damp_names = ("濕氣", "濕熱", "寒濕")
+    if nose_lower in damp_names and bias_of(7) in damp_names and bias_of(9) in damp_names:
         flags.append({"id": "spleen_damp", "cells": [7, 8, 9], "half": "lower", "pattern": "濕氣", "text": "鼻翼與兩頰晦黃低飽和 → 脾胃濕證"})
         remember(["spleen"], {"overlay": DAMP_OVERLAY, "patterns": (("實證", 1.8),), "score": 9.0})
         findings.append(f"鼻翼（第8格下）與第7、9格晦黃低S → 脾胃濕證（{TEACHING_NOTE}）")
@@ -1731,6 +1995,10 @@ def analyze_face_grid(
             "included_cells": list(COMPLEXION_CELL_IDS),
             "excluded_cells": list(COMPLEXION_EXCLUDED_IDS),
             "baseline_source": base_source,
+            "teaching_normal": {**FACE_NORMAL_LAB, "classes": [
+                {"id": spec["id"], "label": spec["label"], "hex": spec["hex"], "centroid": spec["centroid"]}
+                for spec in FACE_COLOR_CLASSES
+            ]},
             "thresholds": FACE_LAB_THRESHOLDS,
         },
         "color_health": color_health,
@@ -1931,8 +2199,11 @@ def tongue_surface_metrics(seg: dict[str, Any]) -> dict[str, float]:
     coat = seg["coat_stats"]
     body = seg["body_stats"]
     whole = seg["all_stats"]
+    body_n = float(body.get("pixel_count") or 0)
+    coat_n = float(coat.get("pixel_count") or 0)
     return {
         "coat_ratio": coat.get("pixel_count", 0) / total,
+        "coating_ratio": coat_n / max(1.0, body_n + coat_n),
         "coat_L": coat.get("L", 0.0),
         "coat_a": coat.get("a_star", 0.0),
         "coat_b": coat.get("b_star", 0.0),
@@ -1951,18 +2222,19 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
     """Four coat appearances from LAB color plus thickness, cracks, and sheen."""
     t = TONGUE_LAB_THRESHOLDS
     coat_ratio = metrics["coat_ratio"]
+    coating_ratio = metrics.get("coating_ratio", coat_ratio)
     energy = metrics["energy"]
     contrast = metrics["contrast"]
     highlight = metrics["highlight"]
     # A coat that fills the frame has no pink body to segment against, so use the whole surface.
-    covered = coat_ratio >= 0.15
+    covered = coating_ratio >= TONGUE_MIRROR_COAT_MAX or coat_ratio >= 0.15
     color_L = metrics["coat_L"] if covered else metrics["all_L"]
     color_b = metrics["coat_b"] if covered else metrics["all_b"]
-    mirror = (
-        not covered
-        and metrics["body_a"] >= t["coat_mirror_a"]
-        and energy >= t["coat_smooth_energy"]
-        and highlight >= t["coat_mirror_highlight_min"]
+    mirror = coating_ratio < TONGUE_MIRROR_COAT_MAX and (
+        metrics["body_a"] >= t["coat_mirror_a"]
+        or energy >= t["coat_smooth_energy"]
+        or highlight >= t["coat_mirror_highlight_min"]
+        or coating_ratio <= 0.05
     )
     if mirror:
         return {
@@ -2106,6 +2378,8 @@ def segment_tongue_body_coat(image: Image.Image) -> dict[str, Any]:
     coat_stats, _ = _gather_masked(rgb, lab, coat_mask, width, height, {"left": 0, "top": 0, "right": 1, "bottom": 1}, True)
     all_stats = _stats_from_rgb_lab(rgb, lab)
     total = max(1, width * height)
+    body_n = float(body_stats.get("pixel_count") or 0)
+    coat_n = float(coat_stats.get("pixel_count") or 0)
     return {
         "width": width,
         "height": height,
@@ -2115,8 +2389,10 @@ def segment_tongue_body_coat(image: Image.Image) -> dict[str, Any]:
         "body_stats": body_stats,
         "coat_stats": coat_stats,
         "all_stats": all_stats,
-        "body_ratio": round(body_stats.get("pixel_count", 0) / total, 3),
-        "coat_ratio": round(coat_stats.get("pixel_count", 0) / total, 3),
+        "body_ratio": round(body_n / total, 3),
+        "coat_ratio": round(coat_n / total, 3),
+        "coating_ratio": round(coat_n / max(1.0, body_n + coat_n), 3),
+        "coating_ratio_def": TONGUE_COATING_RATIO_DEF,
         "s_median": round(s_med, 3),
         "L_median": round(l_med, 1),
         "a_median": round(a_med, 1),
@@ -2141,6 +2417,7 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     thresh = TONGUE_LAB_THRESHOLDS
     seg = segment_tongue_body_coat(image)
     baseline = _lab_baseline(seg["all_stats"])
+    coating_ratio = float(seg.get("coating_ratio") or tongue_coating_ratio(seg))
 
     def remember(
         targets: tuple[str, ...],
@@ -2389,14 +2666,19 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
             {
                 "label": spec["id"],
                 "organs": zone_organs,
-                "delta_e": round(lab_cie76(body_stats, baseline), 2),
+                "delta_e": round(lab_cie76(body_stats, TONGUE_BODY_NORMAL), 2),
             }
         )
+        zone_coat_n = float(coat_stats.get("pixel_count") or 0)
+        if zone_coat_n < thresh["min_mask_pixels"] and coating_ratio < TONGUE_MIRROR_COAT_MAX:
+            coat_delta = 8.0 + 12.0 * max(0.0, (TONGUE_MIRROR_COAT_MAX - coating_ratio) / TONGUE_MIRROR_COAT_MAX)
+        else:
+            coat_delta = lab_cie76(coat_stats, TONGUE_COAT_NORMAL)
         coat_blocks.append(
             {
                 "label": spec["id"],
                 "organs": zone_organs,
-                "delta_e": round(lab_cie76(coat_stats, baseline), 2),
+                "delta_e": round(coat_delta, 2),
             }
         )
         total_px = max(1.0, layers["all"].get("pixel_count", 1))
@@ -2493,11 +2775,23 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         {
             "label": "coating",
             "organs": ["spleen", "gallbladder", "large_intestine"],
-            "delta_e": round(lab_cie76(coat_box_stats, baseline), 2),
+            "delta_e": round(lab_cie76(coat_box_stats, TONGUE_COAT_NORMAL), 2),
         }
     )
-    body_color_health = apply_relative_color_scores(body_blocks)
-    coat_color_health = apply_relative_color_scores(coat_blocks)
+    bianzheng = classify_tongue_bianzheng(body_all, coat_box_stats, coating_ratio, surface)
+    for block in body_blocks + coat_blocks:
+        block["class_label"] = bianzheng.get("label")
+        block["api_pattern"] = bianzheng.get("api_pattern")
+    colors["tongue_body_color"] = f"{bianzheng['bias']}／{bianzheng['meaning']}"
+    remember(
+        bianzheng.get("targets") or (),
+        bianzheng.get("overlay"),
+        bianzheng.get("patterns") or (),
+        float(20 - min(bianzheng["body_health"], bianzheng["coat_health"])),
+        "coat" if bianzheng["label"] in ("濕症", "實熱") else "body",
+    )
+    body_color_health = apply_relative_color_scores(body_blocks, ref=DELTA_E_REF)
+    coat_color_health = apply_relative_color_scores(coat_blocks, ref=TONGUE_COAT_DELTA_E_REF)
     body_by_label = {block["label"]: block for block in body_blocks}
     coat_by_label = {block["label"]: block for block in coat_blocks}
     for zone in zones:
@@ -2619,6 +2913,10 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         "thresholds": thresh,
         "body_color_health": body_color_health,
         "coat_color_health": coat_color_health,
+        "bianzheng": bianzheng,
+        "teaching_normal": {"body": TONGUE_BODY_NORMAL, "coat": TONGUE_COAT_NORMAL},
+        "coating_ratio": coating_ratio,
+        "coating_ratio_def": TONGUE_COATING_RATIO_DEF,
         "disclaimer": TEACHING_NOTE,
     }
     return tongue_grid, findings, colors
@@ -2754,12 +3052,27 @@ def analyze_session(
     scores, breakdown = compose_organ_health(source_maps)
     used_sources = [key for key, value in source_maps.items() if value is not None]
     organ_health = serialize_organ_health(scores, breakdown, used_sources)
+
+    def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
+        for organ, label in (pattern_map or {}).items():
+            if not label or label in ("健康", "待觀察", "未定"):
+                continue
+            for key, _name, _score_key, pattern_key in ORGAN_META:
+                if key == organ:
+                    patterns[pattern_key] = label
+                    overlay = overlay_from_pattern_label(label)
+                    if overlay:
+                        overlays[organ] = overlay
+
+    merge_color_patterns(((face_grid or {}).get("color_health") or {}).get("organ_patterns"))
+    merge_color_patterns(((tongue_grid or {}).get("body_color_health") or {}).get("organ_patterns"))
+    merge_color_patterns(((tongue_grid or {}).get("coat_color_health") or {}).get("organ_patterns"))
     for grid in (face_grid, tongue_grid):
         for organ, filename in ((grid or {}).get("organ_overlays") or {}).items():
             overlays[organ] = filename
             if filename == DAMP_OVERLAY:
                 for key, _name, _score_key, pattern_key in ORGAN_META:
-                    if key == organ:
+                    if key == organ and patterns.get(pattern_key) in ("待觀察", "未定", "健康", None, ""):
                         patterns[pattern_key] = "濕氣較重"
     all_findings = findings + text_notes + pulse_notes
     if not all_findings:

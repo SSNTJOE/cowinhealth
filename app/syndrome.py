@@ -43,11 +43,10 @@ PULSE_ORGAN_NOTE = (
     "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
 )
 COLOR_HEALTH_FORMULA = (
-    "臉色／舌質／舌苔：各張照片（或舌質、舌苔分組）對基本色算 CIE76 ΔE；"
-    "score=round(10-9*(d-d_min)/(d_max-d_min))，clamp 1–10。"
-    "d_min=集合最小ΔE（≈0 即近基本色→10），d_max=最大ΔE（最偏色區塊→1）；"
-    "十等分線性。span<1 或全相等則全 10。7–10 健康。"
-    "有個人 Lab（眼／膚）用該基本色，否則用既有圖內 Lab 基準。"
+    "score=clamp(round(10-9*ΔE/ΔE_ref),1,10)，ΔE_ref=20（苔濕極值可用24）。"
+    "ΔE=0（近教學正常值）→10；ΔE≈ref→1。7–10 健康。"
+    "臉正常 L*65 a*12 b*20 #E2AC8A；舌質 L*53 a*23 b*12 #C86868；舌苔 L*70 a*4 b*8 #D2C8C2。"
+    "證型取 Lab 類別質心最近者；濕熱／寒濕分開。舌質／苔另用 coating_ratio 與三條鑑別。"
 )
 HEALTH_FORMULA = (
     "臟腑健康度=round(mean(可用來源分數))；來源為臉色Lab、舌質Lab、舌苔Lab，"
@@ -301,6 +300,44 @@ def organ_scores_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[
     return scores
 
 
+CLASS_TO_API_PATTERN = {
+    "正常": "健康",
+    "接近基本色": "健康",
+    "接近正常": "健康",
+    "實熱": "實證熱證",
+    "實熱色": "實證熱證",
+    "虛熱": "虛證熱證",
+    "虛熱色": "虛證熱證",
+    "實寒": "實證寒證",
+    "實寒色": "實證寒證",
+    "虛寒": "虛證寒證",
+    "虛寒色": "虛證寒證",
+    "濕熱": "濕熱證",
+    "濕熱證": "濕熱證",
+    "寒濕": "寒濕證",
+    "寒濕證": "寒濕證",
+    "濕症": "濕氣較重",
+    "濕氣": "濕氣較重",
+}
+
+
+def organ_patterns_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Pattern of the worst (lowest health) block per organ; 健康 if none."""
+    chosen: dict[str, tuple[int, str]] = {}
+    for block in blocks or []:
+        try:
+            health = int(block.get("health_score"))
+        except (TypeError, ValueError):
+            continue
+        raw = block.get("api_pattern") or block.get("class_label") or block.get("bias") or ""
+        label = CLASS_TO_API_PATTERN.get(str(raw), str(raw) or "健康")
+        for organ in block.get("organs") or []:
+            previous = chosen.get(organ)
+            if previous is None or health < previous[0]:
+                chosen[organ] = (health, label)
+    return {organ: label for organ, (_health, label) in chosen.items()}
+
+
 def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
 ) -> tuple[dict[str, int], dict[str, Any]]:
@@ -352,9 +389,18 @@ def serialize_organ_health(
 def overlay_from_pattern_label(label: str | None) -> str | None:
     mapping = {
         "實證熱證": "strong-hot.png",
+        "實熱": "strong-hot.png",
         "實證寒證": "strong-cold.png",
+        "實寒": "strong-cold.png",
         "虛證熱證": "weak-hot.png",
+        "虛熱": "weak-hot.png",
         "虛證寒證": "weak-cold.png",
+        "虛寒": "weak-cold.png",
         "濕氣較重": "mositure.png",
+        "濕熱證": "mositure.png",
+        "寒濕證": "mositure.png",
+        "濕熱": "mositure.png",
+        "寒濕": "mositure.png",
+        "濕症": "mositure.png",
     }
     return mapping.get(label or "")

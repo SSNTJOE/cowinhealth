@@ -38,6 +38,9 @@ public final class ActivityMainBinding implements ViewBinding {
   public final EditText birthYear;
 
   @NonNull
+  public final TextView bmiLive;
+
+  @NonNull
   public final ImageView bodyImage;
 
   @NonNull
@@ -113,20 +116,21 @@ public final class ActivityMainBinding implements ViewBinding {
   public final EditText weight;
 
   private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull LinearLayout allergiesGroup,
-      @NonNull TextView anon, @NonNull EditText birthYear, @NonNull ImageView bodyImage,
-      @NonNull FrameLayout bodyMap, @NonNull LinearLayout conditionsGroup,
-      @NonNull EditText discomfort, @NonNull EditText email, @NonNull RadioButton genderFemale,
-      @NonNull RadioGroup genderGroup, @NonNull RadioButton genderMale,
-      @NonNull RadioButton genderOther, @NonNull EditText height, @NonNull Button login,
-      @NonNull EditText nickname, @NonNull Button openPulse, @NonNull EditText password,
-      @NonNull PreviewView preview, @NonNull Button register, @NonNull TextView result,
-      @NonNull Button save, @NonNull Button saveProfile, @NonNull EditText server,
-      @NonNull Button shotFace, @NonNull Button shotTongue, @NonNull EditText symptoms,
-      @NonNull CombinedChart trendChart, @NonNull EditText weight) {
+      @NonNull TextView anon, @NonNull EditText birthYear, @NonNull TextView bmiLive,
+      @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap,
+      @NonNull LinearLayout conditionsGroup, @NonNull EditText discomfort, @NonNull EditText email,
+      @NonNull RadioButton genderFemale, @NonNull RadioGroup genderGroup,
+      @NonNull RadioButton genderMale, @NonNull RadioButton genderOther, @NonNull EditText height,
+      @NonNull Button login, @NonNull EditText nickname, @NonNull Button openPulse,
+      @NonNull EditText password, @NonNull PreviewView preview, @NonNull Button register,
+      @NonNull TextView result, @NonNull Button save, @NonNull Button saveProfile,
+      @NonNull EditText server, @NonNull Button shotFace, @NonNull Button shotTongue,
+      @NonNull EditText symptoms, @NonNull CombinedChart trendChart, @NonNull EditText weight) {
     this.rootView = rootView;
     this.allergiesGroup = allergiesGroup;
     this.anon = anon;
     this.birthYear = birthYear;
+    this.bmiLive = bmiLive;
     this.bodyImage = bodyImage;
     this.bodyMap = bodyMap;
     this.conditionsGroup = conditionsGroup;
@@ -196,6 +200,12 @@ public final class ActivityMainBinding implements ViewBinding {
       id = R.id.birthYear;
       EditText birthYear = ViewBindings.findChildViewById(rootView, id);
       if (birthYear == null) {
+        break missingId;
+      }
+
+      id = R.id.bmiLive;
+      TextView bmiLive = ViewBindings.findChildViewById(rootView, id);
+      if (bmiLive == null) {
         break missingId;
       }
 
@@ -350,9 +360,10 @@ public final class ActivityMainBinding implements ViewBinding {
       }
 
       return new ActivityMainBinding((ScrollView) rootView, allergiesGroup, anon, birthYear,
-          bodyImage, bodyMap, conditionsGroup, discomfort, email, genderFemale, genderGroup,
-          genderMale, genderOther, height, login, nickname, openPulse, password, preview, register,
-          result, save, saveProfile, server, shotFace, shotTongue, symptoms, trendChart, weight);
+          bmiLive, bodyImage, bodyMap, conditionsGroup, discomfort, email, genderFemale,
+          genderGroup, genderMale, genderOther, height, login, nickname, openPulse, password,
+          preview, register, result, save, saveProfile, server, shotFace, shotTongue, symptoms,
+          trendChart, weight);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

@@ -2,6 +2,7 @@ com.tube.healthing
 id allergiesGroup
 id anon
 id birthYear
+id bmiLive
 id bodyImage
 id bodyMap
 id conditionsGroup

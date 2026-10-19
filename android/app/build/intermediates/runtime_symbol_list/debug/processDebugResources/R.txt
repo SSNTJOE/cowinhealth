@@ -3205,6 +3205,7 @@ int id below 0x7f08005e
 int id bestChoice 0x7f08005f
 int id birthYear 0x7f080211
 int id blocking 0x7f080060
+int id bmiLive 0x7f08021d
 int id bodyImage 0x7f080061
 int id bodyMap 0x7f080062
 int id bottom 0x7f080063
