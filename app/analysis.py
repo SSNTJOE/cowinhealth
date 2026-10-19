@@ -1639,6 +1639,20 @@ TONGUE_LAB_THRESHOLDS = {
     "root_yang_coat_b_max": 16.0,
     "root_yang_dL_vs_center": 6.0,
     "root_yang_da_vs_center": -4.0,
+    "coat_yellow_b": 18.0,
+    "coat_scorch_b": 28.0,
+    "coat_yellow_L_low": 58.0,
+    "coat_yellow_L_high": 78.0,
+    "coat_white_b": 10.0,
+    "coat_white_L": 72.0,
+    "coat_mirror_a": 28.0,
+    "coat_mirror_ratio_max": 0.12,
+    "coat_thick_energy": 0.35,
+    "coat_smooth_energy": 0.55,
+    "coat_crack_contrast": 9.0,
+    "coat_greasy_highlight_max": 0.03,
+    "coat_slip_highlight_min": 0.04,
+    "coat_mirror_highlight_min": 0.03,
     "seg_white_s_rel": 0.85,
     "seg_white_s_cap": 0.20,
     "seg_yellow_db": 6.0,
@@ -1707,6 +1721,162 @@ def tongue_coat_from_lab(stats: dict[str, float], peer: dict[str, float]) -> tup
         if db >= TONGUE_LAB_THRESHOLDS["coat_yellow_db"]:
             return "黃苔", "實熱"
     return hsv_bias, hsv_meaning
+
+
+def tongue_surface_metrics(seg: dict[str, Any]) -> dict[str, float]:
+    """LAB plus texture. Energy is GLCM uniformity (thick or smooth); contrast is cracks; highlights are sheen."""
+    rgb = seg["rgb"]
+    lab = seg["lab"]
+    width, height = seg["width"], seg["height"]
+    total = max(1, width * height)
+    bins = 8
+    hist = [[0] * bins for _ in range(bins)]
+    pairs = 0
+    contrast_sum = 0.0
+    highlight_n = 0
+    light = [px[0] for px in lab]
+
+    def level(value: float) -> int:
+        return min(bins - 1, max(0, int(value / 100.0 * bins)))
+
+    for y in range(height):
+        row = y * width
+        for x in range(width):
+            i = row + x
+            lv = light[i]
+            neigh: list[float] = []
+            if x + 1 < width:
+                rv = light[i + 1]
+                contrast_sum += abs(lv - rv)
+                pairs += 1
+                hist[level(lv)][level(rv)] += 1
+                neigh.append(rv)
+            if y + 1 < height:
+                dv = light[i + width]
+                contrast_sum += abs(lv - dv)
+                pairs += 1
+                hist[level(lv)][level(dv)] += 1
+                neigh.append(dv)
+            if x > 0:
+                neigh.append(light[i - 1])
+            if y > 0:
+                neigh.append(light[i - width])
+            if not neigh:
+                continue
+            local = sum(neigh) / len(neigh)
+            _h, sat, _v = rgb_to_hsv_pixel(*rgb[i])
+            if lv >= local + 8 and lv >= 68 and sat <= 0.28:
+                highlight_n += 1
+    energy = 0.0
+    if pairs:
+        for row_hist in hist:
+            for count in row_hist:
+                share = count / pairs
+                energy += share * share
+    coat = seg["coat_stats"]
+    body = seg["body_stats"]
+    whole = seg["all_stats"]
+    return {
+        "coat_ratio": coat.get("pixel_count", 0) / total,
+        "coat_L": coat.get("L", 0.0),
+        "coat_a": coat.get("a_star", 0.0),
+        "coat_b": coat.get("b_star", 0.0),
+        "coat_s": coat.get("s", 0.0),
+        "body_L": body.get("L", 0.0),
+        "body_a": body.get("a_star", 0.0),
+        "all_L": whole.get("L", 0.0),
+        "all_b": whole.get("b_star", 0.0),
+        "energy": energy,
+        "contrast": contrast_sum / pairs if pairs else 0.0,
+        "highlight": highlight_n / total,
+    }
+
+
+def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any] | None:
+    """Four coat appearances from LAB color plus thickness, cracks, and sheen."""
+    t = TONGUE_LAB_THRESHOLDS
+    coat_ratio = metrics["coat_ratio"]
+    energy = metrics["energy"]
+    contrast = metrics["contrast"]
+    highlight = metrics["highlight"]
+    # A coat that fills the frame has no pink body to segment against, so use the whole surface.
+    covered = coat_ratio >= 0.15
+    color_L = metrics["coat_L"] if covered else metrics["all_L"]
+    color_b = metrics["coat_b"] if covered else metrics["all_b"]
+    mirror = (
+        not covered
+        and metrics["body_a"] >= t["coat_mirror_a"]
+        and energy >= t["coat_smooth_energy"]
+        and highlight >= t["coat_mirror_highlight_min"]
+    )
+    if mirror:
+        return {
+            "bias": "光剝無苔",
+            "meaning": "胃陰枯竭、全身大虛",
+            "overlay": "weak-hot.png",
+            "patterns": (("虛證", 2.0), ("熱證", 1.4)),
+            "targets": ("spleen",),
+            "score": 9.0,
+        }
+    yellow_dry = (
+        color_b >= t["coat_scorch_b"]
+        and color_L <= t["coat_yellow_L_low"]
+        and contrast >= t["coat_crack_contrast"]
+        and highlight <= t["coat_greasy_highlight_max"]
+    )
+    if yellow_dry:
+        return {
+            "bias": "黃燥裂苔",
+            "meaning": "實熱亢盛、熱極傷津",
+            "overlay": "strong-hot.png",
+            "patterns": (("熱證", 2.2), ("實證", 1.8)),
+            "targets": ("spleen", "large_intestine"),
+            "score": 9.0,
+        }
+    yellow_greasy = (
+        color_b >= t["coat_yellow_b"]
+        and t["coat_yellow_L_low"] < color_L <= t["coat_yellow_L_high"]
+        and energy >= t["coat_thick_energy"]
+        and contrast < t["coat_crack_contrast"]
+        and highlight <= t["coat_greasy_highlight_max"]
+    )
+    if yellow_greasy:
+        return {
+            "bias": "黃厚膩苔",
+            "meaning": "胃腸濕熱、積食化火",
+            "overlay": "strong-hot.png",
+            "patterns": (("熱證", 2.0), ("實證", 1.6)),
+            "damp": True,
+            "targets": ("spleen", "large_intestine"),
+            "score": 9.0,
+        }
+    white_slip = (
+        abs(color_b) <= t["coat_white_b"]
+        and color_L >= t["coat_white_L"]
+        and energy >= t["coat_thick_energy"]
+        and highlight >= t["coat_slip_highlight_min"]
+        and metrics["body_a"] < t["coat_mirror_a"]
+    )
+    if white_slip:
+        return {
+            "bias": "白厚滑苔",
+            "meaning": "脾胃虛寒、寒濕內停",
+            "overlay": "weak-cold.png",
+            "patterns": (("虛證", 1.8), ("寒證", 2.0)),
+            "targets": ("spleen",),
+            "score": 9.0,
+        }
+    return None
+
+
+def _coat_feature_text(metrics: dict[str, float]) -> str:
+    covered = metrics["coat_ratio"] >= 0.15
+    color_L = metrics["coat_L"] if covered else metrics["all_L"]
+    color_b = metrics["coat_b"] if covered else metrics["all_b"]
+    return (
+        f"L* {color_L:.1f} a* {metrics['body_a']:.1f} b* {color_b:.1f}，"
+        f"能量 {metrics['energy']:.2f}、對比 {metrics['contrast']:.1f}、高光 {metrics['highlight']:.2f}"
+    )
 
 
 def _speckle_ratio(a_vals: list[float], extra: float) -> float:
@@ -2095,15 +2265,26 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     )
     if coat_box_stats.get("pixel_count", 0) < thresh["min_mask_pixels"]:
         coat_box_stats = seg["coat_stats"] if seg["coat_stats"].get("pixel_count", 0) else packed["center"]["all"]
-    coat_bias, coat_meaning = tongue_coat_from_lab(coat_box_stats, peer)
-    coat_text = f"舌苔（全舌疊加，分離後苔像素）{coat_bias} → {coat_meaning}（{TEACHING_NOTE}）"
+    surface = tongue_surface_metrics(seg)
+    appearance = classify_tongue_coat_appearance(surface)
+    if appearance:
+        coat_bias, coat_meaning = appearance["bias"], appearance["meaning"]
+        coat_text = (
+            f"{coat_bias}（{_coat_feature_text(surface)}）→ {coat_meaning}（{TEACHING_NOTE}）"
+        )
+        remember(appearance["targets"], appearance["overlay"], appearance["patterns"], appearance["score"], "coat")
+        if appearance.get("damp"):
+            remember(("spleen",), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 7.0, "coat")
+    else:
+        coat_bias, coat_meaning = tongue_coat_from_lab(coat_box_stats, peer)
+        coat_text = f"舌苔（全舌疊加，分離後苔像素）{coat_bias} → {coat_meaning}（{TEACHING_NOTE}）"
+        if coat_bias == "黑灰苔":
+            remember(("kidney",), "strong-cold.png", (("寒證", 1.8), ("實證", 1.4)), 6.0, "coat")
+        elif coat_bias in ("黃苔", "焦黃苔"):
+            remember(("spleen",), "strong-hot.png", (("熱證", 1.5),), 5.0, "coat")
+        elif coat_bias == "白苔很少":
+            remember(("spleen",), "weak-cold.png", (("虛證", 1.8),), 5.0, "coat")
     findings.append(coat_text)
-    if coat_bias == "黑灰苔":
-        remember(("kidney",), "strong-cold.png", (("寒證", 1.8), ("實證", 1.4)), 6.0, "coat")
-    elif coat_bias in ("黃苔", "焦黃苔"):
-        remember(("spleen",), "strong-hot.png", (("熱證", 1.5),), 5.0, "coat")
-    elif coat_bias == "白苔很少":
-        remember(("spleen",), "weak-cold.png", (("虛證", 1.8),), 5.0, "coat")
 
     body_all = seg["body_stats"] if seg["body_stats"].get("pixel_count", 0) else average_stats([packed[z]["body"] for z in packed])
     body_bias, body_meaning = tongue_body_from_lab(body_all, baseline)
@@ -2129,6 +2310,11 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         "meaning": coat_meaning,
         "reading": f"{coat_bias} → {coat_meaning}",
         "interpretation": coat_text,
+        "texture": {
+            "energy": round(surface["energy"], 3),
+            "contrast": round(surface["contrast"], 2),
+            "highlight": round(surface["highlight"], 3),
+        },
         "box": TONGUE_COAT_BOX,
     }
     measurements = []
