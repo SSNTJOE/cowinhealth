@@ -91,6 +91,7 @@ EXTRA_COLUMNS = [
     ("users", "birth_year", "INT NULL"),
     ("users", "conditions_json", "TEXT NULL"),
     ("users", "allergies_json", "TEXT NULL"),
+    ("users", "complexion_lab_json", "TEXT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
     ("health_records", "face_color", "VARCHAR(255) NULL"),
@@ -108,6 +109,7 @@ EXTRA_COLUMNS = [
     ("health_records", "complexion_hsv_json", "TEXT NULL"),
     ("health_records", "tongue_grid_json", "TEXT NULL"),
     ("health_records", "tongue_measurements_json", "TEXT NULL"),
+    ("health_records", "organ_composite_json", "TEXT NULL"),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS

@@ -265,7 +265,7 @@ def fetch_user(user_id: str) -> dict | None:
             cur.execute(
                 """
                 SELECT user_id, email, nickname, birth_year, height, weight, age, gender,
-                       medical_history, conditions_json, allergies_json
+                       medical_history, conditions_json, allergies_json, complexion_lab_json
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -311,6 +311,7 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         "complexion_hsv_json",
         "tongue_grid_json",
         "tongue_measurements_json",
+        "organ_composite_json",
     ]
     colors = result.get("region_colors") or {}
     complexion = result.get("complexion") or {}
@@ -340,6 +341,7 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         json.dumps(complexion.get("hsv"), ensure_ascii=False) if complexion.get("hsv") else None,
         json.dumps(tongue_grid, ensure_ascii=False) if tongue_grid else None,
         json.dumps(tongue_measurements, ensure_ascii=False) if tongue_measurements else None,
+        json.dumps(result.get("organ_health"), ensure_ascii=False) if result.get("organ_health") else None,
     ]
     conn = connect()
     try:
@@ -349,6 +351,15 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
                 values,
             )
             record_id = cur.lastrowid
+            lab = complexion.get("lab")
+            if lab:
+                payload = dict(lab)
+                if complexion.get("S") is not None:
+                    payload["S"] = complexion.get("S")
+                cur.execute(
+                    "UPDATE users SET complexion_lab_json = %s WHERE user_id = %s",
+                    (json.dumps(payload, ensure_ascii=False), user_id),
+                )
     finally:
         conn.close()
     result["record_id"] = record_id
@@ -632,8 +643,15 @@ async def analyze(
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail="pulse_json 不是合法 JSON") from exc
 
-    result = analyze_session(images, symptoms or "", discomfort or "", pulse)
     profile = fetch_user(user_id) or {}
+    personal_lab = None
+    raw_lab = profile.get("complexion_lab_json")
+    if raw_lab:
+        try:
+            personal_lab = json.loads(raw_lab) if isinstance(raw_lab, str) else raw_lab
+        except json.JSONDecodeError:
+            personal_lab = None
+    result = analyze_session(images, symptoms or "", discomfort or "", pulse, personal_lab=personal_lab)
     advice = build_advice(
         result["findings"],
         symptoms or "",
@@ -668,7 +686,7 @@ def records(request: Request):
                        diet_advice, diet_url, acupoint_url,
                        face_grid_json, face_measurements_json,
                        complexion_label, complexion_hex, complexion_hsv_json,
-                       tongue_grid_json, tongue_measurements_json
+                       tongue_grid_json, tongue_measurements_json, organ_composite_json
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -701,4 +719,12 @@ def records(request: Request):
                 row["tongue_grid"] = None
         else:
             row["tongue_grid"] = None
+        raw_health = row.get("organ_composite_json")
+        if raw_health:
+            try:
+                row["organ_health"] = json.loads(raw_health)
+            except json.JSONDecodeError:
+                row["organ_health"] = None
+        else:
+            row["organ_health"] = None
     return {"user_id": user_id, "records": rows, "trend": build_trend(rows)}

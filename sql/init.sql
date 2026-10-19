@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   medical_history TEXT NULL,
   conditions_json TEXT NULL,
   allergies_json TEXT NULL,
+  complexion_lab_json TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -61,5 +62,6 @@ CREATE TABLE IF NOT EXISTS health_records (
   complexion_hsv_json TEXT NULL,
   tongue_grid_json TEXT NULL,
   tongue_measurements_json TEXT NULL,
+  organ_composite_json TEXT NULL,
   CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
 );

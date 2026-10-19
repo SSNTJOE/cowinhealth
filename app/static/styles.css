@@ -295,6 +295,7 @@ dialog {
   box-sizing: border-box;
 }
 .tongue-zone strong { font-size: 13px; }
+.tongue-flag { color: #b42318; font-weight: 700; }
 .face-cell-card .swatch {
   width: 14px;
   height: 14px;

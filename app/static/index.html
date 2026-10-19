@@ -86,11 +86,12 @@
       <p id="cam-msg" class="status"></p>
       <div id="face-grid-wrap" class="hidden">
         <h3>臉部分區（4×3，教學示範）</h3>
-        <p class="note">縱 4 列、橫 3 欄。基本色是第 1、2、3、5、7、8、9、10、11 格的平均。各區先對照色域：實熱 R160–220／G20–50／B20–50、實寒 R80–130／G40–80／B70–110、虛熱 R220–255／G90–140／B110–150、虛寒 R210–240／G170–200／B170–200；沒入色域再跟基本色比，較紅為實熱、較黃為濕氣較重、較黑為實寒、較白為虛寒。第 8 格是鼻子。第 4、5 格是眼睛，正常以白與黑為主；落入實熱為肝實熱、虛熱為肝虛熱，較黃為濕氣較重。第 12 格取較紅的區塊當嘴唇，用同一套色域。此為教學示範，不能取代醫師診斷。</p>
+        <p class="note">縱 4 列、橫 3 欄。基本色是第 1、2、3、5、7、8、9、10、11 格的平均，轉成 YCrCb 後只看 Cr（紅）與 Cb（藍），拿掉亮度，深淺膚色可以一起比。實熱：Cr 極高且 Cb 極低。實寒：Cb 上升、Cr 被壓住。虛熱：兩顴（第 7、9 格）Cr 升高，不是整臉通紅。虛寒：Cr 與 Cb 一起掉到接近中性，血色不足。第 8 格是鼻子。第 4、6 格是眼睛，第 5 格是兩眼之間；眼以白與黑為主，Cr 升高為肝熱，較黃為濕氣較重。第 12 格取較紅區塊當嘴唇。此為教學示範，不能取代醫師診斷。</p>
         <div class="face-grid-stage" id="face-grid-stage">
           <img id="face-preview" alt="臉部擷取" />
           <div id="face-grid-overlay" class="face-grid-overlay"></div>
         </div>
+        <p id="face-lab-flags" class="advice tongue-flag hidden"></p>
         <p id="complexion-now" class="advice"></p>
         <div id="face-cells-list" class="face-cells-list"></div>
         <h4>臉色歷史</h4>
@@ -98,11 +99,12 @@
       </div>
       <div id="tongue-grid-wrap" class="hidden">
         <h3>舌部分區（上中下左右＋舌苔，教學示範）</h3>
-        <p class="note">相片方向：舌尖朝下（近唇）、舌根朝上。五塊對應：上＝腎（舌根）、中＝脾胃、下＝心肺（舌尖）、左／右＝肝膽。使用者說「六塊」但列了上中下左右五區；第六層採<strong>全舌舌苔疊加</strong>（不把中區再切成中上／中下）。舌質紅→實熱證、白→虛寒證；白苔很少→胃虛、黃苔→實熱、黑灰苔→實寒證。此為教學示範，不能取代醫師診斷。</p>
+        <p class="note">相片方向：舌尖朝下（近唇）、舌根朝上。五塊對應：上＝腎（舌根）、中＝脾胃、下＝心肺（舌尖）、左／右＝肝膽：舌邊 a* 明顯高於舌中為肝火旺，再帶暗紫（b* 下降）為肝膽濕熱、氣鬱化火；舌邊 a* 偏低為肝血虛，舌體瘦小時一併註明。使用者說「六塊」但列了上中下左右五區；第六層採<strong>全舌舌苔疊加</strong>（不把中區再切成中上／中下）。舌質紅→實熱證、白→虛寒證；白苔很少→胃虛、黃苔→實熱、黑灰苔→實寒證。此為教學示範，不能取代醫師診斷。</p>
         <div class="face-grid-stage" id="tongue-grid-stage">
           <img id="tongue-preview" alt="舌頭擷取" />
           <div id="tongue-grid-overlay" class="tongue-grid-overlay"></div>
         </div>
+        <p id="tongue-tip-flag" class="advice tongue-flag hidden"></p>
         <p id="tongue-coat-now" class="advice"></p>
         <div id="tongue-cells-list" class="face-cells-list"></div>
       </div>

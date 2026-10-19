@@ -28,10 +28,26 @@ PULSE_TO_ORGAN = {
     "right_cun_heavy": "lung",
     "right_cun_light": "large_intestine",
     "right_guan_heavy": "spleen",
-    "right_guan_light": "spleen",  # 胃併入脾系統
-    "right_chi_heavy": "heart",  # 心包併入心
+    "right_guan_light": "spleen",  # 胃併入脾系統（右手關輕按）
+    "right_chi_heavy": "kidney",  # 命門併入腎（右手尺重按）
     "right_chi_light": "bladder",  # 三焦氣化併入膀胱
 }
+# PulseActivity 12×15s keys. Teaching: 左寸心、關肝、尺腎；右寸肺、關脾、尺腎／命門.
+# Light (fu) maps paired fu organs; 胃→脾, 命門→腎, 心包 was Pulse label but 命門 uses kidney.
+PULSE_ORGAN_NOTE = (
+    "left_cun_heavy=心, left_cun_light=小腸; "
+    "left_guan_heavy=肝, left_guan_light=膽; "
+    "left_chi_heavy=腎, left_chi_light=膀胱; "
+    "right_cun_heavy=肺, right_cun_light=大腸; "
+    "right_guan_heavy=脾, right_guan_light=脾(胃); "
+    "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
+)
+HEALTH_FORMULA = (
+    "臟腑健康度=round(mean(可用來源分數))；來源為臉色Lab、舌質Lab、舌苔Lab，"
+    "Android 另加寸關尺15秒脈頻。來源缺席不列入平均；來源在場但該臟無偏色則記5。"
+    "單源分數沿用 overlay_from_weights：證據<0.9→5，否則 clamp(1,10, round(5-min(最強,4)))。"
+    "脈：15秒>23→熱/實，<14→寒/虛，14–23→5。"
+)
 
 SYMPTOM_RULES = [
     (("心悸", "失眠", "胸悶", "心煩"), "heart", "熱證", 1.4),
@@ -80,6 +96,36 @@ def apply_text(evidence: dict[str, dict[str, float]], text: str) -> list[str]:
 
 def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[str]) -> None:
     mapping = [
+        ("胃火", "spleen", "熱證", 2.0),
+        ("胃火", "spleen", "實證", 1.6),
+        ("額頭實熱", "heart", "熱證", 2.0),
+        ("額頭（第2格", "heart", "實證", 1.4),
+        ("肝腎陰虛", "liver", "虛證", 1.8),
+        ("肝腎陰虛", "kidney", "虛證", 1.8),
+        ("肝腎陰虛", "liver", "熱證", 1.4),
+        ("寒凝", "kidney", "寒證", 1.8),
+        ("寒凝", "heart", "實證", 1.4),
+        ("脾腎陽虛", "spleen", "虛證", 1.8),
+        ("脾腎陽虛", "kidney", "虛證", 1.8),
+        ("脾腎陽虛", "kidney", "寒證", 1.4),
+        ("脾胃濕證", "spleen", "實證", 1.8),
+        ("鼻翼", "spleen", "實證", 1.2),
+        ("心火盛", "heart", "熱證", 2.2),
+        ("心火盛", "heart", "實證", 1.6),
+        ("心肺氣虛", "heart", "虛證", 2.0),
+        ("心肺氣虛", "lung", "虛證", 1.8),
+        ("淡白無血色", "heart", "寒證", 1.6),
+        ("心肺區偏紅", "heart", "熱證", 1.8),
+        ("點刺", "heart", "熱證", 0.8),
+        ("脾胃虛寒", "spleen", "寒證", 2.0),
+        ("脾胃虛寒", "spleen", "虛證", 1.8),
+        ("白厚苔", "spleen", "寒證", 1.4),
+        ("胃腸實熱", "spleen", "熱證", 2.0),
+        ("胃腸實熱", "large_intestine", "熱證", 1.6),
+        ("胃腸實熱", "gallbladder", "熱證", 1.2),
+        ("焦黃苔", "spleen", "熱證", 1.6),
+        ("焦黃苔", "large_intestine", "實證", 1.4),
+        ("血瘀傾向", "liver", "實證", 1.8),
         ("心火", "heart", "熱證", 2.0),
         ("唇色偏紅", "heart", "熱證", 1.6),
         ("脾血虛", "spleen", "虛證", 2.2),
@@ -207,6 +253,74 @@ def finalize(
         scores[score_key] = score
         overlays[key] = overlay
     return scores, patterns, overlays
+
+
+def pulse_is_present(pulse: dict[str, Any] | None) -> bool:
+    if not pulse:
+        return False
+    for slot in PULSE_TO_ORGAN:
+        raw = pulse.get(slot)
+        if raw is None:
+            continue
+        try:
+            float(raw)
+            return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def evidence_from_marks(marks: list[dict[str, Any]] | None) -> dict[str, dict[str, float]]:
+    evidence = empty_evidence()
+    for mark in marks or []:
+        add(evidence, mark.get("organ", ""), mark.get("pattern", ""), float(mark.get("weight") or 0))
+    return evidence
+
+
+def compose_organ_health(
+    source_scores: dict[str, dict[str, int] | None],
+) -> tuple[dict[str, int], dict[str, Any]]:
+    """Mean of present sources per organ. Missing source omitted; present+empty = 5."""
+    composites: dict[str, int] = {}
+    breakdown: dict[str, Any] = {}
+    for key, name, score_key, _pattern_key in ORGAN_META:
+        parts: dict[str, int | None] = {}
+        values: list[int] = []
+        for source, scores in source_scores.items():
+            if scores is None:
+                parts[source] = None
+                continue
+            value = int(scores.get(score_key, 5))
+            parts[source] = value
+            values.append(value)
+        if values:
+            composite = max(1, min(10, int(round(sum(values) / len(values)))))
+        else:
+            composite = 5
+        composites[score_key] = composite
+        breakdown[key] = {
+            "organ": name,
+            "composite": composite,
+            "n_sources": len(values),
+            "sources": parts,
+        }
+    return composites, breakdown
+
+
+def serialize_organ_health(
+    scores: dict[str, int],
+    breakdown: dict[str, Any],
+    source_keys: list[str],
+) -> dict[str, Any]:
+    return {
+        "formula": HEALTH_FORMULA,
+        "pulse_organ_map": dict(PULSE_TO_ORGAN),
+        "pulse_organ_note": PULSE_ORGAN_NOTE,
+        "source_keys": source_keys,
+        "scores": scores,
+        "organs": breakdown,
+        "disclaimer": "教學示範，非中醫診斷",
+    }
 
 
 def overlay_from_pattern_label(label: str | None) -> str | None:

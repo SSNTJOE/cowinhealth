@@ -248,19 +248,32 @@ function renderFaceGrid(grid, previewUrl) {
           const half = document.createElement("div");
           half.className = "half";
           const tag = part.part === "upper" ? "上" : "下";
-          half.innerHTML = `<strong>8${tag}</strong> ${part.organs}<br>${part.bias}`;
+          const lab = part.lab ? `L${Math.round(part.lab.L)} a${part.lab.a >= 0 ? "+" : ""}${Math.round(part.lab.a)} b${part.lab.b >= 0 ? "+" : ""}${Math.round(part.lab.b)}` : "";
+          half.innerHTML = `<strong>8${tag}</strong> ${part.organs}<br>${lab}<br>${part.bias}`;
           box.appendChild(half);
         });
       } else {
-        box.innerHTML = `<strong>${cell.id}</strong> ${cell.organs}<br>${cell.name}<br>${cell.bias || ""}`;
+        box.innerHTML = `<strong>${cell.id}</strong> ${cell.organs}<br>${cell.name}<br>${cell.lab_text || ""}<br>${cell.bias || ""}`;
       }
       overlay.appendChild(box);
     }
   }
+  const flagBox = document.getElementById("face-lab-flags");
+  if (flagBox) {
+    const flags = grid.flags || [];
+    if (flags.length) {
+      flagBox.textContent = flags.map((item) => item.text).join("；") + "（教學示範）";
+      flagBox.classList.remove("hidden");
+    } else {
+      flagBox.textContent = "";
+      flagBox.classList.add("hidden");
+    }
+  }
   const complexion = grid.complexion || {};
   const now = document.getElementById("complexion-now");
+  const lab = complexion.lab || {};
   now.textContent = complexion.interpretation
-    ? `臉色（${complexion.hex || ""} ${complexion.bias || ""} → ${complexion.pattern || ""}）：${complexion.interpretation}`
+    ? `臉色（${complexion.hex || ""} L${lab.L ?? "–"} a${lab.a ?? "–"} b${lab.b ?? "–"} ${complexion.bias || ""} → ${complexion.pattern || ""}）：${complexion.interpretation}`
     : "";
   const list = document.getElementById("face-cells-list");
   list.innerHTML = "";
@@ -275,8 +288,9 @@ function renderFaceGrid(grid, previewUrl) {
       })
       .join("");
     const hsv = cell.hsv || {};
+    const labCell = cell.lab || {};
     card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>第 ${cell.id} 格 ${cell.name}</b>（${cell.organs}）</div>
-      <div>${cell.hex}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.hex}　${cell.lab_text || `L${labCell.L ?? "–"} a${labCell.a ?? "–"} b${labCell.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
       <div>${cell.reading || cell.bias || ""}</div>
       <div>${cell.interpretation || ""}</div>${splitHtml}`;
     list.appendChild(card);
@@ -307,9 +321,27 @@ function renderTongueGrid(grid, previewUrl) {
     box.style.top = (cell.top * 100) + "%";
     box.style.width = ((cell.right - cell.left) * 100) + "%";
     box.style.height = ((cell.bottom - cell.top) * 100) + "%";
-    box.innerHTML = `<strong>${cell.label}</strong> ${cell.organs}<br>${cell.anatomy}<br>${cell.bias || ""}`;
+    const labText = cell.lab_text || "";
+    box.innerHTML = `<strong>${cell.label}</strong> ${cell.organs}<br>${cell.anatomy}<br>${labText}<br>${cell.bias || ""}`;
     overlay.appendChild(box);
   });
+  const flagEl = document.getElementById("tongue-tip-flag");
+  if (flagEl) {
+    const bits = [];
+    if (grid.tip_heat_flag && grid.tip_heat_flag_text) {
+      const delta = grid.delta_a_tip_minus_center;
+      const gate = grid.delta_a_threshold;
+      bits.push(`${grid.tip_heat_flag_text}（Δa* 舌尖−舌中 ${delta >= 0 ? "+" : ""}${delta}，門檻 ${gate}；教學示範）`);
+    }
+    if (grid.liver_side_flag_text) bits.push(grid.liver_side_flag_text);
+    if (bits.length) {
+      flagEl.textContent = bits.join(" ");
+      flagEl.classList.remove("hidden");
+    } else {
+      flagEl.textContent = "";
+      flagEl.classList.add("hidden");
+    }
+  }
   const coating = grid.coating || {};
   const now = document.getElementById("tongue-coat-now");
   now.textContent = coating.interpretation
@@ -321,8 +353,9 @@ function renderTongueGrid(grid, previewUrl) {
     const card = document.createElement("div");
     card.className = "face-cell-card";
     const hsv = cell.hsv || {};
+    const lab = cell.lab || {};
     card.innerHTML = `<div><span class="swatch" style="background:${cell.hex}"></span><b>${cell.label} ${cell.organs}</b>（${cell.anatomy}）</div>
-      <div>${cell.hex}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+      <div>${cell.hex}　${cell.lab_text || `L${lab.L ?? "–"} a${lab.a ?? "–"} b${lab.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
       <div>${cell.reading || cell.bias || ""}</div>
       <div>${cell.interpretation || ""}</div>`;
     list.appendChild(card);
@@ -331,8 +364,9 @@ function renderTongueGrid(grid, previewUrl) {
     const card = document.createElement("div");
     card.className = "face-cell-card";
     const hsv = coating.hsv || {};
-    card.innerHTML = `<div><span class="swatch" style="background:${coating.hex}"></span><b>第六層 舌苔</b>（胃／全舌疊加）</div>
-      <div>${coating.hex || ""}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
+    const lab = coating.lab || {};
+    card.innerHTML = `<div><span class="swatch" style="background:${coating.hex}"></span><b>第六層 舌苔</b>（胃／膽／大腸疊加）</div>
+      <div>${coating.hex || ""}　${coating.lab_text || `L${lab.L ?? "–"} a${lab.a ?? "–"} b${lab.b ?? "–"}`}　H${hsv.hue ?? "–"} S${hsv.saturation ?? "–"} V${hsv.value ?? "–"}</div>
       <div>${coating.reading || ""}</div>
       <div>${coating.interpretation || ""}</div>`;
     list.appendChild(card);
