@@ -1629,6 +1629,16 @@ TONGUE_LAB_THRESHOLDS = {
     "side_purple_db_vs_center": -3.5,
     "side_pale_da_vs_center": -4.0,
     "side_thin_aspect": 0.52,
+    "root_peel_coat_max": 0.18,
+    "root_peel_coat_gap": 0.20,
+    "root_yin_da": 8.0,
+    "root_yin_a_min": 40.0,
+    "root_yin_dL_gap": 8.0,
+    "root_thick_coat_min": 0.55,
+    "root_yang_coat_s_max": 0.28,
+    "root_yang_coat_b_max": 16.0,
+    "root_yang_dL_vs_center": 6.0,
+    "root_yang_da_vs_center": -4.0,
     "seg_white_s_rel": 0.85,
     "seg_white_s_cap": 0.20,
     "seg_yellow_db": 6.0,
@@ -1828,11 +1838,24 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         all_stats, all_a = _gather_masked(seg["rgb"], seg["lab"], seg["coat_mask"], seg["width"], seg["height"], spec, None)
         body_stats, body_a = _gather_masked(seg["rgb"], seg["lab"], seg["coat_mask"], seg["width"], seg["height"], spec, False)
         coat_stats, _coat_a = _gather_masked(seg["rgb"], seg["lab"], seg["coat_mask"], seg["width"], seg["height"], spec, True)
-        if body_stats.get("pixel_count", 0) < thresh["min_mask_pixels"]:
+        raw_body_count = body_stats.get("pixel_count", 0)
+        raw_coat_count = coat_stats.get("pixel_count", 0)
+        raw_body = body_stats
+        raw_coat = coat_stats
+        if raw_body_count < thresh["min_mask_pixels"]:
             body_stats, body_a = all_stats, all_a
-        if coat_stats.get("pixel_count", 0) < thresh["min_mask_pixels"]:
+        if raw_coat_count < thresh["min_mask_pixels"]:
             coat_stats = all_stats
-        return {"all": all_stats, "body": body_stats, "coat": coat_stats, "body_a": body_a}
+        return {
+            "all": all_stats,
+            "body": body_stats,
+            "coat": coat_stats,
+            "body_a": body_a,
+            "raw_body": raw_body,
+            "raw_coat": raw_coat,
+            "raw_body_count": raw_body_count,
+            "raw_coat_count": raw_coat_count,
+        }
 
     packed: dict[str, dict[str, Any]] = {spec["id"]: zone_layers(spec) for spec in TONGUE_ZONE_LAYOUT}
     peer_coats = [packed[zid]["coat"] for zid in ("top", "left", "right", "bottom") if zid in packed]
@@ -1850,6 +1873,7 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     tongue_aspect = image.width / max(1, image.height)
     thin_tongue = tongue_aspect <= thresh["side_thin_aspect"]
     side_flags: list[str] = []
+    root_flags: list[str] = []
 
     zones: list[dict[str, Any]] = []
     for spec in TONGUE_ZONE_LAYOUT:
@@ -1928,6 +1952,65 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                         f"中（脾胃／舌中）主要觀察舌苔 {coat_bias} → {coat_meaning}（{TEACHING_NOTE}）"
                     )
                     zone_findings.append(interpretation)
+        elif spec["id"] == "top":
+            root_n = max(1.0, layers["all"].get("pixel_count", 1))
+            root_coat_ratio = layers["raw_coat_count"] / root_n
+            other_ratios = []
+            coated_parts = []
+            for zid in ("center", "left", "right", "bottom"):
+                other_n = max(1.0, packed[zid]["all"].get("pixel_count", 1))
+                other_ratios.append(packed[zid]["raw_coat_count"] / other_n)
+                if packed[zid]["raw_coat_count"] >= thresh["min_mask_pixels"]:
+                    coated_parts.append(packed[zid]["raw_coat"])
+            other_coat = sum(other_ratios) / len(other_ratios)
+            coated = average_stats(coated_parts) if coated_parts else None
+            exposed = layers["raw_body"] if layers["raw_body_count"] >= thresh["min_mask_pixels"] else body_stats
+            peeled = (
+                root_coat_ratio <= thresh["root_peel_coat_max"]
+                and coated is not None
+                and other_coat >= root_coat_ratio + thresh["root_peel_coat_gap"]
+            )
+            da_coat = (exposed["a_star"] - coated["a_star"]) if coated is not None else 0.0
+            dL_gap = abs(exposed["L"] - coated["L"]) if coated is not None else 0.0
+            coat_visible = layers["raw_coat"] if layers["raw_coat_count"] >= thresh["min_mask_pixels"] else None
+            thick_white = False
+            if coat_visible is not None and root_coat_ratio >= thresh["root_thick_coat_min"]:
+                dL_coat = coat_visible["L"] - center_body["L"]
+                da_pale = body_stats["a_star"] - center_body["a_star"]
+                thick_white = (
+                    dL_coat >= thresh["root_yang_dL_vs_center"]
+                    and coat_visible["s"] <= thresh["root_yang_coat_s_max"]
+                    and coat_visible["b_star"] <= thresh["root_yang_coat_b_max"]
+                    and da_pale <= thresh["root_yang_da_vs_center"]
+                    and body_stats["L"] >= center_body["L"] + 3.0
+                )
+            if (
+                peeled
+                and exposed["a_star"] >= thresh["root_yin_a_min"]
+                and da_coat >= thresh["root_yin_da"]
+                and dL_gap >= thresh["root_yin_dL_gap"]
+            ):
+                bias, meaning = "剝苔", "腎陰虛（虛熱）"
+                interpretation = (
+                    f"上（腎／舌根）剝苔，露出舌質 a* {exposed['a_star']:.1f}（高於有苔區 {da_coat:+.1f}），"
+                    f"L* 與有苔區相差 {dL_gap:.1f} → 腎陰虛（虛熱）（{TEACHING_NOTE}）"
+                )
+                zone_findings.append(interpretation)
+                root_flags.append(interpretation)
+                remember(("kidney",), "weak-hot.png", (("虛證", 1.8), ("熱證", 2.0)), 8.0)
+            elif thick_white and coat_visible is not None:
+                bias, meaning = "白厚苔", "命門火衰（腎陽虛）"
+                interpretation = (
+                    f"上（腎／舌根）苔厚白，苔 L* {coat_visible['L']:.1f}、S {coat_visible['s']:.2f}，"
+                    f"舌質 a* 相對舌中 {body_stats['a_star'] - center_body['a_star']:+.1f}、偏淡嫩"
+                    f" → 命門火衰（腎陽虛）（{TEACHING_NOTE}）"
+                )
+                zone_findings.append(interpretation)
+                root_flags.append(interpretation)
+                remember(("kidney",), "weak-cold.png", (("虛證", 1.8), ("寒證", 2.0)), 8.0, "coat")
+            else:
+                bias, meaning = "接近周圍", "舌根未見剝苔或厚白苔"
+                interpretation = f"上（腎／舌根）未見剝苔或厚白苔（{TEACHING_NOTE}）"
         elif spec["id"] in ("left", "right"):
             da_center = body_stats["a_star"] - center_body["a_star"]
             db_center = body_stats["b_star"] - center_body["b_star"]
@@ -2135,6 +2218,8 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         "tip_heat_flag_text": TONGUE_TIP_HEAT_FLAG if tip_heat_flag else None,
         "liver_side_flags": side_flags,
         "liver_side_flag_text": " ".join(side_flags) if side_flags else None,
+        "root_flags": root_flags,
+        "root_flag_text": " ".join(root_flags) if root_flags else None,
         "tongue_aspect": round(tongue_aspect, 3),
         "tongue_thin": thin_tongue,
         "tip_speckle_ratio": round(speckle, 3),

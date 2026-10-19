@@ -334,6 +334,7 @@ function renderTongueGrid(grid, previewUrl) {
       bits.push(`${grid.tip_heat_flag_text}（Δa* 舌尖−舌中 ${delta >= 0 ? "+" : ""}${delta}，門檻 ${gate}；教學示範）`);
     }
     if (grid.liver_side_flag_text) bits.push(grid.liver_side_flag_text);
+    if (grid.root_flag_text) bits.push(grid.root_flag_text);
     if (bits.length) {
       flagEl.textContent = bits.join(" ");
       flagEl.classList.remove("hidden");
