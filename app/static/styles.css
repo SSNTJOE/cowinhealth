@@ -154,6 +154,20 @@ video, canvas, img.preview {
   z-index: 2;
   border-radius: var(--align-radius);
 }
+/* Face positioning marks. viewBox 300×400 is the 4×3 grid (cell = 100×100):
+   eyes row 1, nose row 2 col 1, lips row 3 col 1. Hidden unless .is-face. */
+.face-guides {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.align-frame.is-face .face-guides {
+  display: block;
+  filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
 .align-hint {
   position: absolute;
   left: 0;
