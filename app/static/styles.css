@@ -62,6 +62,141 @@ video, canvas, img.preview {
   border-radius: 12px;
   object-fit: cover;
 }
+.camera-stage {
+  --align-left: 27.5%;
+  --align-top: 10%;
+  --align-width: 45%;
+  --align-height: 80%;
+  --align-radius: 18px;
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 560px);
+  aspect-ratio: 4 / 3;
+  max-height: 420px;
+  background: #111;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 8px auto 4px;
+}
+.camera-stage.is-tongue {
+  /* Smaller U-shaped window; flat top aligns with upper teeth. */
+  --align-left: 36%;
+  --align-top: 22%;
+  --align-width: 28%;
+  --align-height: 52%;
+  --align-radius: 8px 8px 50% 50% / 8px 8px 40% 40%;
+  --align-zoom: 3.7;
+}
+.camera-clip {
+  position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
+  overflow: hidden;
+  z-index: 0;
+  border-radius: var(--align-radius);
+  background: #111;
+}
+.camera-stage video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  right: auto;
+  bottom: auto;
+  z-index: 0;
+  max-height: none;
+  object-fit: cover;
+  object-position: 50% 50%;
+  transform: scaleX(-1);
+  border-radius: 0;
+  display: block;
+  opacity: 1;
+  visibility: visible;
+  background: #111;
+}
+.camera-stage.is-tongue video {
+  /* Digital zoom so the tongue fills the smaller window without leaning in. */
+  width: calc(100% * var(--align-zoom));
+  height: calc(100% * var(--align-zoom));
+  left: calc((100% - 100% * var(--align-zoom)) / 2);
+  top: calc((100% - 100% * var(--align-zoom)) / 2 + 12%);
+  object-position: 50% 62%;
+}
+.align-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-repeat: no-repeat;
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-repeat: no-repeat;
+  /* Percent mask-position is not the same as left/top; 50% 50% centers the hole
+     (both face and tongue frames are centered). JS also pins hole in px. */
+  -webkit-mask-size: 100% 100%, var(--align-width) var(--align-height);
+  -webkit-mask-position: 0 0, 50% 50%;
+  -webkit-mask-composite: xor;
+  mask-size: 100% 100%, var(--align-width) var(--align-height);
+  mask-position: 0 0, 50% 50%;
+  mask-composite: exclude;
+}
+.align-frame {
+  position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
+  box-sizing: border-box;
+  border: 3px solid #ffcc00;
+  background: transparent;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: var(--align-radius);
+}
+/* Face positioning marks. viewBox 300×400 is the 4×3 grid (cell = 100×100):
+   eyes row 1, nose row 2 col 1, lips row 3 col 1. Hidden unless .is-face. */
+.face-guides {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.align-frame.is-face .face-guides {
+  display: block;
+  filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
+.tongue-guides {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.align-frame.is-tongue .tongue-guides {
+  display: block;
+  filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
+.align-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  margin: 0;
+  z-index: 3;
+  text-align: center;
+  color: #ffcc00;
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
 .status { min-height: 1.4em; color: var(--muted); font-size: 14px; }
 .ok { color: var(--ok); }
 .err { color: #a12626; }
