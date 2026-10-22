@@ -27,15 +27,7 @@ CONDITION_SET = set(CONDITION_OPTIONS)
 
 
 def allergy_options() -> tuple[str, ...]:
-    from .recipes import allergen_labels
-
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for label in (*BASE_ALLERGY_OPTIONS, *allergen_labels()):
-        if label and label not in seen:
-            seen.add(label)
-            ordered.append(label)
-    return tuple(ordered)
+    return BASE_ALLERGY_OPTIONS
 
 
 def allergy_option_set() -> set[str]:
