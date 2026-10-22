@@ -5,7 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
     <TextView android:id="@+id/guide" android:textSize="16sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <ImageView android:id="@+id/diagram" android:layout_width="match_parent" android:layout_height="140dp" android:contentDescription="寸關尺示意圖"/>
+    <ImageView android:id="@+id/diagram" android:layout_width="match_parent" android:layout_height="96dp" android:contentDescription="寸關尺：腕橫紋上寸、關、尺，後置鏡頭貼膚"/>
     <androidx.camera.view.PreviewView
         android:id="@+id/preview"
         android:layout_width="match_parent"

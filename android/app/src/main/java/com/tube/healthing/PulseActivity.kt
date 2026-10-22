@@ -1,12 +1,15 @@
 package com.tube.healthing
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.Camera
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -20,6 +23,7 @@ import kotlin.math.abs
 class PulseActivity : AppCompatActivity() {
     private lateinit var binding: ActivityPulseBinding
     private val executor = Executors.newSingleThreadExecutor()
+    private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private val results = JSONObject()
     private var beats = 0
@@ -27,6 +31,15 @@ class PulseActivity : AppCompatActivity() {
     private var lastBeatAt = 0L
     private var measuring = false
     private var step = 0
+
+    private val permission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startCamera() else {
+            Toast.makeText(this, "脈診需要相機權限（後置鏡頭）", Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
 
     private val steps = listOf(
         Triple("left_cun_light", "左手寸、輕按（小腸）", "請把後置鏡頭與 LED 貼在左手寸部，先輕放。"),
@@ -47,14 +60,23 @@ class PulseActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityPulseBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         showStep()
-        startCamera()
         binding.start.setOnClickListener { startMeasure() }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startCamera()
+        } else {
+            permission.launch(Manifest.permission.CAMERA)
+        }
     }
 
     private fun showStep() {
         val item = steps[step]
-        binding.guide.text = "步驟 ${step + 1}/12\n${item.second}\n${item.third}\n後置鏡頭會打開 LED。把鏡頭貼在該側手腕的寸、關或尺上。15 秒超過 23 次為熱/實，少於 14 次為寒/虛。"
+        binding.guide.text = "步驟 ${step + 1}/12\n${item.second}\n${item.third}\n" +
+            "只用後置鏡頭（不要用自拍鏡）。有閃光會打開，像指尖 PPG 一樣把鏡頭與燈蓋住。" +
+            "把後置鏡頭貼在該側手腕的寸、關或尺上。15 秒超過 23 次為熱/實，少於 14 次為寒/虛。"
         binding.count.text = "0 次"
     }
 
@@ -64,59 +86,81 @@ class PulseActivity : AppCompatActivity() {
             binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             try {
                 val provider = future.get()
-                val preview = Preview.Builder()
-                    .setResolutionSelector(CameraBind.resolution())
-                    .build()
-                    .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
-                val analysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                analysis.setAnalyzer(executor) { image ->
-                    if (measuring) {
-                        val plane = image.planes[0]
-                        val buffer = plane.buffer
-                        val data = ByteArray(buffer.remaining())
-                        buffer.get(data)
-                        var sum = 0L
-                        for (b in data) sum += (b.toInt() and 0xFF)
-                        val luma = sum.toDouble() / data.size
-                        val now = System.currentTimeMillis()
-                        if (abs(luma - lastLuma) > 4 && now - lastBeatAt > 280) {
-                            beats += 1
-                            lastBeatAt = now
-                            runOnUiThread { binding.count.text = "$beats 次" }
+                cameraProvider = provider
+                var bound: Camera? = null
+                for (size in CameraBind.trySizes()) {
+                    val rs = CameraBind.resolution(size)
+                    val preview = Preview.Builder()
+                        .setResolutionSelector(rs)
+                        .build()
+                        .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+                    val analysis = ImageAnalysis.Builder()
+                        .setResolutionSelector(rs)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                        .build()
+                    analysis.setAnalyzer(executor) { image ->
+                        try {
+                            if (measuring) {
+                                val plane = image.planes[0]
+                                val buffer = plane.buffer
+                                val data = ByteArray(buffer.remaining())
+                                buffer.get(data)
+                                var sum = 0L
+                                for (b in data) sum += (b.toInt() and 0xFF)
+                                val luma = sum.toDouble() / data.size.coerceAtLeast(1)
+                                val now = System.currentTimeMillis()
+                                if (abs(luma - lastLuma) > 4 && now - lastBeatAt > 280) {
+                                    beats += 1
+                                    lastBeatAt = now
+                                    runOnUiThread { binding.count.text = "$beats 次" }
+                                }
+                                lastLuma = luma
+                            }
+                        } finally {
+                            image.close()
                         }
-                        lastLuma = luma
                     }
-                    image.close()
+                    bound = CameraBind.bindRearOnly(this, provider, preview, analysis)
+                    if (bound != null) break
                 }
-                val bound = CameraBind.bind(
-                    this,
-                    provider,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis
-                )
                 camera = bound
                 if (bound == null) {
-                    Toast.makeText(this, "模擬器沒有可用鏡頭，請把 Camera 設成 VirtualScene 或 Webcam", Toast.LENGTH_LONG).show()
-                } else if (bound.cameraInfo.hasFlashUnit()) {
-                    bound.cameraControl.enableTorch(true)
+                    Toast.makeText(
+                        this,
+                        "打不開後置鏡頭。模擬器請把 Back camera 設成 VirtualScene；實機請確認不是自拍鏡頭。",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    enableTorch(bound)
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, e.message ?: "無法開啟鏡頭", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, e.message ?: "無法開啟後置鏡頭", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun enableTorch(bound: Camera) {
+        if (!bound.cameraInfo.hasFlashUnit()) return
+        try {
+            bound.cameraControl.enableTorch(true)
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onDestroy() {
-        camera?.cameraControl?.enableTorch(false)
+        try {
+            camera?.cameraControl?.enableTorch(false)
+        } catch (_: Exception) {
+        }
+        cameraProvider?.unbindAll()
         executor.shutdown()
         super.onDestroy()
     }
 
     private fun startMeasure() {
         if (measuring) return
+        camera?.let { enableTorch(it) }
         beats = 0
         measuring = true
         binding.start.isEnabled = false

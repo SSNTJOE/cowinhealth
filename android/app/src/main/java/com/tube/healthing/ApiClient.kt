@@ -1,5 +1,6 @@
 package com.tube.healthing
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -94,6 +95,28 @@ class ApiClient(
         }
     }
 
+    fun recipeCountries(): JSONObject {
+        val req = Request.Builder().url("$baseUrl/api/recipes/countries").get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取國家列表失敗"))
+            return json
+        }
+    }
+
+    fun recipes(country: String, lang: String, patterns: String): JSONObject {
+        val url = "$baseUrl/api/recipes".toHttpUrl().newBuilder()
+            .addQueryParameter("country", country)
+            .addQueryParameter("lang", lang)
+        if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
+        val req = Request.Builder().url(url.build()).auth().get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取食譜失敗"))
+            return json
+        }
+    }
+
     fun submit(
         symptoms: String,
         discomfort: String,
@@ -104,6 +127,7 @@ class ApiClient(
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("symptoms", symptoms)
             .addFormDataPart("discomfort", discomfort)
+            .addFormDataPart("include_pulse", "1")
         if (pulseJson != null) builder.addFormDataPart("pulse_json", pulseJson)
         val jpeg = "image/jpeg".toMediaType()
         if (face != null) builder.addFormDataPart("face", "face.jpg", face.asRequestBody(jpeg))

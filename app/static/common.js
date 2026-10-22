@@ -204,6 +204,147 @@ function bodyImageSrcFromGender(gender) {
   return bodyKindFromGender(gender) === "girl" ? "/media/girl-body.png" : "/media/boy-body.png";
 }
 
+const UI_LANG_KEY = "healthing_lang";
+const UI_I18N = {
+  zh: {
+    langLabel: "語言",
+    homeSub: "用 E-mail 和密碼登入後，畫面只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。",
+    dietLink: "網路食療搜尋連結",
+    acupointLink: "穴道按摩搜尋連結",
+    recipeHeading: "今日食譜（教學示範）",
+    recipeNote: "先選國家，再從通過禁忌／過敏篩選的食譜裡挑選。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。教學示範，非診斷。",
+    country: "國家",
+    recipe: "食譜",
+    pickCountry: "請選擇國家",
+    pickRecipe: "請選擇食譜",
+    emptyRecipes: "沒有符合今日證型、禁忌與過敏條件的食譜。",
+    fieldRecipe: "食譜",
+    fieldBenefit: "益處",
+    fieldBan: "禁忌",
+    fieldNutrient: "元素",
+    fieldAllergens: "過敏原",
+  },
+  en: {
+    langLabel: "Language",
+    homeSub: "After email login the page shows only an anonymous ID. Record today’s symptoms, photograph face/lips/tongue, and view organ pattern maps.",
+    dietLink: "Diet search link",
+    acupointLink: "Acupoint massage search",
+    recipeHeading: "Today’s recipes (teaching demo)",
+    recipeNote: "Pick a country first. Recipes whose contraindications (column H) mention today’s patterns or your conditions are excluded, as are allergen matches (column J). Benefits (G) are preferred when they support today’s patterns. Teaching demo, not a diagnosis.",
+    country: "Country",
+    recipe: "Recipe",
+    pickCountry: "Select a country",
+    pickRecipe: "Select a recipe",
+    emptyRecipes: "No recipes pass today’s pattern, contraindication, and allergy filters.",
+    fieldRecipe: "Recipe",
+    fieldBenefit: "Benefits",
+    fieldBan: "Contraindications",
+    fieldNutrient: "Nutrients",
+    fieldAllergens: "Allergens",
+  },
+  ja: {
+    langLabel: "言語",
+    homeSub: "メールでログイン後、画面には匿名 ID のみ表示されます。今日の体調・顔／唇／舌の写真から臓腑の虚実寒熱を示します。",
+    dietLink: "食事療法の検索リンク",
+    acupointLink: "経穴マッサージ検索",
+    recipeHeading: "本日のレシピ（教材デモ）",
+    recipeNote: "先に国を選びます。禁忌（H）に本日の証型や持病が含まれるもの、アレルゲン（J）に該当するものは除外します。益処（G）が証型に合うものを優先。教材であり診断ではありません。",
+    country: "国",
+    recipe: "レシピ",
+    pickCountry: "国を選択",
+    pickRecipe: "レシピを選択",
+    emptyRecipes: "本日の証型・禁忌・アレルギー条件に合うレシピがありません。",
+    fieldRecipe: "レシピ",
+    fieldBenefit: "益処",
+    fieldBan: "禁忌",
+    fieldNutrient: "栄養素",
+    fieldAllergens: "アレルゲン",
+  },
+  ko: {
+    langLabel: "언어",
+    homeSub: "이메일 로그인 후 화면에는 익명 ID만 표시됩니다. 오늘 증상과 얼굴/입술/혀 사진으로 장부의 허실한열을 보여 줍니다.",
+    dietLink: "식이요법 검색 링크",
+    acupointLink: "혈자리 마사지 검색",
+    recipeHeading: "오늘의 레시피（교육 시연）",
+    recipeNote: "먼저 국가를 고릅니다. 금기(H)에 오늘 증형이나 질환이 있거나 알레르기(J)가 겹치면 제외합니다. 유익(G)이 증형에 맞는 항목을 우선합니다. 교육용이며 진단이 아닙니다.",
+    country: "국가",
+    recipe: "레시피",
+    pickCountry: "국가 선택",
+    pickRecipe: "레시피 선택",
+    emptyRecipes: "오늘의 증형·금기·알레르기 조건에 맞는 레시피가 없습니다.",
+    fieldRecipe: "레시피",
+    fieldBenefit: "유익",
+    fieldBan: "금기",
+    fieldNutrient: "영양소",
+    fieldAllergens: "알레르기 유발 물질",
+  },
+};
+
+function readCookie(name) {
+  const parts = ("; " + document.cookie).split("; " + name + "=");
+  if (parts.length < 2) return "";
+  return decodeURIComponent(parts.pop().split(";").shift() || "");
+}
+
+function writeCookie(name, value) {
+  document.cookie = name + "=" + encodeURIComponent(value) + ";path=/;max-age=31536000;samesite=lax";
+}
+
+function normalizeUiLang(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "en" || raw === "english") return "en";
+  if (raw === "ja" || raw === "jp" || raw.indexOf("日本") >= 0) return "ja";
+  if (raw === "ko" || raw === "kr" || raw.indexOf("한국") >= 0 || raw.indexOf("韓") >= 0) return "ko";
+  return "zh";
+}
+
+function getUiLang() {
+  return normalizeUiLang(localStorage.getItem(UI_LANG_KEY) || readCookie(UI_LANG_KEY) || "zh");
+}
+
+function setUiLang(lang) {
+  const value = normalizeUiLang(lang);
+  try { localStorage.setItem(UI_LANG_KEY, value); } catch (_err) { /* ignore */ }
+  writeCookie(UI_LANG_KEY, value);
+  const htmlLang = { zh: "zh-Hant", en: "en", ja: "ja", ko: "ko" }[value] || "zh-Hant";
+  document.documentElement.lang = htmlLang;
+  return value;
+}
+
+function uiText(key) {
+  const pack = UI_I18N[getUiLang()] || UI_I18N.zh;
+  return pack[key] || UI_I18N.zh[key] || key;
+}
+
+function applyUiLangChrome() {
+  const lang = setUiLang(getUiLang());
+  const select = document.getElementById("ui-lang");
+  if (select && select.value !== lang) select.value = lang;
+  const langLabel = document.getElementById("lang-label");
+  if (langLabel) langLabel.textContent = uiText("langLabel");
+  const sub = document.getElementById("home-sub");
+  if (sub) sub.textContent = uiText("homeSub");
+  const heading = document.getElementById("recipe-heading");
+  if (heading) heading.textContent = uiText("recipeHeading");
+  const note = document.getElementById("recipe-note");
+  if (note) note.textContent = uiText("recipeNote");
+  const countryLabel = document.getElementById("recipe-country-label");
+  if (countryLabel) countryLabel.textContent = uiText("country");
+  const recipeLabel = document.getElementById("recipe-name-label");
+  if (recipeLabel) recipeLabel.textContent = uiText("recipe");
+}
+
+function compactPatternLabel(label) {
+  const text = String(label || "");
+  if (!text || text === "健康" || text === "未定" || text === "待觀察" || text === "色差基準") return "";
+  if (text.indexOf("濕") >= 0) return "濕";
+  if (text.indexOf("虛") >= 0 && text.indexOf("熱") >= 0) return "虛熱";
+  if (text.indexOf("實") >= 0 && text.indexOf("熱") >= 0) return "實熱";
+  if (text.indexOf("虛") >= 0 && text.indexOf("寒") >= 0) return "虛寒";
+  if (text.indexOf("實") >= 0 && text.indexOf("寒") >= 0) return "實寒";
+  return "";
+}
+
 function bindBmiInputs(heightInput, weightInput, outputEl) {
   if (!heightInput || !weightInput || !outputEl) return () => {};
   const update = () => {

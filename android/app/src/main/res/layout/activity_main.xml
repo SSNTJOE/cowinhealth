@@ -8,7 +8,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
         <TextView android:text="Health-ing App" android:textSize="22sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/server" android:hint="伺服器，模擬器可用 http://10.0.2.2:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="語言 / Language" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <Spinner
+            android:id="@+id/langSelect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/server" android:hint="伺服器。模擬器 http://10.0.2.2:8000；手機請填 http://電腦區網IP:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/email" android:hint="E-mail" android:inputType="textEmailAddress" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/password" android:hint="密碼" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
@@ -76,5 +81,38 @@
                 android:contentDescription="五臟六腑圖"/>
         </FrameLayout>
         <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:autoLink="web" android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/dietLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/acupointLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/recipeHeading"
+            android:text="今日食譜（教學示範）"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"/>
+        <Spinner
+            android:id="@+id/recipeCountry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <Spinner
+            android:id="@+id/recipePick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/recipeDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"/>
     </LinearLayout>
 </ScrollView>

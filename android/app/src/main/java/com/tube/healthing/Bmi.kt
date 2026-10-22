@@ -60,7 +60,7 @@ object Bmi {
     fun formatDisplay(heightCm: String?, weightKg: String?): String {
         parsePositiveNumber(heightCm) ?: return ""
         val ref = formatHealthyReference(heightCm)
-        val bmi = compute(heightCm, weightKg) ?: return ""
+        val bmi = compute(heightCm, weightKg) ?: return ref
         val line = "BMI " + oneDecimal(bmi) + "（" + categoryTw(bmi) + "）"
         return if (ref.isNotEmpty()) line + "　" + ref else line
     }

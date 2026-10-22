@@ -23,8 +23,15 @@ object CameraBind {
             hardware.contains("goldfish")
     }
 
-    fun resolution(): ResolutionSelector {
-        val size = if (isEmulator()) Size(640, 480) else Size(1280, 720)
+    fun trySizes(): List<Size> {
+        return if (isEmulator()) {
+            listOf(Size(640, 480))
+        } else {
+            listOf(Size(1280, 720), Size(640, 480))
+        }
+    }
+
+    fun resolution(size: Size = trySizes().first()): ResolutionSelector {
         return ResolutionSelector.Builder()
             .setResolutionStrategy(
                 ResolutionStrategy(
@@ -51,5 +58,21 @@ object CameraBind {
             }
         }
         return null
+    }
+
+    /** Pulse / PPG: rear camera only. Never silently switch to the selfie lens. */
+    fun bindRearOnly(
+        owner: LifecycleOwner,
+        provider: ProcessCameraProvider,
+        vararg useCases: UseCase
+    ): Camera? {
+        val rear = CameraSelector.DEFAULT_BACK_CAMERA
+        if (!provider.hasCamera(rear)) return null
+        return try {
+            provider.unbindAll()
+            provider.bindToLifecycle(owner, rear, *useCases)
+        } catch (_: Exception) {
+            null
+        }
     }
 }

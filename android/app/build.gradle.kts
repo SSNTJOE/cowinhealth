@@ -4,11 +4,11 @@ plugins {
 
 android {
     namespace = "com.tube.healthing"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.tube.healthing"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1"
     }
