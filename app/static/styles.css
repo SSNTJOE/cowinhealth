@@ -16,6 +16,22 @@ body {
   color: var(--ink);
 }
 .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.title-row h1 { margin: 0; }
+.lang-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+.lang-select select { width: auto; min-width: 140px; }
 h1 { margin: 0 0 8px; font-size: 28px; }
 .sub { color: var(--muted); margin-bottom: 20px; }
 .card {
@@ -27,6 +43,32 @@ h1 { margin: 0 0 8px; font-size: 28px; }
   box-shadow: 0 8px 24px rgba(80, 50, 20, 0.06);
 }
 label { display: block; font-size: 14px; margin: 10px 0 6px; }
+.check-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 4px 0 12px;
+}
+.check-grid label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.check-grid input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+}
+.check-grid.allergies {
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
 input, select, textarea, button { font: inherit; }
 input, select, textarea {
   width: 100%;
@@ -62,6 +104,141 @@ video, canvas, img.preview {
   border-radius: 12px;
   object-fit: cover;
 }
+.camera-stage {
+  --align-left: 27.5%;
+  --align-top: 10%;
+  --align-width: 45%;
+  --align-height: 80%;
+  --align-radius: 18px;
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 560px);
+  aspect-ratio: 4 / 3;
+  max-height: 420px;
+  background: #111;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 8px auto 4px;
+}
+.camera-stage.is-tongue {
+  /* Smaller U-shaped window; flat top aligns with upper teeth. */
+  --align-left: 36%;
+  --align-top: 22%;
+  --align-width: 28%;
+  --align-height: 52%;
+  --align-radius: 8px 8px 50% 50% / 8px 8px 40% 40%;
+  --align-zoom: 3.7;
+}
+.camera-clip {
+  position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
+  overflow: hidden;
+  z-index: 0;
+  border-radius: var(--align-radius);
+  background: #111;
+}
+.camera-stage video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  right: auto;
+  bottom: auto;
+  z-index: 0;
+  max-height: none;
+  object-fit: cover;
+  object-position: 50% 50%;
+  transform: scaleX(-1);
+  border-radius: 0;
+  display: block;
+  opacity: 1;
+  visibility: visible;
+  background: #111;
+}
+.camera-stage.is-tongue video {
+  /* Digital zoom so the tongue fills the smaller window without leaning in. */
+  width: calc(100% * var(--align-zoom));
+  height: calc(100% * var(--align-zoom));
+  left: calc((100% - 100% * var(--align-zoom)) / 2);
+  top: calc((100% - 100% * var(--align-zoom)) / 2 + 12%);
+  object-position: 50% 62%;
+}
+.align-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  -webkit-mask-repeat: no-repeat;
+  mask-image: linear-gradient(#000 0 0), linear-gradient(#000 0 0);
+  mask-repeat: no-repeat;
+  /* Percent mask-position is not the same as left/top; 50% 50% centers the hole
+     (both face and tongue frames are centered). JS also pins hole in px. */
+  -webkit-mask-size: 100% 100%, var(--align-width) var(--align-height);
+  -webkit-mask-position: 0 0, 50% 50%;
+  -webkit-mask-composite: xor;
+  mask-size: 100% 100%, var(--align-width) var(--align-height);
+  mask-position: 0 0, 50% 50%;
+  mask-composite: exclude;
+}
+.align-frame {
+  position: absolute;
+  left: var(--align-left);
+  top: var(--align-top);
+  width: var(--align-width);
+  height: var(--align-height);
+  box-sizing: border-box;
+  border: 3px solid #ffcc00;
+  background: transparent;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: var(--align-radius);
+}
+/* Face positioning marks. viewBox 300×400 is the 4×3 grid (cell = 100×100):
+   eyes row 1, nose row 2 col 1, lips row 3 col 1. Hidden unless .is-face. */
+.face-guides {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.align-frame.is-face .face-guides {
+  display: block;
+  filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
+.tongue-guides {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.align-frame.is-tongue .tongue-guides {
+  display: block;
+  filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
+.align-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  margin: 0;
+  z-index: 3;
+  text-align: center;
+  color: #ffcc00;
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
 .status { min-height: 1.4em; color: var(--muted); font-size: 14px; }
 .ok { color: var(--ok); }
 .err { color: #a12626; }
@@ -82,10 +259,20 @@ video, canvas, img.preview {
 table { width: 100%; border-collapse: collapse; font-size: 12px; overflow-x: auto; display: block; }
 th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: center; white-space: nowrap; }
 .note { font-size: 13px; color: var(--muted); }
+.bmi-live {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  line-height: 1.5;
+}
 .advice {
   background: #fff4e5;
   border-radius: 12px;
   padding: 10px 12px;
+}
+.trend-wrap {
+  position: relative;
+  height: 360px;
+  margin: 8px 0 16px;
 }
 dialog {
   border: 1px solid var(--line);
@@ -103,13 +290,14 @@ dialog {
   height: auto;
   display: block;
   border-radius: 16px;
+  opacity: 0.48;
 }
 .sticker {
   position: absolute;
   width: 13%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  mix-blend-mode: screen;
+  opacity: 1;
 }
 .sticker-label {
   position: absolute;
@@ -132,11 +320,95 @@ dialog {
   width: 36px;
   height: 36px;
   object-fit: contain;
-  mix-blend-mode: screen;
-  background: #1a1a1a;
   border-radius: 8px;
 }
 .legend { display: flex; gap: 8px; flex-wrap: wrap; }
+.face-grid-stage {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  aspect-ratio: 3 / 4;
+  margin: 8px auto 12px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #111;
+}
+.face-grid-stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+}
+.face-grid-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  pointer-events: none;
+}
+.face-cell {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  padding: 4px 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  background: rgba(20, 12, 8, 0.18);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.face-cell strong { font-size: 13px; }
+.face-cell.split { padding: 0; }
+.face-cell .half {
+  flex: 1;
+  padding: 3px 5px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.55);
+}
+.face-cell .half:last-child { border-bottom: 0; }
+.face-cells-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 10px 0 16px;
+}
+@media (max-width: 700px) { .face-cells-list { grid-template-columns: 1fr; } }
+.face-cell-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.tongue-grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tongue-zone {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  padding: 4px 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  background: rgba(20, 12, 8, 0.22);
+  box-sizing: border-box;
+}
+.tongue-zone strong { font-size: 13px; }
+.tongue-flag { color: #b42318; font-weight: 700; }
+.face-cell-card .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #ccc;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
 .tag { border-radius: 999px; padding: 4px 10px; font-size: 13px; color: #fff; }
 .tag.xu { background: #8aa4c8; }
 .tag.shi { background: #8b3a3a; }
@@ -144,3 +416,19 @@ dialog {
 .tag.han { background: #4aa3c7; }
 .tag.unknown { background: #c4a574; }
 .organ-label { font-size: 11px; font-weight: 700; }
+#links a { margin-right: 12px; }
+#recipe-panel { margin-top: 12px; }
+#recipe-detail {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+}
+#recipe-detail li {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+#recipe-detail li strong { display: block; margin-bottom: 4px; }
