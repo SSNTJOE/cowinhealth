@@ -8,11 +8,49 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
         <TextView android:text="Health-ing App" android:textSize="22sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/server" android:hint="伺服器，模擬器可用 http://10.0.2.2:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="語言 / Language" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <Spinner
+            android:id="@+id/langSelect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/server" android:hint="伺服器。模擬器 http://10.0.2.2:8000；手機請填 http://電腦區網IP:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/email" android:hint="E-mail" android:inputType="textEmailAddress" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/password" android:hint="密碼" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <Button android:id="@+id/login" android:text="連線網站帳號並登入" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/login" android:text="登入網站帳號" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+            <Button android:id="@+id/register" android:text="註冊寫入 MySQL" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+        </LinearLayout>
         <TextView android:id="@+id/anon" android:text="尚未登入" android:textSize="18sp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <TextView android:text="基本資料（與網站共用 MySQL，教學參考非診斷）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="12dp"/>
+        <EditText android:id="@+id/nickname" android:hint="暱稱" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/birthYear" android:hint="出生年" android:inputType="number" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <RadioGroup android:id="@+id/genderGroup" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <RadioButton android:id="@+id/genderFemale" android:text="女" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <RadioButton android:id="@+id/genderMale" android:text="男" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <RadioButton android:id="@+id/genderOther" android:text="其他" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        </RadioGroup>
+        <EditText android:id="@+id/height" android:hint="身高 (cm)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/weight" android:hint="體重 (kg)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/bmiLive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text=""
+            android:textSize="14sp"/>
+        <TextView android:text="特殊疾病（可複選）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <LinearLayout
+            android:id="@+id/conditionsGroup"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <TextView android:text="過敏（可複選，食療搜尋會避開）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <LinearLayout
+            android:id="@+id/allergiesGroup"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <Button android:id="@+id/saveProfile" android:text="儲存基本資料到 MySQL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/symptoms" android:hint="今日身體狀況" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/discomfort" android:hint="不舒服的地方" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <androidx.camera.view.PreviewView
@@ -25,6 +63,11 @@
         </LinearLayout>
         <Button android:id="@+id/openPulse" android:text="寸關尺脈診（各 15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/save" android:text="送出今日紀錄" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄；7–10 健康）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <com.github.mikephil.charting.charts.CombinedChart
+            android:id="@+id/trendChart"
+            android:layout_width="match_parent"
+            android:layout_height="280dp"/>
         <TextView android:text="臟腑圖（有證型才放貼圖）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
         <FrameLayout
             android:id="@+id/bodyMap"
@@ -37,6 +80,39 @@
                 android:adjustViewBounds="true"
                 android:contentDescription="五臟六腑圖"/>
         </FrameLayout>
-        <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:autoLink="web" android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/dietLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/acupointLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/recipeHeading"
+            android:text="今日食譜（教學示範）"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"/>
+        <Spinner
+            android:id="@+id/recipeCountry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <Spinner
+            android:id="@+id/recipePick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/recipeDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"/>
     </LinearLayout>
 </ScrollView>
