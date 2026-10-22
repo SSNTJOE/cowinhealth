@@ -49,7 +49,10 @@ const updateProfileBmi = bindBmiInputs(
   document.getElementById("bmi-live"),
 );
 
-loadProfile().catch((err) => {
-  profileMsg.textContent = formatApiError(err);
-  profileMsg.className = "status err";
-});
+loadHealthFlagOptions()
+  .then(() => fillHealthFlags(document, {}))
+  .then(() => loadProfile())
+  .catch((err) => {
+    profileMsg.textContent = formatApiError(err);
+    profileMsg.className = "status err";
+  });

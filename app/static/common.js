@@ -55,8 +55,23 @@ function formBody(obj) {
   return body;
 }
 
-const CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
-const ALLERGY_OPTIONS = ["蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+let CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
+let ALLERGY_OPTIONS = ["蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+
+async function loadHealthFlagOptions() {
+  try {
+    const data = await api("/api/flags");
+    if (Array.isArray(data.conditions) && data.conditions.length) {
+      CONDITION_OPTIONS = data.conditions;
+    }
+    if (Array.isArray(data.allergies) && data.allergies.length) {
+      ALLERGY_OPTIONS = data.allergies;
+    }
+  } catch (_err) {
+    /* keep defaults if Recipe.xls is unavailable */
+  }
+  return { conditions: CONDITION_OPTIONS, allergies: ALLERGY_OPTIONS };
+}
 
 function renderCheckboxes(container, options, selected) {
   if (!container) return;
@@ -84,9 +99,13 @@ function fillHealthFlags(root, user) {
     CONDITION_OPTIONS,
     user && user.conditions,
   );
+  const allergyOpts =
+    user && Array.isArray(user.allergy_options) && user.allergy_options.length
+      ? user.allergy_options
+      : ALLERGY_OPTIONS;
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
-    ALLERGY_OPTIONS,
+    allergyOpts,
     user && user.allergies,
   );
 }

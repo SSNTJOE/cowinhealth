@@ -5,7 +5,7 @@ import urllib.parse
 import urllib.request
 from html import unescape
 
-from .health_flags import ACUPOINT_BIAS, ALLERGY_EXCLUDE, DIET_BIAS
+from .health_flags import ACUPOINT_BIAS, DIET_BIAS, allergy_exclude_tokens
 
 USER_AGENT = "Health-ing/1.0 (educational demo)"
 
@@ -42,12 +42,11 @@ def fetch_snippet(query: str, timeout: int = 8) -> str:
 def allergy_excludes(allergies: list[str]) -> list[str]:
     tokens: list[str] = []
     seen: set[str] = set()
-    for allergy in allergies:
-        for word in ALLERGY_EXCLUDE.get(allergy, (allergy,)):
-            if word not in seen:
-                seen.add(word)
-                tokens.append(f"-{word}")
-                tokens.append(f"不含{word}")
+    for word in allergy_exclude_tokens(allergies):
+        if word not in seen:
+            seen.add(word)
+            tokens.append(f"-{word}")
+            tokens.append(f"不含{word}")
     return tokens
 
 

@@ -14,7 +14,7 @@ CONDITION_OPTIONS = (
     "服用抗凝血劑",
 )
 
-ALLERGY_OPTIONS = (
+BASE_ALLERGY_OPTIONS = (
     "蝦蟹",
     "芒果",
     "花生",
@@ -24,7 +24,26 @@ ALLERGY_OPTIONS = (
 )
 
 CONDITION_SET = set(CONDITION_OPTIONS)
-ALLERGY_SET = set(ALLERGY_OPTIONS)
+
+
+def allergy_options() -> tuple[str, ...]:
+    from .recipes import allergen_labels
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for label in (*BASE_ALLERGY_OPTIONS, *allergen_labels()):
+        if label and label not in seen:
+            seen.add(label)
+            ordered.append(label)
+    return tuple(ordered)
+
+
+def allergy_option_set() -> set[str]:
+    return set(allergy_options())
+
+
+ALLERGY_OPTIONS = BASE_ALLERGY_OPTIONS
+ALLERGY_SET = set(BASE_ALLERGY_OPTIONS)
 
 DIET_BIAS = {
     "糖尿病": "低GI控糖",
@@ -47,13 +66,25 @@ ACUPOINT_BIAS = {
 }
 
 ALLERGY_EXCLUDE = {
-    "蝦蟹": ("蝦蟹", "蝦", "蟹"),
+    "蝦蟹": ("蝦蟹", "蝦", "蝦米", "龍蝦", "螃蟹"),
     "芒果": ("芒果",),
-    "花生": ("花生",),
-    "堅果": ("堅果", "核桃", "杏仁"),
-    "雞蛋": ("雞蛋", "蛋奶"),
-    "牛奶": ("牛奶", "乳製品"),
+    "花生": ("花生", "花生油"),
+    "堅果": ("堅果", "核桃", "杏仁", "杏仁果", "腰果", "夏威夷豆", "松子", "栗子", "白果"),
+    "雞蛋": ("雞蛋", "蛋白", "蛋黃", "皮蛋", "鵪鶉蛋", "蛋奶"),
+    "牛奶": ("牛奶", "羊奶", "奶油", "起司", "優格", "乳製品"),
 }
+
+
+def allergy_exclude_tokens(allergies: list[str] | None) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for allergy in allergies or []:
+        words = ALLERGY_EXCLUDE.get(allergy, (allergy,))
+        for word in words:
+            if word and word not in seen:
+                seen.add(word)
+                tokens.append(word)
+    return tokens
 
 
 def labels_from_text(text: str | None, allowed: tuple[str, ...]) -> list[str]:
@@ -114,10 +145,11 @@ def user_conditions(user: dict | None) -> list[str]:
 
 def user_allergies(user: dict | None) -> list[str]:
     user = user or {}
-    labels = decode_stored_labels(user.get("allergies_json"), ALLERGY_OPTIONS)
+    options = allergy_options()
+    labels = decode_stored_labels(user.get("allergies_json"), options)
     if labels:
         return labels
-    return labels_from_text(user.get("medical_history"), ALLERGY_OPTIONS)
+    return labels_from_text(user.get("medical_history"), options)
 
 
 def history_summary(conditions: list[str], allergies: list[str]) -> str | None:

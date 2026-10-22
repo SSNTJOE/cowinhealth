@@ -22,10 +22,10 @@ from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
 from .health_flags import (
-    ALLERGY_SET,
     CONDITION_SET,
-    ALLERGY_OPTIONS,
     CONDITION_OPTIONS,
+    allergy_option_set,
+    allergy_options,
     dumps_labels,
     history_summary,
     parse_label_list,
@@ -217,6 +217,7 @@ def serialize_user(user: dict, include_email: bool = False) -> dict:
         "medical_history": user.get("medical_history"),
         "conditions": user_conditions(user),
         "allergies": user_allergies(user),
+        "allergy_options": list(allergy_options()),
         "profile_complete": is_profile_complete(user),
     }
     if include_email:
@@ -405,6 +406,14 @@ def health():
         conn.close()
 
 
+@app.get("/api/flags")
+def health_flag_options():
+    return {
+        "conditions": list(CONDITION_OPTIONS),
+        "allergies": list(allergy_options()),
+    }
+
+
 @app.post("/api/register")
 def register(
     email: str = Form(...),
@@ -538,7 +547,7 @@ def update_profile(
         next_conditions = user_conditions(current)
     if allergies_json is not None:
         next_allergies = parse_label_list(
-            allergies_json, ALLERGY_SET, ALLERGY_OPTIONS, "allergies_json"
+            allergies_json, allergy_option_set(), allergy_options(), "allergies_json"
         )
     else:
         next_allergies = user_allergies(current)

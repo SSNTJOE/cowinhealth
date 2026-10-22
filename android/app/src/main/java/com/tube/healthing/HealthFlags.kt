@@ -16,6 +16,16 @@ object HealthFlags {
     )
     val ALLERGIES = listOf("蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶")
 
+    fun jsonLabels(arr: JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val label = arr.optString(i).trim()
+            if (label.isNotEmpty()) out.add(label)
+        }
+        return out
+    }
+
     fun inflate(parent: LinearLayout, options: List<String>) {
         parent.removeAllViews()
         options.forEach { label ->

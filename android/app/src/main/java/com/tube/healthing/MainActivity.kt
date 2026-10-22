@@ -99,8 +99,10 @@ class MainActivity : AppCompatActivity() {
                 binding.email.text.toString(),
                 binding.password.text.toString()
             )
+            val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
             runOnUiThread {
+                applyAllergyOptions(flags)
                 applyUser(me.optJSONObject("user"))
                 Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
             }
@@ -117,14 +119,23 @@ class MainActivity : AppCompatActivity() {
                 binding.email.text.toString(),
                 binding.password.text.toString()
             )
+            val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
             runOnUiThread {
+                applyAllergyOptions(flags)
                 applyUser(me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")))
                 Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
             }
             refreshTrend()
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun applyAllergyOptions(flags: JSONObject?) {
+        val options = HealthFlags.jsonLabels(flags?.optJSONArray("allergies"))
+        if (options.isNotEmpty()) {
+            HealthFlags.inflate(binding.allergiesGroup, options)
         }
     }
 
@@ -142,6 +153,10 @@ class MainActivity : AppCompatActivity() {
             else -> binding.genderGroup.clearCheck()
         }
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
+        val allergyOptions = HealthFlags.jsonLabels(user.optJSONArray("allergy_options"))
+        if (allergyOptions.isNotEmpty()) {
+            HealthFlags.inflate(binding.allergiesGroup, allergyOptions)
+        }
         HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
         female = jsonText(user, "gender") == "female"
         loadBodyImage()
