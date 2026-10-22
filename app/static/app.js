@@ -298,4 +298,10 @@ document.getElementById("daily-form").addEventListener("submit", (e) => {
 document.getElementById("body-boy").addEventListener("click", () => setBodyImage("boy"));
 document.getElementById("body-girl").addEventListener("click", () => setBodyImage("girl"));
 
+const updateHomeBmi = bindBmiInputs(
+  document.getElementById("height"),
+  document.getElementById("weight"),
+  document.getElementById("bmi-live"),
+);
+
 checkMysql().then(loadMe);

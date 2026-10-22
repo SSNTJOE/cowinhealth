@@ -17,3 +17,79 @@ function formBody(obj) {
   });
   return body;
 }
+
+const HEALTHY_BMI_MIN = 18.5;
+const HEALTHY_BMI_MAX = 24;
+const HEALTHY_BMI_MAX_DISPLAY = 23.9;
+
+function parsePositiveNumber(value) {
+  const n = typeof value === "number" ? value : parseFloat(String(value).trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function computeBmi(heightCm, weightKg) {
+  const height = parsePositiveNumber(heightCm);
+  const weight = parsePositiveNumber(weightKg);
+  if (height == null || weight == null) return null;
+  const meters = height / 100;
+  if (meters <= 0) return null;
+  return weight / (meters * meters);
+}
+
+function bmiCategoryTw(bmi) {
+  if (bmi == null || !Number.isFinite(bmi)) return "";
+  if (bmi < 18.5) return "過輕";
+  if (bmi < 24) return "健康體重";
+  if (bmi < 27) return "過重";
+  if (bmi < 30) return "輕度肥胖";
+  if (bmi < 35) return "中度肥胖";
+  return "重度肥胖";
+}
+
+function healthyWeightRangeKg(heightCm) {
+  const height = parsePositiveNumber(heightCm);
+  if (height == null) return null;
+  const h2 = (height * height) / 10000;
+  const minKg = Math.round(HEALTHY_BMI_MIN * h2 * 10) / 10;
+  const exclusiveKg = HEALTHY_BMI_MAX * h2;
+  const maxKg = Math.round((Math.floor(exclusiveKg * 10 + 1e-8) / 10 - 0.1) * 10) / 10;
+  if (!(minKg > 0) || !(maxKg >= minKg)) return null;
+  return { min: minKg, max: maxKg };
+}
+
+function formatHealthyBmiReference(heightCm) {
+  const range = healthyWeightRangeKg(heightCm);
+  if (!range) return "";
+  return (
+    "參考：BMI " +
+    HEALTHY_BMI_MIN.toFixed(1) +
+    "–" +
+    HEALTHY_BMI_MAX_DISPLAY.toFixed(1) +
+    "，建議體重 " +
+    range.min.toFixed(1) +
+    "–" +
+    range.max.toFixed(1) +
+    " kg"
+  );
+}
+
+function formatBmiDisplay(heightCm, weightKg) {
+  const height = parsePositiveNumber(heightCm);
+  if (height == null) return "";
+  const ref = formatHealthyBmiReference(height);
+  const bmi = computeBmi(height, weightKg);
+  if (bmi == null) return "";
+  const line = "BMI " + bmi.toFixed(1) + "（" + bmiCategoryTw(bmi) + "）";
+  return ref ? line + "　" + ref : line;
+}
+
+function bindBmiInputs(heightInput, weightInput, outputEl) {
+  if (!heightInput || !weightInput || !outputEl) return () => {};
+  const update = () => {
+    outputEl.textContent = formatBmiDisplay(heightInput.value, weightInput.value);
+  };
+  heightInput.addEventListener("input", update);
+  weightInput.addEventListener("input", update);
+  update();
+  return update;
+}
