@@ -28,10 +28,35 @@ PULSE_TO_ORGAN = {
     "right_cun_heavy": "lung",
     "right_cun_light": "large_intestine",
     "right_guan_heavy": "spleen",
-    "right_guan_light": "spleen",  # 胃併入脾系統
-    "right_chi_heavy": "heart",  # 心包併入心
+    "right_guan_light": "spleen",  # 胃併入脾系統（右手關輕按）
+    "right_chi_heavy": "kidney",  # 命門併入腎（右手尺重按）
     "right_chi_light": "bladder",  # 三焦氣化併入膀胱
 }
+# PulseActivity 12×15s keys. Teaching: 左寸心、關肝、尺腎；右寸肺、關脾、尺腎／命門.
+# Light (fu) maps paired fu organs; 胃→脾, 命門→腎, 心包 was Pulse label but 命門 uses kidney.
+PULSE_ORGAN_NOTE = (
+    "left_cun_heavy=心, left_cun_light=小腸; "
+    "left_guan_heavy=肝, left_guan_light=膽; "
+    "left_chi_heavy=腎, left_chi_light=膀胱; "
+    "right_cun_heavy=肺, right_cun_light=大腸; "
+    "right_guan_heavy=脾, right_guan_light=脾(胃); "
+    "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
+)
+COLOR_HEALTH_FORMULA = (
+    "score=clamp(round(10-9*ΔE/ΔE_ref),1,10)，ΔE_ref=20（苔濕極值可用24）。"
+    "ΔE=0（近教學正常值）→10；ΔE≈ref→1。7–10 健康。"
+    "臉正常 L*65 a*12 b*20 #E2AC8A；舌質 L*53 a*23 b*12 #C86868；舌苔 L*70 a*4 b*8 #D2C8C2。"
+    "證型取 Lab 類別質心最近者；濕熱／寒濕分開。舌質／苔另用 coating_ratio 與三條鑑別。"
+)
+HEALTH_FORMULA = (
+    "網站臟腑健康度=round(mean(臉色Lab、舌質Lab、舌苔Lab))，證型只由臉與舌確認，不計入脈。"
+    "Android 須先有寸關尺脈診，健康度再把脈頻列入平均；"
+    "實熱／實寒／虛熱／虛寒取臉、舌、脈三者裡有判定的來源，虛實與寒熱各自平均後才確認。"
+    "來源缺席不列入平均；臉／舌來源在場但該臟無對應色塊則記10（近基本色）。"
+    + COLOR_HEALTH_FORMULA
+    + "脈仍用 overlay_from_weights：證據<0.9→5，否則 clamp(1,10, round(5-min(最強,4)))。"
+    "脈：15秒>23→熱/實，<14→寒/虛，14–23→5。"
+)
 
 SYMPTOM_RULES = [
     (("心悸", "失眠", "胸悶", "心煩"), "heart", "熱證", 1.4),
@@ -80,6 +105,36 @@ def apply_text(evidence: dict[str, dict[str, float]], text: str) -> list[str]:
 
 def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[str]) -> None:
     mapping = [
+        ("胃火", "spleen", "熱證", 2.0),
+        ("胃火", "spleen", "實證", 1.6),
+        ("額頭實熱", "heart", "熱證", 2.0),
+        ("額頭（第2格", "heart", "實證", 1.4),
+        ("肝腎陰虛", "liver", "虛證", 1.8),
+        ("肝腎陰虛", "kidney", "虛證", 1.8),
+        ("肝腎陰虛", "liver", "熱證", 1.4),
+        ("寒凝", "kidney", "寒證", 1.8),
+        ("寒凝", "heart", "實證", 1.4),
+        ("脾腎陽虛", "spleen", "虛證", 1.8),
+        ("脾腎陽虛", "kidney", "虛證", 1.8),
+        ("脾腎陽虛", "kidney", "寒證", 1.4),
+        ("脾胃濕證", "spleen", "實證", 1.8),
+        ("鼻翼", "spleen", "實證", 1.2),
+        ("心火盛", "heart", "熱證", 2.2),
+        ("心火盛", "heart", "實證", 1.6),
+        ("心肺氣虛", "heart", "虛證", 2.0),
+        ("心肺氣虛", "lung", "虛證", 1.8),
+        ("淡白無血色", "heart", "寒證", 1.6),
+        ("心肺區偏紅", "heart", "熱證", 1.8),
+        ("點刺", "heart", "熱證", 0.8),
+        ("脾胃虛寒", "spleen", "寒證", 2.0),
+        ("脾胃虛寒", "spleen", "虛證", 1.8),
+        ("白厚苔", "spleen", "寒證", 1.4),
+        ("胃腸實熱", "spleen", "熱證", 2.0),
+        ("胃腸實熱", "large_intestine", "熱證", 1.6),
+        ("胃腸實熱", "gallbladder", "熱證", 1.2),
+        ("焦黃苔", "spleen", "熱證", 1.6),
+        ("焦黃苔", "large_intestine", "實證", 1.4),
+        ("血瘀傾向", "liver", "實證", 1.8),
         ("心火", "heart", "熱證", 2.0),
         ("唇色偏紅", "heart", "熱證", 1.6),
         ("脾血虛", "spleen", "虛證", 2.2),
@@ -95,8 +150,40 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("肺氣虛", "lung", "虛證", 1.6),
         ("氣色偏白", "lung", "虛證", 1.4),
         ("眼部偏紅", "liver", "熱證", 1.3),
+        ("偏紅／腫脹傾向", "liver", "熱證", 1.6),
+        ("臉色偏綠", "kidney", "寒證", 1.7),
+        ("臉色偏紅", "heart", "熱證", 1.5),
+        ("臉色偏黃", "spleen", "實證", 1.5),
+        ("臉色偏白", "lung", "虛證", 1.5),
+        ("氣血虛", "spleen", "虛證", 1.8),
+        ("實熱證", "heart", "熱證", 1.6),
+        ("胃不好", "spleen", "虛證", 1.6),
+        ("濕熱", "spleen", "熱證", 1.5),
+        ("血虛", "spleen", "虛證", 1.6),
+        ("肺和皮實熱", "lung", "熱證", 1.7),
+        ("肝膽）偏黃", "gallbladder", "熱證", 1.4),
+        ("肝膽）偏紅", "liver", "熱證", 1.3),
+        ("心熱象", "heart", "熱證", 1.4),
+        ("咽喉／肺熱", "lung", "熱證", 1.3),
+        ("咽喉／肺虛", "lung", "虛證", 1.3),
+        ("小腸／大腸熱", "large_intestine", "熱證", 1.2),
+        ("生殖器／腎不足", "kidney", "虛證", 1.4),
         ("舌尖紅", "heart", "熱證", 2.0),
         ("舌邊青紫", "liver", "實證", 2.2),
+        ("腎／舌根）舌質偏紅", "kidney", "熱證", 1.6),
+        ("腎／舌根）舌質偏白", "kidney", "寒證", 1.6),
+        ("脾胃）舌質偏紅", "spleen", "熱證", 1.5),
+        ("脾胃）舌質偏白", "spleen", "寒證", 1.5),
+        ("心肺／舌尖）舌質偏紅", "heart", "熱證", 1.8),
+        ("心肺／舌尖）舌質偏白", "lung", "寒證", 1.4),
+        ("肝膽）舌質偏紅", "liver", "熱證", 1.5),
+        ("肝膽）舌質偏白", "liver", "寒證", 1.4),
+        ("白苔很少", "spleen", "虛證", 1.8),
+        ("胃虛", "spleen", "虛證", 1.6),
+        ("黑灰苔", "kidney", "寒證", 1.8),
+        ("實寒證", "kidney", "寒證", 1.4),
+        ("虛寒證", "kidney", "寒證", 1.4),
+        ("黃苔", "spleen", "熱證", 1.5),
         ("子宮", "uterus", "實證", 1.0),
     ]
     joined = " ".join(findings)
@@ -140,7 +227,7 @@ def overlay_from_weights(weights: dict[str, float]) -> tuple[str, int, str | Non
     xu, shi, re, han = weights["虛證"], weights["實證"], weights["熱證"], weights["寒證"]
     strongest = max(xu, shi, re, han)
     if strongest < 0.9:
-        return "未定", 5, None
+        return "待觀察", 5, None
     if xu >= shi:
         xu_shi = "虛證"
         xs_w = xu
@@ -177,11 +264,216 @@ def finalize(
     return scores, patterns, overlays
 
 
+_PATTERN_AXES = {
+    "實證熱證": ("實", "熱"),
+    "實熱": ("實", "熱"),
+    "實熱色": ("實", "熱"),
+    "虛證熱證": ("虛", "熱"),
+    "虛熱": ("虛", "熱"),
+    "虛熱色": ("虛", "熱"),
+    "實證寒證": ("實", "寒"),
+    "實寒": ("實", "寒"),
+    "實寒色": ("實", "寒"),
+    "虛證寒證": ("虛", "寒"),
+    "虛寒": ("虛", "寒"),
+    "虛寒色": ("虛", "寒"),
+}
+_AXES_TO_PATTERN = {
+    ("實", "熱"): "實證熱證",
+    ("虛", "熱"): "虛證熱證",
+    ("實", "寒"): "實證寒證",
+    ("虛", "寒"): "虛證寒證",
+}
+
+
+def average_pattern_labels(labels: list[str | None]) -> str:
+    """Average 實/虛 and 寒/熱 across labels that name one of the four patterns."""
+    votes = [pair for pair in (_PATTERN_AXES.get(str(label or "")) for label in labels) if pair]
+    if not votes:
+        return "待觀察"
+    xu = sum(1 for xu_shi, _re_han in votes if xu_shi == "虛")
+    shi = len(votes) - xu
+    re = sum(1 for _xu_shi, re_han in votes if re_han == "熱")
+    han = len(votes) - re
+    xu_shi = "虛" if xu >= shi else "實"
+    re_han = "熱" if re >= han else "寒"
+    return _AXES_TO_PATTERN[(xu_shi, re_han)]
+
+
+def pulse_patterns_by_organ(pulse: dict[str, Any] | None) -> dict[str, str]:
+    evidence = empty_evidence()
+    apply_pulse(evidence, pulse)
+    _scores, patterns, _overlays = finalize(evidence)
+    found: dict[str, str] = {}
+    for key, _name, _score_key, pattern_key in ORGAN_META:
+        label = patterns.get(pattern_key) or ""
+        if label in _PATTERN_AXES:
+            found[key] = label
+    return found
+
+
+def confirm_organ_patterns(
+    face_patterns: dict[str, str] | None,
+    body_patterns: dict[str, str] | None,
+    coat_patterns: dict[str, str] | None,
+    pulse: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Android: one vote each from face, tongue (body+coat), and pulse."""
+    pulse_patterns = pulse_patterns_by_organ(pulse)
+    confirmed: dict[str, str] = {}
+    for key, _name, _score_key, pattern_key in ORGAN_META:
+        tongue = average_pattern_labels([
+            (body_patterns or {}).get(key),
+            (coat_patterns or {}).get(key),
+        ])
+        tongue_label = None if tongue == "待觀察" else tongue
+        confirmed[pattern_key] = average_pattern_labels([
+            (face_patterns or {}).get(key),
+            tongue_label,
+            pulse_patterns.get(key),
+        ])
+    return confirmed
+
+
+def pulse_is_present(pulse: dict[str, Any] | None) -> bool:
+    if not pulse:
+        return False
+    for slot in PULSE_TO_ORGAN:
+        raw = pulse.get(slot)
+        if raw is None:
+            continue
+        try:
+            float(raw)
+            return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def evidence_from_marks(marks: list[dict[str, Any]] | None) -> dict[str, dict[str, float]]:
+    evidence = empty_evidence()
+    for mark in marks or []:
+        add(evidence, mark.get("organ", ""), mark.get("pattern", ""), float(mark.get("weight") or 0))
+    return evidence
+
+
+def organ_scores_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[str, int]:
+    """Worst (lowest) relative 1–10 score among blocks mapped to each organ; default 10."""
+    scores = {score_key: 10 for _key, _name, score_key, _pk in ORGAN_META}
+    for block in blocks or []:
+        try:
+            health = int(block.get("health_score"))
+        except (TypeError, ValueError):
+            continue
+        health = max(1, min(10, health))
+        for organ in block.get("organs") or []:
+            for key, _name, score_key, _pk in ORGAN_META:
+                if key == organ:
+                    scores[score_key] = min(scores[score_key], health)
+    return scores
+
+
+CLASS_TO_API_PATTERN = {
+    "正常": "健康",
+    "接近基本色": "健康",
+    "接近正常": "健康",
+    "實熱": "實證熱證",
+    "實熱色": "實證熱證",
+    "虛熱": "虛證熱證",
+    "虛熱色": "虛證熱證",
+    "實寒": "實證寒證",
+    "實寒色": "實證寒證",
+    "虛寒": "虛證寒證",
+    "虛寒色": "虛證寒證",
+    "濕熱": "濕熱證",
+    "濕熱證": "濕熱證",
+    "寒濕": "寒濕證",
+    "寒濕證": "寒濕證",
+    "濕症": "濕氣較重",
+    "濕氣": "濕氣較重",
+}
+
+
+def organ_patterns_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Pattern of the worst (lowest health) block per organ; 健康 if none."""
+    chosen: dict[str, tuple[int, str]] = {}
+    for block in blocks or []:
+        try:
+            health = int(block.get("health_score"))
+        except (TypeError, ValueError):
+            continue
+        raw = block.get("api_pattern") or block.get("class_label") or block.get("bias") or ""
+        label = CLASS_TO_API_PATTERN.get(str(raw), str(raw) or "健康")
+        for organ in block.get("organs") or []:
+            previous = chosen.get(organ)
+            if previous is None or health < previous[0]:
+                chosen[organ] = (health, label)
+    return {organ: label for organ, (_health, label) in chosen.items()}
+
+
+def compose_organ_health(
+    source_scores: dict[str, dict[str, int] | None],
+) -> tuple[dict[str, int], dict[str, Any]]:
+    """Mean of present sources per organ. Missing source omitted; present+empty color = 10."""
+    composites: dict[str, int] = {}
+    breakdown: dict[str, Any] = {}
+    for key, name, score_key, _pattern_key in ORGAN_META:
+        parts: dict[str, int | None] = {}
+        values: list[int] = []
+        for source, scores in source_scores.items():
+            if scores is None:
+                parts[source] = None
+                continue
+            missing_default = 5 if source == "pulse" else 10
+            value = int(scores.get(score_key, missing_default))
+            parts[source] = value
+            values.append(value)
+        if values:
+            composite = max(1, min(10, int(round(sum(values) / len(values)))))
+        else:
+            composite = 5
+        composites[score_key] = composite
+        breakdown[key] = {
+            "organ": name,
+            "composite": composite,
+            "n_sources": len(values),
+            "sources": parts,
+        }
+    return composites, breakdown
+
+
+def serialize_organ_health(
+    scores: dict[str, int],
+    breakdown: dict[str, Any],
+    source_keys: list[str],
+) -> dict[str, Any]:
+    return {
+        "formula": HEALTH_FORMULA,
+        "color_formula": COLOR_HEALTH_FORMULA,
+        "pulse_organ_map": dict(PULSE_TO_ORGAN),
+        "pulse_organ_note": PULSE_ORGAN_NOTE,
+        "source_keys": source_keys,
+        "scores": scores,
+        "organs": breakdown,
+        "disclaimer": "教學示範，非中醫診斷",
+    }
+
+
 def overlay_from_pattern_label(label: str | None) -> str | None:
     mapping = {
         "實證熱證": "strong-hot.png",
+        "實熱": "strong-hot.png",
         "實證寒證": "strong-cold.png",
+        "實寒": "strong-cold.png",
         "虛證熱證": "weak-hot.png",
+        "虛熱": "weak-hot.png",
         "虛證寒證": "weak-cold.png",
+        "虛寒": "weak-cold.png",
+        "濕氣較重": "mositure.png",
+        "濕熱證": "mositure.png",
+        "寒濕證": "mositure.png",
+        "濕熱": "mositure.png",
+        "寒濕": "mositure.png",
+        "濕症": "mositure.png",
     }
     return mapping.get(label or "")
