@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=cam5" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam8" />
 </head>
 <body>
   <div class="wrap">
@@ -53,8 +53,8 @@
         <p class="note">教學示範用，用來篩選食療與穴道搜尋方向，不是診斷或用藥建議。</p>
         <div id="conditions-group" class="check-grid"></div>
         <h3>過敏（可複選）</h3>
-        <p class="note">搜尋食譜時會避開這些食材。</p>
-        <div id="allergies-group" class="check-grid"></div>
+        <p class="note">選項來自 Recipe.xls 過敏原欄，另保留常見分類。勾選後不會推薦含這些食材的食譜。</p>
+        <div id="allergies-group" class="check-grid allergies"></div>
         <div class="actions">
           <button type="submit">儲存身體資料</button>
         </div>
@@ -71,9 +71,11 @@
       </div>
 
       <h3>相機擷取</h3>
-      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：只取舌體）。伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
+      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：上緣對齊上排牙齒、舌體填滿黃框）。舌頭黃框會放大鏡頭畫面，不必貼近鏡頭。伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
       <div class="camera-stage is-face" id="camera-stage">
-        <video id="camera" autoplay muted playsinline webkit-playsinline></video>
+        <div class="camera-clip" id="camera-clip">
+          <video id="camera" autoplay muted playsinline webkit-playsinline></video>
+        </div>
         <div id="align-dim" class="align-dim is-face" aria-hidden="true"></div>
         <div id="align-frame" class="align-frame is-face">
           <svg class="face-guides" viewBox="0 0 300 400" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" focusable="false">
@@ -92,6 +94,9 @@
               <path d="M12 50Q24 36 34 36Q44 36 50 44Q56 36 66 36Q76 36 88 50Q70 56 50 54Q30 56 12 50Z"/>
               <path d="M16 54Q50 52 84 54Q72 74 50 78Q28 74 16 54Z"/>
             </g>
+          </svg>
+          <svg class="tongue-guides" viewBox="0 0 100 160" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <line x1="6" y1="12" x2="94" y2="12" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round"/>
           </svg>
         </div>
         <p id="align-hint" class="align-hint">對準臉：髮際以下～下巴，兩耳以內</p>
@@ -182,7 +187,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=cam4"></script>
-  <script src="/static/app.js?v=cam4"></script>
+  <script src="/static/common.js?v=cam7"></script>
+  <script src="/static/app.js?v=cam8"></script>
 </body>
 </html>

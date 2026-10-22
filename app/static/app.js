@@ -12,12 +12,12 @@ let lastFacePreviewUrl = null;
 let lastTonguePreviewUrl = null;
 /** Matches --align-* on #camera-stage (fractions of the stage). Video, yellow frame, dim hole, and capture share this box. */
 const ALIGN_FRAMES = {
-  face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80 },
-  tongue: { left: 0.32, top: 0.18, width: 0.36, height: 0.64 },
+  face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80, zoom: 1, yBias: 0 },
+  tongue: { left: 0.36, top: 0.22, width: 0.28, height: 0.52, zoom: 3.7, yBias: 0.08 },
 };
 const ALIGN_HINTS = {
   face: "對準臉：髮際以下～下巴，兩耳以內",
-  tongue: "對準舌：只把舌體放進黃框（不要嘴唇／房間）",
+  tongue: "對準舌：上緣對齊上排牙齒，舌體填滿黃框",
 };
 let alignMode = "face";
 let lastFaceGrid = null;
@@ -260,6 +260,15 @@ function coverDest(vw, vh, sw, sh) {
   return { dx: 0, dy: (sh - dh) / 2, dw, dh };
 }
 
+function sourceCrop(vw, vh, zoom, yBias) {
+  const z = Math.max(1, zoom || 1);
+  const srcW = vw / z;
+  const srcH = vh / z;
+  const sx = (vw - srcW) / 2;
+  const sy = Math.max(0, Math.min(vh - srcH, (vh - srcH) / 2 + (yBias || 0) * vh));
+  return { sx, sy, srcW, srcH };
+}
+
 function captureFrame(kind) {
   const mode = kind === "tongue" ? "tongue" : "face";
   setAlignMode(mode);
@@ -271,14 +280,15 @@ function captureFrame(kind) {
   const destH = Math.max(1, Math.round(frame.height * sh));
   const vw = video.videoWidth || 640;
   const vh = video.videoHeight || 480;
-  const { dx, dy, dw, dh } = coverDest(vw, vh, destW, destH);
+  const { sx, sy, srcW, srcH } = sourceCrop(vw, vh, frame.zoom, frame.yBias);
+  const { dx, dy, dw, dh } = coverDest(srcW, srcH, destW, destH);
   canvas.width = destW;
   canvas.height = destH;
   const ctx = canvas.getContext("2d");
   ctx.save();
   ctx.translate(destW, 0);
   ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+  ctx.drawImage(video, sx, sy, srcW, srcH, dx, dy, dw, dh);
   ctx.restore();
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
@@ -769,4 +779,7 @@ const updateHomeBmi = bindBmiInputs(
   document.getElementById("bmi-live"),
 );
 
-checkMysql().then(loadMe);
+checkMysql()
+  .then(() => loadHealthFlagOptions())
+  .then(() => fillHealthFlags(document, {}))
+  .then(loadMe);
