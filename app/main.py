@@ -32,6 +32,7 @@ from .health_flags import (
     user_allergies,
     user_conditions,
 )
+from .recipes import TEACHING_DISCLAIMER, countries as recipe_countries_list, filter_recipes, split_csv
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, overlay_from_pattern_label
 from .trend import build_trend, iso_time
 
@@ -412,6 +413,72 @@ def health_flag_options():
         "conditions": list(CONDITION_OPTIONS),
         "allergies": list(allergy_options()),
     }
+
+
+def latest_record_patterns(user_id: str) -> dict[str, str]:
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(PATTERN_KEYS)}
+                FROM health_records
+                WHERE user_id = %s
+                ORDER BY record_date DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone() or {}
+    finally:
+        conn.close()
+    return {key: (row.get(key) or "") for key in PATTERN_KEYS}
+
+
+@app.get("/api/recipes/countries")
+def api_recipe_countries():
+    try:
+        names = recipe_countries_list()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到 Recipe.xls") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"countries": names, "disclaimer": TEACHING_DISCLAIMER}
+
+
+@app.get("/api/recipes")
+def api_recipes(
+    request: Request,
+    country: str,
+    lang: str = "zh",
+    patterns: str | None = None,
+    allergies: str | None = None,
+    conditions: str | None = None,
+):
+    user_id = current_user_id(request)
+    profile = fetch_user(user_id) if user_id else None
+    allergy_list = split_csv(allergies) if allergies is not None else user_allergies(profile)
+    condition_list = split_csv(conditions) if conditions is not None else user_conditions(profile)
+    pattern_map = latest_record_patterns(user_id) if user_id else {}
+    extra_labels = split_csv(patterns)
+    try:
+        payload = filter_recipes(
+            country=country,
+            lang=lang,
+            patterns=pattern_map,
+            pattern_labels=extra_labels,
+            allergies=allergy_list,
+            conditions=condition_list,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到 Recipe.xls") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    payload["allergies"] = allergy_list
+    payload["conditions"] = condition_list
+    return payload
 
 
 @app.post("/api/register")
