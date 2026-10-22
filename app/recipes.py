@@ -3,11 +3,6 @@ from __future__ import annotations
 from functools import lru_cache
 
 from .config import ROOT
-<<<<<<< HEAD
-
-RECIPE_PATH = ROOT / "Recipe.xls"
-SPLIT_MARKS = ("、", ",", ";", "/", "，")
-=======
 from .health_flags import CONDITION_OPTIONS, allergy_exclude_tokens
 from .syndrome import ORGAN_META
 
@@ -65,7 +60,6 @@ SEASONING_SKIP = {
     "花椒",
     "月桂葉",
 }
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
 
 
 def split_tokens(text: str | None) -> list[str]:
@@ -97,37 +91,24 @@ def _open_sheet():
 @lru_cache(maxsize=4)
 def _rows_cached(mtime_ns: int) -> tuple[dict[str, str], ...]:
     sheet = _open_sheet()
-<<<<<<< HEAD
     headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
     last = max(sheet.ncols - 1, 0)
-=======
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
     rows: list[dict[str, str]] = []
     for row in range(1, sheet.nrows):
         rows.append(
             {
-<<<<<<< HEAD
-                "country": str(sheet.cell_value(row, 0)).strip() if sheet.ncols > 0 else "",
-                "name_zh": str(sheet.cell_value(row, 1)).strip() if sheet.ncols > 1 else "",
-                "name_en": str(sheet.cell_value(row, 2)).strip() if sheet.ncols > 2 else "",
-=======
                 "id": str(row),
                 "country": str(sheet.cell_value(row, 0)).strip() if sheet.ncols > 0 else "",
                 "name_zh": str(sheet.cell_value(row, 1)).strip() if sheet.ncols > 1 else "",
                 "name_en": str(sheet.cell_value(row, 2)).strip() if sheet.ncols > 2 else "",
                 "name_ja": str(sheet.cell_value(row, 3)).strip() if sheet.ncols > 3 else "",
                 "name_ko": str(sheet.cell_value(row, 4)).strip() if sheet.ncols > 4 else "",
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
                 "recipe": str(sheet.cell_value(row, 5)).strip() if sheet.ncols > 5 else "",
                 "benefit": str(sheet.cell_value(row, 6)).strip() if sheet.ncols > 6 else "",
                 "ban": str(sheet.cell_value(row, 7)).strip() if sheet.ncols > 7 else "",
                 "nutrient": str(sheet.cell_value(row, 8)).strip() if sheet.ncols > 8 else "",
-<<<<<<< HEAD
                 "allergens": str(sheet.cell_value(row, last)).strip(),
                 "_headers": "\t".join(headers),
-=======
-                "allergens": str(sheet.cell_value(row, 9)).strip() if sheet.ncols > 9 else "",
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
             }
         )
     return tuple(rows)
@@ -139,8 +120,6 @@ def recipe_rows() -> tuple[dict[str, str], ...]:
     return _rows_cached(mtime)
 
 
-<<<<<<< HEAD
-=======
 def countries() -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -152,7 +131,6 @@ def countries() -> list[str]:
     return ordered
 
 
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
 def allergen_labels() -> tuple[str, ...]:
     seen: set[str] = set()
     labels: list[str] = []
@@ -179,8 +157,6 @@ def recipe_contains_allergen(allergen_cell: str, tokens: list[str]) -> bool:
         if token in cell_tokens or token in blob:
             return True
     return False
-<<<<<<< HEAD
-=======
 
 
 def normalize_lang(lang: str | None) -> str:
@@ -367,4 +343,3 @@ def filter_recipes(
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
     }
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)

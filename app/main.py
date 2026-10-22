@@ -415,8 +415,6 @@ def health_flag_options():
     }
 
 
-<<<<<<< HEAD
-=======
 def latest_record_patterns(user_id: str) -> dict[str, str]:
     conn = connect()
     try:
@@ -483,7 +481,6 @@ def api_recipes(
     return payload
 
 
->>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
 @app.post("/api/register")
 def register(
     email: str = Form(...),
