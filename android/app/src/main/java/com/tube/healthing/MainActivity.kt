@@ -157,7 +157,11 @@ class MainActivity : AppCompatActivity() {
             val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
             runOnUiThread {
+<<<<<<< HEAD
+                applyAllergyOptions(flags)
+=======
                 applyFlagOptions(flags)
+>>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
                 applyUser(me.optJSONObject("user"))
                 Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
             }
@@ -179,7 +183,11 @@ class MainActivity : AppCompatActivity() {
             val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
             runOnUiThread {
+<<<<<<< HEAD
+                applyAllergyOptions(flags)
+=======
                 applyFlagOptions(flags)
+>>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
                 applyUser(me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")))
                 Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
             }
@@ -190,6 +198,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+<<<<<<< HEAD
+    private fun applyAllergyOptions(flags: JSONObject?) {
+        val options = HealthFlags.jsonLabels(flags?.optJSONArray("allergies"))
+        if (options.isNotEmpty()) {
+            HealthFlags.inflate(binding.allergiesGroup, options)
+=======
     private fun applyFlagOptions(flags: JSONObject?) {
         val keptConditions = JSONArray(HealthFlags.selectedJson(binding.conditionsGroup))
         val keptAllergies = JSONArray(HealthFlags.selectedJson(binding.allergiesGroup))
@@ -204,6 +218,7 @@ class MainActivity : AppCompatActivity() {
         if (options.isNotEmpty()) {
             HealthFlags.inflate(binding.allergiesGroup, options)
             HealthFlags.apply(binding.allergiesGroup, keptAllergies)
+>>>>>>> 0d36a53 (Add Recipe.xls allergy checkboxes and rear-camera pulse on Android 16.)
         }
     }
 
