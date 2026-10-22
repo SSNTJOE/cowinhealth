@@ -4,12 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam9" />
 </head>
 <body>
   <div class="wrap">
-    <h1>Health-ing</h1>
-    <p class="sub">用 E-mail 和密碼登入後，畫面只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。</p>
+    <div class="title-row">
+      <h1>Health-ing</h1>
+      <label class="lang-select">
+        <span id="lang-label">語言</span>
+        <select id="ui-lang" aria-label="Language">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+        </select>
+      </label>
+    </div>
+    <p class="sub" id="home-sub">用 E-mail 和密碼登入後，畫面只顯示匿名 ID。可寫今日身體狀況、拍照看面色／唇色／舌象，並顯示臟腑虛實寒熱圖。</p>
     <p id="mysql-status" class="status">正在檢查 MySQL…</p>
 
     <section id="auth-card" class="card">
@@ -48,8 +59,13 @@
             <input type="number" step="0.1" id="weight" />
           </div>
         </div>
-        <label>病史</label>
-        <textarea id="medical_history" rows="2"></textarea>
+        <p id="bmi-live" class="bmi-live note"></p>
+        <h3>特殊疾病（可複選）</h3>
+        <p class="note">教學示範用，用來篩選食療與穴道搜尋方向，不是診斷或用藥建議。</p>
+        <div id="conditions-group" class="check-grid"></div>
+        <h3>過敏（可複選）</h3>
+        <p class="note">選項來自 Recipe.xls 過敏原欄，另保留常見分類。勾選後不會推薦含這些食材的食譜。</p>
+        <div id="allergies-group" class="check-grid allergies"></div>
         <div class="actions">
           <button type="submit">儲存身體資料</button>
         </div>
@@ -66,8 +82,36 @@
       </div>
 
       <h3>相機擷取</h3>
-      <p class="note">請允許瀏覽器使用相機。按鈕會擷取當下那一幀，轉成圖片後用 fetch 送到 Python。</p>
-      <video id="camera" autoplay playsinline></video>
+      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：上緣對齊上排牙齒、舌體填滿黃框）。舌頭黃框會放大鏡頭畫面，不必貼近鏡頭。伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
+      <div class="camera-stage is-face" id="camera-stage">
+        <div class="camera-clip" id="camera-clip">
+          <video id="camera" autoplay muted playsinline webkit-playsinline></video>
+        </div>
+        <div id="align-dim" class="align-dim is-face" aria-hidden="true"></div>
+        <div id="align-frame" class="align-frame is-face">
+          <svg class="face-guides" viewBox="0 0 300 400" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <defs>
+              <g id="face-eye-guide" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 50Q34 36 58 38Q78 40 86 50Q78 60 58 62Q34 64 16 50Z"/>
+                <ellipse cx="64" cy="50" rx="8.5" ry="7.5"/>
+              </g>
+            </defs>
+            <use href="#face-eye-guide" transform="translate(0 100)"/>
+            <use href="#face-eye-guide" transform="translate(300 100) scale(-1 1)"/>
+            <g transform="translate(100 200)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M50 6C46 24 44 42 42 56C40 68 36 74 28 78C22 81 20 86 26 88C34 91 44 86 50 80C56 86 66 91 74 88C80 86 78 81 72 78C64 74 60 68 58 56C56 42 54 24 50 6Z"/>
+            </g>
+            <g transform="translate(100 300)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 50Q24 36 34 36Q44 36 50 44Q56 36 66 36Q76 36 88 50Q70 56 50 54Q30 56 12 50Z"/>
+              <path d="M16 54Q50 52 84 54Q72 74 50 78Q28 74 16 54Z"/>
+            </g>
+          </svg>
+          <svg class="tongue-guides" viewBox="0 0 100 160" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <line x1="6" y1="12" x2="94" y2="12" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <p id="align-hint" class="align-hint">對準臉：髮際以下～下巴，兩耳以內</p>
+      </div>
       <canvas id="snap" class="hidden"></canvas>
       <div class="actions">
         <button type="button" id="btn-face">拍臉 / 眼 / 唇</button>
@@ -75,6 +119,30 @@
         <button type="button" id="btn-save" class="ghost">儲存今日紀錄（含狀況文字）</button>
       </div>
       <p id="cam-msg" class="status"></p>
+      <div id="face-grid-wrap" class="hidden">
+        <h3>臉部分區（4×3，教學示範）</h3>
+        <p class="note">縱 4 列、橫 3 欄。基本色是第 1、2、3、5、7、8、9、10、11 格的平均，轉成 YCrCb 後只看 Cr（紅）與 Cb（藍），拿掉亮度，深淺膚色可以一起比。實熱：Cr 極高且 Cb 極低。實寒：Cb 上升、Cr 被壓住。虛熱：兩顴（第 7、9 格）Cr 升高，不是整臉通紅。虛寒：Cr 與 Cb 一起掉到接近中性，血色不足。第 8 格是鼻子。第 4、6 格是眼睛，第 5 格是兩眼之間；眼以白與黑為主，Cr 升高為肝熱，較黃為濕氣較重。第 12 格取較紅區塊當嘴唇。此為教學示範，不能取代醫師診斷。</p>
+        <div class="face-grid-stage" id="face-grid-stage">
+          <img id="face-preview" alt="臉部擷取" />
+          <div id="face-grid-overlay" class="face-grid-overlay"></div>
+        </div>
+        <p id="face-lab-flags" class="advice tongue-flag hidden"></p>
+        <p id="complexion-now" class="advice"></p>
+        <div id="face-cells-list" class="face-cells-list"></div>
+        <h4>臉色歷史</h4>
+        <div id="complexion-history"></div>
+      </div>
+      <div id="tongue-grid-wrap" class="hidden">
+        <h3>舌部分區（上中下左右＋舌苔，教學示範）</h3>
+        <p class="note">相片方向：舌尖朝下（近唇）、舌根朝上。五塊對應：上＝腎（舌根）：剝苔、a* 極高，且 L* 與有苔區有明顯斷層，為腎陰虛（虛熱）；舌根苔厚白（L* 高）、舌質淡嫩為命門火衰（腎陽虛）。中＝脾胃、下＝心肺（舌尖）、左／右＝肝膽：舌邊 a* 明顯高於舌中為肝火旺，再帶暗紫（b* 下降）為肝膽濕熱、氣鬱化火；舌邊 a* 偏低為肝血虛，舌體瘦小時一併註明。使用者說「六塊」但列了上中下左右五區；第六層採<strong>全舌舌苔疊加</strong>（不把中區再切成中上／中下）。舌苔看顏色和表面：黃厚膩（b* 高、L* 中等、能量高、無高光）為胃腸濕熱、積食化火；黃燥裂（b* 極高、L* 低、對比極高、無高光）為實熱亢盛、熱極傷津；白厚滑（b* 近 0、L* 高、能量高、大面積高光）為脾胃虛寒、寒濕內停；光剝無苔（a* 高、幾乎無苔、能量極高、全舌高光）為胃陰枯竭、全身大虛。此為教學示範，不能取代醫師診斷。</p>
+        <div class="face-grid-stage" id="tongue-grid-stage">
+          <img id="tongue-preview" alt="舌頭擷取" />
+          <div id="tongue-grid-overlay" class="tongue-grid-overlay"></div>
+        </div>
+        <p id="tongue-tip-flag" class="advice tongue-flag hidden"></p>
+        <p id="tongue-coat-now" class="advice"></p>
+        <div id="tongue-cells-list" class="face-cells-list"></div>
+      </div>
       <p>
         主要顏色：
         <span id="color-chip" class="color-chip"></span>
@@ -84,25 +152,39 @@
       <ul id="findings"></ul>
       <p id="advice" class="advice"></p>
       <p id="links"></p>
+      <div id="recipe-panel" class="hidden">
+        <h3 id="recipe-heading">今日食譜（教學示範）</h3>
+        <p class="note" id="recipe-note">先選國家，再從通過禁忌／過敏篩選的食譜裡挑選。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。教學示範，非診斷。</p>
+        <label id="recipe-country-label">國家</label>
+        <select id="recipe-country"></select>
+        <label id="recipe-name-label">食譜</label>
+        <select id="recipe-pick"></select>
+        <ul id="recipe-detail"></ul>
+      </div>
 
       <h3>臟腑圖（虛／實／熱／寒）</h3>
-      <p class="note">依性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
-      <div class="actions">
-        <button type="button" id="body-boy" class="ghost">男生圖</button>
-        <button type="button" id="body-girl" class="ghost">女生圖</button>
-      </div>
+      <p class="note">依基本資料的性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
       <div class="legend">
         <span class="legend-item"><img src="/media/strong-hot.png" alt="" />實證熱證</span>
         <span class="legend-item"><img src="/media/strong-cold.png" alt="" />實證寒證</span>
         <span class="legend-item"><img src="/media/weak-hot.png" alt="" />虛證熱證</span>
         <span class="legend-item"><img src="/media/weak-cold.png" alt="" />虛證寒證</span>
+        <span class="legend-item"><img src="/media/mositure.png" alt="" />濕氣較重</span>
       </div>
       <div class="body-map" id="body-map">
         <img id="body-img" alt="五臟六腑圖" src="/media/boy-body.png" />
         <div id="organ-pins"></div>
       </div>
       <div id="scores" class="scores"></div>
+      <p class="note">臉色／舌質／舌苔：ΔE* 對教學正常值（臉 L*65 a*12 b*20；舌質 L*53 a*23 b*12；舌苔 L*70 a*4 b*8），score=10−9×ΔE/20（苔濕可用 24）；<strong>7–10 健康</strong>。臟腑分為臉＋舌質＋舌苔（Android 另加脈）平均。證型：實熱／虛熱／實寒／虛寒／濕熱／寒濕。</p>
       <p class="note" id="disclaimer"></p>
+
+      <h3>臟腑分數趨勢</h3>
+      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（近基本色 10，最大色差 1；7–10 健康）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
+      <div class="trend-wrap">
+        <canvas id="trend-chart"></canvas>
+      </div>
+      <p id="trend-empty" class="note hidden">尚無足夠紀錄可畫趨勢。</p>
 
       <h3>歷史紀錄</h3>
       <div id="records"></div>
@@ -124,7 +206,8 @@
     </form>
   </dialog>
 
-  <script src="/static/common.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="/static/common.js?v=cam9"></script>
+  <script src="/static/app.js?v=cam9"></script>
 </body>
 </html>
