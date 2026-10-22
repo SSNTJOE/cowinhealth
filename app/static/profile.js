@@ -1,4 +1,5 @@
 const profileMsg = document.getElementById("profile-msg");
+fillHealthFlags(document, {});
 
 async function loadProfile() {
   const data = await api("/api/me?include_email=true");
@@ -12,6 +13,10 @@ async function loadProfile() {
   document.getElementById("nickname").value = user.nickname || "";
   document.getElementById("birth_year").value = user.birth_year || "";
   document.getElementById("gender").value = user.gender || "";
+  document.getElementById("height").value = user.height ?? "";
+  document.getElementById("weight").value = user.weight ?? "";
+  fillHealthFlags(document, user);
+  if (typeof updateProfileBmi === "function") updateProfileBmi();
 }
 
 document.getElementById("profile-form").addEventListener("submit", async (event) => {
@@ -24,18 +29,30 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
         nickname: document.getElementById("nickname").value,
         birth_year: document.getElementById("birth_year").value,
         gender: document.getElementById("gender").value,
+        height: document.getElementById("height").value,
+        weight: document.getElementById("weight").value,
+        ...selectedHealthFlags(document),
       }),
     });
     profileMsg.textContent = "已儲存";
     profileMsg.className = "status ok";
     window.location.href = "/";
   } catch (err) {
-    profileMsg.textContent = err.message;
+    profileMsg.textContent = formatApiError(err);
     profileMsg.className = "status err";
   }
 });
 
-loadProfile().catch((err) => {
-  profileMsg.textContent = err.message;
-  profileMsg.className = "status err";
-});
+const updateProfileBmi = bindBmiInputs(
+  document.getElementById("height"),
+  document.getElementById("weight"),
+  document.getElementById("bmi-live"),
+);
+
+loadHealthFlagOptions()
+  .then(() => fillHealthFlags(document, {}))
+  .then(() => loadProfile())
+  .catch((err) => {
+    profileMsg.textContent = formatApiError(err);
+    profileMsg.className = "status err";
+  });

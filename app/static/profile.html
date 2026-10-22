@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>基本資料 — Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam7" />
 </head>
 <body>
   <div class="wrap">
@@ -34,6 +34,23 @@
             </select>
           </div>
         </div>
+        <div class="row">
+          <div>
+            <label>身高 (cm)</label>
+            <input type="number" step="0.1" id="height" />
+          </div>
+          <div>
+            <label>體重 (kg)</label>
+            <input type="number" step="0.1" id="weight" />
+          </div>
+        </div>
+        <p id="bmi-live" class="bmi-live note"></p>
+        <h3>特殊疾病（可複選）</h3>
+        <p class="note">教學示範用，用來篩選食療與穴道搜尋方向，不是診斷或用藥建議。</p>
+        <div id="conditions-group" class="check-grid"></div>
+        <h3>過敏（可複選）</h3>
+        <p class="note">選項來自 Recipe.xls 過敏原欄，另保留常見分類。勾選後不會推薦含這些食材的食譜。</p>
+        <div id="allergies-group" class="check-grid allergies"></div>
         <div class="actions">
           <button type="submit">儲存並進入主畫面</button>
           <a href="/"><button type="button" class="ghost">返回</button></a>
@@ -42,7 +59,7 @@
       <p id="profile-msg" class="status"></p>
     </section>
   </div>
-  <script src="/static/common.js"></script>
-  <script src="/static/profile.js"></script>
+  <script src="/static/common.js?v=cam7"></script>
+  <script src="/static/profile.js?v=cam7"></script>
 </body>
 </html>

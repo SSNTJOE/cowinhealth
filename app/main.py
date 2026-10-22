@@ -21,7 +21,19 @@ from .advice import build_advice
 from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
+from .health_flags import (
+    CONDITION_SET,
+    CONDITION_OPTIONS,
+    allergy_option_set,
+    allergy_options,
+    dumps_labels,
+    history_summary,
+    parse_label_list,
+    user_allergies,
+    user_conditions,
+)
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, overlay_from_pattern_label
+from .trend import build_trend, iso_time
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MEDIA_ALIASES = {
@@ -35,6 +47,8 @@ MEDIA_ALIASES = {
     "strong-cold.pgn": "strong-cold.png",
     "weak-hot.pgn": "weak-hot.png",
     "weak-cold.pgn": "weak-cold.png",
+    "moisture.png": "mositure.png",
+    "mositure.png": "mositure.png",
 }
 signer = TimestampSigner(SECRET_KEY)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -73,6 +87,22 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 GENDER_VALUES = {"female", "male", "other"}
+GENDER_ALIASES = {
+    "female": "female",
+    "f": "female",
+    "girl": "female",
+    "woman": "female",
+    "女": "female",
+    "女生": "female",
+    "male": "male",
+    "m": "male",
+    "boy": "male",
+    "man": "male",
+    "男": "male",
+    "男生": "male",
+    "other": "other",
+    "其他": "other",
+}
 
 
 def allocate_user_id(cur) -> str:
@@ -107,7 +137,8 @@ def parse_birth_year(value: int | str) -> int:
 
 
 def parse_gender(gender: str) -> str:
-    value = (gender or "").strip()
+    raw = (gender or "").strip()
+    value = GENDER_ALIASES.get(raw) or GENDER_ALIASES.get(raw.lower())
     if value not in GENDER_VALUES:
         raise HTTPException(status_code=400, detail="請選擇性別")
     return value
@@ -121,16 +152,72 @@ def is_profile_complete(user: dict) -> bool:
     return bool(user.get("nickname") and user.get("birth_year") and user.get("gender"))
 
 
+def _positive_float(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def compute_bmi(height, weight) -> float | None:
+    height_cm = _positive_float(height)
+    weight_kg = _positive_float(weight)
+    if height_cm is None or weight_kg is None:
+        return None
+    meters = height_cm / 100.0
+    return round(weight_kg / (meters * meters), 1)
+
+
+def bmi_category_tw(bmi: float | None) -> str | None:
+    if bmi is None:
+        return None
+    if bmi < 18.5:
+        return "過輕"
+    if bmi < 24:
+        return "健康體重"
+    if bmi < 27:
+        return "過重"
+    if bmi < 30:
+        return "輕度肥胖"
+    if bmi < 35:
+        return "中度肥胖"
+    return "重度肥胖"
+
+
+def healthy_weight_range(height) -> str | None:
+    height_cm = _positive_float(height)
+    if height_cm is None:
+        return None
+    h2 = (height_cm * height_cm) / 10000.0
+    min_kg = round(18.5 * h2, 1)
+    exclusive_kg = 24 * h2
+    max_kg = round(int(exclusive_kg * 10 + 1e-8) / 10 - 0.1, 1)
+    if min_kg <= 0 or max_kg < min_kg:
+        return None
+    return f"{min_kg:.1f}–{max_kg:.1f} kg"
+
+
 def serialize_user(user: dict, include_email: bool = False) -> dict:
+    height = float(user["height"]) if user.get("height") is not None else None
+    weight = float(user["weight"]) if user.get("weight") is not None else None
+    bmi = compute_bmi(height, weight)
     public = {
         "user_id": user.get("user_id"),
         "nickname": user.get("nickname"),
         "birth_year": user.get("birth_year"),
         "age": int(user["age"]) if user.get("age") is not None else None,
         "gender": user.get("gender"),
-        "height": float(user["height"]) if user.get("height") is not None else None,
-        "weight": float(user["weight"]) if user.get("weight") is not None else None,
+        "height": height,
+        "weight": weight,
+        "bmi": bmi,
+        "bmi_category": bmi_category_tw(bmi),
+        "healthy_bmi_range": "18.5–23.9" if _positive_float(height) else None,
+        "healthy_weight_range": healthy_weight_range(height),
         "medical_history": user.get("medical_history"),
+        "conditions": user_conditions(user),
+        "allergies": user_allergies(user),
+        "allergy_options": list(allergy_options()),
         "profile_complete": is_profile_complete(user),
     }
     if include_email:
@@ -178,7 +265,8 @@ def fetch_user(user_id: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT user_id, email, nickname, birth_year, height, weight, age, gender, medical_history
+                SELECT user_id, email, nickname, birth_year, height, weight, age, gender,
+                       medical_history, conditions_json, allergies_json, complexion_lab_json
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -217,8 +305,21 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         "diet_url",
         "acupoint_url",
         "pulse_json",
+        "face_grid_json",
+        "face_measurements_json",
+        "complexion_label",
+        "complexion_hex",
+        "complexion_hsv_json",
+        "tongue_grid_json",
+        "tongue_measurements_json",
+        "organ_composite_json",
     ]
     colors = result.get("region_colors") or {}
+    complexion = result.get("complexion") or {}
+    face_grid = result.get("face_grid")
+    measurements = (face_grid or {}).get("measurements")
+    tongue_grid = result.get("tongue_grid")
+    tongue_measurements = (tongue_grid or {}).get("measurements")
     values = [
         user_id,
         record_date,
@@ -234,6 +335,14 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         extra.get("diet_url"),
         extra.get("acupoint_url"),
         extra.get("pulse_json"),
+        json.dumps(face_grid, ensure_ascii=False) if face_grid else None,
+        json.dumps(measurements, ensure_ascii=False) if measurements else None,
+        complexion.get("bias") or extra.get("complexion_label"),
+        complexion.get("hex"),
+        json.dumps(complexion.get("hsv"), ensure_ascii=False) if complexion.get("hsv") else None,
+        json.dumps(tongue_grid, ensure_ascii=False) if tongue_grid else None,
+        json.dumps(tongue_measurements, ensure_ascii=False) if tongue_measurements else None,
+        json.dumps(result.get("organ_health"), ensure_ascii=False) if result.get("organ_health") else None,
     ]
     conn = connect()
     try:
@@ -243,6 +352,15 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
                 values,
             )
             record_id = cur.lastrowid
+            lab = complexion.get("lab")
+            if lab:
+                payload = dict(lab)
+                if complexion.get("S") is not None:
+                    payload["S"] = complexion.get("S")
+                cur.execute(
+                    "UPDATE users SET complexion_lab_json = %s WHERE user_id = %s",
+                    (json.dumps(payload, ensure_ascii=False), user_id),
+                )
     finally:
         conn.close()
     result["record_id"] = record_id
@@ -286,6 +404,14 @@ def health():
         return {"ok": True, "mysql": row["ok"] == 1}
     finally:
         conn.close()
+
+
+@app.get("/api/flags")
+def health_flag_options():
+    return {
+        "conditions": list(CONDITION_OPTIONS),
+        "allergies": list(allergy_options()),
+    }
 
 
 @app.post("/api/register")
@@ -395,6 +521,8 @@ def update_profile(
     weight: float | None = Form(default=None),
     gender: str | None = Form(default=None),
     medical_history: str | None = Form(default=None),
+    conditions_json: str | None = Form(default=None),
+    allergies_json: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     current = fetch_user(user_id)
@@ -411,7 +539,24 @@ def update_profile(
     next_age = age_from_birth_year(next_birth) if next_birth else current.get("age")
     next_height = height if height is not None else current.get("height")
     next_weight = weight if weight is not None else current.get("weight")
-    next_history = medical_history if medical_history is not None else current.get("medical_history")
+    if conditions_json is not None:
+        next_conditions = parse_label_list(
+            conditions_json, CONDITION_SET, CONDITION_OPTIONS, "conditions_json"
+        )
+    else:
+        next_conditions = user_conditions(current)
+    if allergies_json is not None:
+        next_allergies = parse_label_list(
+            allergies_json, allergy_option_set(), allergy_options(), "allergies_json"
+        )
+    else:
+        next_allergies = user_allergies(current)
+    if conditions_json is not None or allergies_json is not None:
+        next_history = history_summary(next_conditions, next_allergies)
+    elif medical_history is not None:
+        next_history = medical_history
+    else:
+        next_history = current.get("medical_history")
 
     conn = connect()
     try:
@@ -420,7 +565,8 @@ def update_profile(
                 """
                 UPDATE users
                 SET nickname = %s, birth_year = %s, height = %s, weight = %s,
-                    age = %s, gender = %s, medical_history = %s
+                    age = %s, gender = %s, medical_history = %s,
+                    conditions_json = %s, allergies_json = %s
                 WHERE user_id = %s
                 """,
                 (
@@ -431,6 +577,8 @@ def update_profile(
                     next_age,
                     next_gender,
                     next_history,
+                    dumps_labels(next_conditions),
+                    dumps_labels(next_allergies),
                     user_id,
                 ),
             )
@@ -492,6 +640,7 @@ async def analyze(
     symptoms: str | None = Form(default=None),
     discomfort: str | None = Form(default=None),
     pulse_json: str | None = Form(default=None),
+    include_pulse: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
@@ -504,8 +653,30 @@ async def analyze(
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail="pulse_json 不是合法 JSON") from exc
 
-    result = analyze_session(images, symptoms or "", discomfort or "", pulse)
-    advice = build_advice(result["findings"], symptoms or "", discomfort or "")
+    profile = fetch_user(user_id) or {}
+    personal_lab = None
+    raw_lab = profile.get("complexion_lab_json")
+    if raw_lab:
+        try:
+            personal_lab = json.loads(raw_lab) if isinstance(raw_lab, str) else raw_lab
+        except json.JSONDecodeError:
+            personal_lab = None
+    confirm_with_pulse = str(include_pulse or "").strip().lower() in {"1", "true", "yes", "android"}
+    result = analyze_session(
+        images,
+        symptoms or "",
+        discomfort or "",
+        pulse,
+        personal_lab=personal_lab,
+        confirm_with_pulse=confirm_with_pulse,
+    )
+    advice = build_advice(
+        result["findings"],
+        symptoms or "",
+        discomfort or "",
+        conditions=user_conditions(profile),
+        allergies=user_allergies(profile),
+    )
     extra = {
         "symptoms": symptoms,
         "discomfort": discomfort,
@@ -530,11 +701,14 @@ def records(request: Request):
                        face_color, lip_color, tongue_body_color, tongue_coat_color,
                        {", ".join(ORGAN_KEYS)},
                        {", ".join(PATTERN_KEYS)},
-                       diet_advice, diet_url, acupoint_url
+                       diet_advice, diet_url, acupoint_url,
+                       face_grid_json, face_measurements_json,
+                       complexion_label, complexion_hex, complexion_hsv_json,
+                       tongue_grid_json, tongue_measurements_json, organ_composite_json
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
-                LIMIT 20
+                LIMIT 50
                 """,
                 (user_id,),
             )
@@ -542,8 +716,33 @@ def records(request: Request):
     finally:
         conn.close()
     for row in rows:
+        row["record_date"] = iso_time(row.get("record_date"))
         row["overlays"] = {
             key: overlay_from_pattern_label(row.get(pattern_key))
             for key, _name, _score_key, pattern_key in ORGAN_META
         }
-    return {"user_id": user_id, "records": rows}
+        raw_grid = row.get("face_grid_json")
+        if raw_grid:
+            try:
+                row["face_grid"] = json.loads(raw_grid)
+            except json.JSONDecodeError:
+                row["face_grid"] = None
+        else:
+            row["face_grid"] = None
+        raw_tongue = row.get("tongue_grid_json")
+        if raw_tongue:
+            try:
+                row["tongue_grid"] = json.loads(raw_tongue)
+            except json.JSONDecodeError:
+                row["tongue_grid"] = None
+        else:
+            row["tongue_grid"] = None
+        raw_health = row.get("organ_composite_json")
+        if raw_health:
+            try:
+                row["organ_health"] = json.loads(raw_health)
+            except json.JSONDecodeError:
+                row["organ_health"] = None
+        else:
+            row["organ_health"] = None
+    return {"user_id": user_id, "records": rows, "trend": build_trend(rows)}

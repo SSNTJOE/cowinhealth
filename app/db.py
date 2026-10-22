@@ -1,3 +1,5 @@
+import logging
+import threading
 import time
 
 import pymysql
@@ -12,6 +14,11 @@ from .config import (
 )
 from .syndrome import PATTERN_KEYS
 
+logger = logging.getLogger(__name__)
+_schema_ready = False
+_schema_lock = threading.Lock()
+_retry_started = False
+
 SCHEMA_SQL = [
     """
     CREATE TABLE IF NOT EXISTS users (
@@ -25,6 +32,8 @@ SCHEMA_SQL = [
       age INT NULL,
       gender VARCHAR(20) NULL,
       medical_history TEXT NULL,
+      conditions_json TEXT NULL,
+      allergies_json TEXT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -35,10 +44,10 @@ SCHEMA_SQL = [
       record_date DATETIME NOT NULL,
       symptoms TEXT NULL,
       discomfort TEXT NULL,
-      face_color VARCHAR(64) NULL,
-      lip_color VARCHAR(64) NULL,
-      tongue_body_color VARCHAR(64) NULL,
-      tongue_coat_color VARCHAR(64) NULL,
+      face_color VARCHAR(255) NULL,
+      lip_color VARCHAR(255) NULL,
+      tongue_body_color VARCHAR(255) NULL,
+      tongue_coat_color VARCHAR(255) NULL,
       heart_score INT NOT NULL,
       liver_score INT NOT NULL,
       spleen_score INT NOT NULL,
@@ -63,6 +72,13 @@ SCHEMA_SQL = [
       diet_url TEXT NULL,
       acupoint_url TEXT NULL,
       pulse_json TEXT NULL,
+      face_grid_json TEXT NULL,
+      face_measurements_json TEXT NULL,
+      complexion_label VARCHAR(128) NULL,
+      complexion_hex VARCHAR(16) NULL,
+      complexion_hsv_json TEXT NULL,
+      tongue_grid_json TEXT NULL,
+      tongue_measurements_json TEXT NULL,
       CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
@@ -73,23 +89,44 @@ EXTRA_COLUMNS = [
     ("users", "password_hash", "VARCHAR(255) NULL"),
     ("users", "nickname", "VARCHAR(64) NULL"),
     ("users", "birth_year", "INT NULL"),
+    ("users", "conditions_json", "TEXT NULL"),
+    ("users", "allergies_json", "TEXT NULL"),
+    ("users", "complexion_lab_json", "TEXT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
-    ("health_records", "face_color", "VARCHAR(64) NULL"),
-    ("health_records", "lip_color", "VARCHAR(64) NULL"),
-    ("health_records", "tongue_body_color", "VARCHAR(64) NULL"),
-    ("health_records", "tongue_coat_color", "VARCHAR(64) NULL"),
+    ("health_records", "face_color", "VARCHAR(255) NULL"),
+    ("health_records", "lip_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_body_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_coat_color", "VARCHAR(255) NULL"),
     ("health_records", "diet_advice", "VARCHAR(80) NULL"),
     ("health_records", "diet_url", "TEXT NULL"),
     ("health_records", "acupoint_url", "TEXT NULL"),
     ("health_records", "pulse_json", "TEXT NULL"),
+    ("health_records", "face_grid_json", "TEXT NULL"),
+    ("health_records", "face_measurements_json", "TEXT NULL"),
+    ("health_records", "complexion_label", "VARCHAR(128) NULL"),
+    ("health_records", "complexion_hex", "VARCHAR(16) NULL"),
+    ("health_records", "complexion_hsv_json", "TEXT NULL"),
+    ("health_records", "tongue_grid_json", "TEXT NULL"),
+    ("health_records", "tongue_measurements_json", "TEXT NULL"),
+    ("health_records", "organ_composite_json", "TEXT NULL"),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS
 ]
 
+COLUMN_RESIZES = [
+    ("health_records", "face_color", "VARCHAR(255) NULL"),
+    ("health_records", "lip_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_body_color", "VARCHAR(255) NULL"),
+    ("health_records", "tongue_coat_color", "VARCHAR(255) NULL"),
+    ("health_records", "complexion_label", "VARCHAR(128) NULL"),
+]
 
-def connect(with_db: bool = True, autocommit: bool = True):
+
+def connect(with_db: bool = True, autocommit: bool = True, *, ensure: bool = True):
+    if ensure and with_db:
+        ensure_schema()
     kwargs = dict(
         host=MYSQL_HOST,
         port=MYSQL_PORT,
@@ -105,37 +142,91 @@ def connect(with_db: bool = True, autocommit: bool = True):
     return pymysql.connect(**kwargs)
 
 
-def wait_for_mysql(timeout_seconds: int = 90):
+def wait_for_mysql(timeout_seconds: int = 90) -> bool:
     deadline = time.time() + timeout_seconds
     last_error = None
     while time.time() < deadline:
         try:
-            conn = connect(with_db=True)
+            conn = connect(with_db=True, ensure=False)
             conn.close()
-            return
+            return True
         except Exception as exc:  # pragma: no cover - boot-time retry
             last_error = exc
-            time.sleep(2)
-    raise RuntimeError(f"無法連線 MySQL：{last_error}")
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(2, remaining))
+    logger.error("無法連線 MySQL：%s", last_error)
+    return False
 
 
-def init_schema():
-    wait_for_mysql()
-    conn = connect(with_db=True)
+def init_schema(timeout_seconds: int = 8) -> bool:
+    global _schema_ready
+    if _schema_ready:
+        return True
+    with _schema_lock:
+        if _schema_ready:
+            return True
+        if not wait_for_mysql(timeout_seconds):
+            return False
+        conn = None
+        try:
+            conn = connect(with_db=True, ensure=False)
+            with conn.cursor() as cur:
+                for statement in SCHEMA_SQL:
+                    cur.execute(statement)
+                for table, column, ddl in EXTRA_COLUMNS:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
+                        """,
+                        (MYSQL_DATABASE, table, column),
+                    )
+                    if cur.fetchone()["c"] == 0:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                for table, column, ddl in COLUMN_RESIZES:
+                    cur.execute(f"ALTER TABLE {table} MODIFY COLUMN {column} {ddl}")
+            _schema_ready = True
+            logger.info("MySQL schema ready")
+            return True
+        except Exception as exc:
+            logger.error("初始化 MySQL schema 失敗：%s", exc)
+            return False
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def ensure_schema() -> bool:
+    return init_schema(timeout_seconds=2)
+
+
+def start_schema_retry_loop() -> None:
+    global _retry_started
+    if _schema_ready or _retry_started:
+        return
+    _retry_started = True
+
+    def _loop():
+        while not init_schema(timeout_seconds=5):
+            time.sleep(5)
+
+    threading.Thread(target=_loop, name="mysql-schema-retry", daemon=True).start()
+
+
+def ping_mysql() -> bool:
     try:
-        with conn.cursor() as cur:
-            for statement in SCHEMA_SQL:
-                cur.execute(statement)
-            for table, column, ddl in EXTRA_COLUMNS:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) AS c
-                    FROM information_schema.COLUMNS
-                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
-                    """,
-                    (MYSQL_DATABASE, table, column),
-                )
-                if cur.fetchone()["c"] == 0:
-                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-    finally:
-        conn.close()
+        init_schema(timeout_seconds=2)
+        conn = connect(with_db=True, ensure=False)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok")
+                row = cur.fetchone()
+            return bool(row and row["ok"] == 1)
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("MySQL ping failed: %s", exc)
+        return False
