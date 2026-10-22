@@ -1,15 +1,14 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.tube.healthing"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.tube.healthing"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1"
     }
@@ -22,7 +21,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { viewBinding = true }
 }
 
@@ -36,4 +34,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 }
