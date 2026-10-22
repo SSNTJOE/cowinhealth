@@ -13,6 +13,15 @@
         <EditText android:id="@+id/password" android:hint="密碼" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/login" android:text="連線網站帳號並登入" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <TextView android:id="@+id/anon" android:text="尚未登入" android:textSize="18sp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <EditText android:id="@+id/height" android:hint="身高 (cm)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/weight" android:hint="體重 (kg)" android:inputType="numberDecimal" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/bmiLive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text=""
+            android:textSize="14sp"/>
         <EditText android:id="@+id/symptoms" android:hint="今日身體狀況" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/discomfort" android:hint="不舒服的地方" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <androidx.camera.view.PreviewView

@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -48,6 +50,15 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val bmiWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) { refreshBmi() }
+        }
+        binding.height.addTextChangedListener(bmiWatcher)
+        binding.weight.addTextChangedListener(bmiWatcher)
+        refreshBmi()
+
         binding.login.setOnClickListener { Thread { login() }.start() }
         binding.shotFace.setOnClickListener { capture("face") }
         binding.shotTongue.setOnClickListener { capture("tongue") }
@@ -59,6 +70,13 @@ class MainActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED
         ) startCamera() else permission.launch(Manifest.permission.CAMERA)
+    }
+
+    private fun refreshBmi() {
+        binding.bmiLive.text = Bmi.formatDisplay(
+            binding.height.text.toString(),
+            binding.weight.text.toString()
+        )
     }
 
     private fun login() {
