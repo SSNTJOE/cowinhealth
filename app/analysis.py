@@ -205,7 +205,7 @@ def classify_tongue_bianzheng(
     dL_b = float(body.get("L") or 0) - TONGUE_BODY_NORMAL["L"]
     db_c = float(coat.get("b_star") or 0) - TONGUE_COAT_NORMAL["b_star"]
     dL_c = float(coat.get("L") or 0) - TONGUE_COAT_NORMAL["L"]
-    heat = da_b >= 2.0
+    heat = float(body.get("a_star") or 0) >= TONGUE_LAB_THRESHOLDS["body_heat_a_min"]
     ischemic = da_b <= -6.0
     mirror = coating_ratio < TONGUE_MIRROR_COAT_MAX
     yellow_thick = db_c >= 10.0 and dL_c <= -2.0
@@ -2068,6 +2068,10 @@ TONGUE_LAB_THRESHOLDS = {
     "center_heat_db_vs_peer": 6.0,
     "center_scorch_dL_vs_peer": -5.0,
     "body_red_da": 4.0,
+    # Normal tongue pink is #FFB6C1 (a*~28) through #F2B2B7 (a*~25) and #E88B95 (a*~37).
+    # 偏紅 starts past that flesh-red end, so a red hue alone is not heat.
+    "body_heat_a_min": 41.0,
+    "body_heat_red_ratio": 0.45,
     "body_pale_da": -4.0,
     "body_stasis_db": -6.0,
     "coat_yellow_db": 5.0,
@@ -2123,7 +2127,9 @@ def _channel_pack(stats: dict[str, float]) -> dict[str, Any]:
 
 
 def tongue_body_reading(stats: dict[str, float]) -> tuple[str, str]:
-    if stats["red_ratio"] > 0.18:
+    a_star = float(stats.get("a_star") or 0)
+    past_flesh = a_star >= TONGUE_LAB_THRESHOLDS["body_heat_a_min"]
+    if past_flesh and stats["red_ratio"] > TONGUE_LAB_THRESHOLDS["body_heat_red_ratio"]:
         return "偏紅", "實熱證"
     if stats["white_ratio"] > 0.22 or stats["pale_ratio"] > 0.28:
         return "偏白", "虛寒證"
@@ -2149,7 +2155,7 @@ def tongue_body_from_lab(stats: dict[str, float], baseline: dict[str, float]) ->
     dL = stats["L"] - baseline["L"]
     if db <= TONGUE_LAB_THRESHOLDS["body_stasis_db"] and da >= 1.0:
         return "偏青紫", "血瘀傾向"
-    if da >= TONGUE_LAB_THRESHOLDS["body_red_da"]:
+    if da >= TONGUE_LAB_THRESHOLDS["body_red_da"] and stats["a_star"] >= TONGUE_LAB_THRESHOLDS["body_heat_a_min"]:
         return "偏紅", "實熱證"
     if da <= TONGUE_LAB_THRESHOLDS["body_pale_da"] and dL >= 3.0:
         return "偏白", "虛寒證"
