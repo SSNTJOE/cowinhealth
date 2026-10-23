@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=cam9" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam10" />
 </head>
 <body>
   <div class="wrap">
@@ -146,6 +146,14 @@
       <p id="advice" class="advice"></p>
       <p id="links"></p>
 
+      <h3 id="recipe-heading">今日食譜（教學示範）</h3>
+      <p id="recipe-note" class="note">先選國家，再從通過禁忌／過敏篩選的食譜裡挑選。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。選定後顯示食材與煮法。教學示範，非診斷。</p>
+      <label id="recipe-country-label" for="recipe-country">國家</label>
+      <select id="recipe-country"></select>
+      <label id="recipe-name-label" for="recipe-name">食譜</label>
+      <select id="recipe-name"></select>
+      <div id="recipe-detail" class="recipe-detail"></div>
+
       <h3>臟腑圖（虛／實／熱／寒）</h3>
       <p class="note">依基本資料的性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
       <div class="legend">
@@ -191,7 +199,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=cam7"></script>
-  <script src="/static/app.js?v=cam12"></script>
+  <script src="/static/common.js?v=cam8"></script>
+  <script src="/static/app.js?v=cam13"></script>
 </body>
 </html>

@@ -36,9 +36,9 @@ AROMATIC = {"洋蔥", "大蒜", "蔥", "生薑", "芹菜", "韭菜"}
 HERB = {"香菜", "羅勒", "薄荷", "魚腥草"}
 LIQUID = {"牛奶", "椰子汁", "優格", "葡萄酒", "黃酒", "味噌", "紅茶", "綠茶"}
 DAIRY = {"奶油", "起司"}
-LEGUME = {"鷹嘴豆", "紅豆", "黑豆", "菜豆", "豌豆", "蠶豆", "扁豆", "紅腰豆", "兵豆", "黃豆"}
+LEGUME = {"鷹嘴豆", "紅豆", "黑豆", "菜豆", "豌豆", "蠶豆", "扁豆", "紅腰豆", "兵豆", "黃豆", "花生"}
 GARNISH = {
-    "葡萄乾", "松子", "杏仁果", "核桃", "花生", "白芝麻", "南瓜子", "夏威夷豆",
+    "葡萄乾", "松子", "杏仁果", "核桃", "白芝麻", "南瓜子", "夏威夷豆",
     "紫菜", "芒果", "草莓", "奇異果", "蘋果", "梅子", "杏子", "石榴", "紅棗",
     "栗子", "人參", "枸杞", "橄欖", "油橄欖", "椰子肉", "蝦米",
 }
@@ -160,9 +160,19 @@ class Bag:
 
 def join_steps(parts: list[str], zh: str, bag: Bag) -> str:
     steps = [part for part in parts if part]
-    extra = bag.leftover()
-    if extra:
-        steps.append(f"補上{extra}")
+    extra_items: list[tuple[str, int]] = []
+    for role in list(bag.groups):
+        extra_items.extend(bag.groups[role])
+        bag.groups[role] = []
+    if extra_items:
+        text = grams(extra_items)
+        roles = {role_of(name) for name, _amount in extra_items}
+        if roles <= {"acid"} or roles <= {"acid", "herb"}:
+            steps.append(f"最後淋上{text}")
+        elif roles <= {"herb", "garnish"}:
+            steps.append(f"最後撒上{text}")
+        else:
+            steps.append(f"最後加入{text}")
     steps.append(f"即成{zh}")
     return "；".join(steps)
 
@@ -228,9 +238,11 @@ def technique_for(zh: str, en: str) -> str:
         return "paella"
     if has_any(text, "古斯米", "couscous"):
         return "couscous"
+    if has_any(text, "麵包", "bread") and has_any(text, "烤", "腸", "三明治"):
+        return "sandwich"
     if has_any(text, "麵包", "麵團", "bread"):
         return "bake"
-    if has_any(text, "麵", "河粉", "米粉", "冬粉", "粿條", "雜菜", "noodle", "pasta", "ramen", "udon", "soba", "pho", "pad thai", "pancit", "laksa", "叻沙", "mohinga", "炸醬"):
+    if has_any(text, "麵", "河粉", "米粉", "冬粉", "粿條", "雜菜", "noodle", "pasta", "ramen", "udon", "soba", "pho", "pad thai", "pancit", "laksa", "叻沙", "mohinga", "炸醬", "卡波納拉", "carbonara"):
         return "noodle"
     if has_any(text, "粥", "congee", "porridge"):
         return "porridge"
@@ -260,19 +272,25 @@ def technique_for(zh: str, en: str) -> str:
         return "steam_egg"
     if has_any(text, "蒸"):
         return "steam"
-    if has_any(text, "炸", "鹽酥", "天婦羅", "tempura", "schnitzel"):
+    if has_any(text, "淡菜", "moules"):
+        return "mussels"
+    if has_any(text, "薯條", "poutine", "frites"):
+        return "fries"
+    if has_any(text, "炸", "鹽酥", "天婦羅", "tempura", "schnitzel", "豬排", "breaded", "肉丸", "meatball"):
         return "deep_fry"
     if has_any(text, "串", "satay", "沙嗲", "kebab", "kebap", "souvlaki", "yakitori", "cevapi", "切瓦皮"):
         return "skewer"
     if has_any(text, "紅燒"):
         return "braise"
-    if has_any(text, "烤", "roast", "roasted", "grill", "grilled", "asado", "braai", "jerk", "lechon", "mechoui", "shuwa", "kleftiko", "bulgogi", "叉燒", "燒味"):
+    if has_any(text, "烤", "roast", "roasted", "grill", "grilled", "asado", "braai", "jerk", "lechon", "mechoui", "shuwa", "kleftiko", "bulgogi", "叉燒", "燒味", "香腸", "sausage", "bratwurst"):
         return "roast"
     if has_any(text, "抓飯", "pulao", "plov", "palaw", "biryani", "kabsa", "machboos", "jollof", "手抓飯", "香料飯", "卡布薩", "油米飯"):
         return "pilaf"
+    if has_any(text, "慕沙卡", "moussaka"):
+        return "bake"
     if has_any(text, "三明治", "漢堡", "豬扒包", "刈包", "banh mi", "burger", "sandwich", "shawarma", "烤肉捲", "taco", "夾餅", "quesadilla", "pupusa", "baleada", "皮塔", "pita"):
         return "sandwich"
-    if has_any(text, "餡餅", "empanada", "pasty", "samosa", "炸餃"):
+    if has_any(text, "肉餅", "餡餅", "empanada", "pasty", "samosa", "炸餃"):
         return "filled_pastry"
     if has_any(text, "派", "撻", "pizza", "披薩", "quiche", "pie", "tart", "蛋糕", "cake", "pavlova", "蛋白霜", "strudel", "蘋果卷", "麵包", "khachapuri"):
         return "bake"
@@ -280,9 +298,21 @@ def technique_for(zh: str, en: str) -> str:
         return "rice_top"
     if has_any(text, "泡菜", "kimchi") and not has_any(text, "鍋", "stew", "湯"):
         return "ferment"
-    if has_any(text, "炒", "煸", "回鍋", "宮保", "魚香", "木須", "打拋", "西西格", "sisig"):
+    if has_any(text, "豆餅", "patty", "patties"):
+        return "griddle"
+    if has_any(text, "雜炊", "koshari"):
+        return "pilaf"
+    if has_any(text, "肉骨茶", "bak kut teh"):
+        return "soup"
+    if has_any(text, "照燒", "teriyaki"):
+        return "roast"
+    if has_any(text, "早餐", "breakfast"):
+        return "egg_pan"
+    if has_any(text, "紅椒雞", "paprikash", "牛腩"):
+        return "braise"
+    if has_any(text, "炒", "煸", "煎", "回鍋", "宮保", "魚香", "木須", "打拋", "羅勒", "basil", "青椒", "蒜蓉", "肉絲", "西西格", "sisig", "蒜香"):
         return "stir"
-    if has_any(text, "燉", "滷", "煲", "燜", "stew", "rendang", "仁當", "tagine", "goulash", "adobo", "wat", "feijoada", "carbonade", "三杯", "薑母", "鍋"):
+    if has_any(text, "燉", "滷", "煲", "燜", "stew", "rendang", "仁當", "tagine", "goulash", "adobo", "wat", "feijoada", "carbonade", "三杯", "薑母", "鍋", "肉卷", "sarmale"):
         return "braise"
     return "fallback"
 
@@ -290,7 +320,7 @@ def technique_for(zh: str, en: str) -> str:
 def method_for(zh: str, en: str, items: list[tuple[str, int]]) -> str:
     tech = technique_for(zh, en)
     if tech == "fallback":
-        tech = fallback_technique(items)
+        tech = fallback_technique(zh, en, items)
     bag = Bag(group_items(items))
     builders = {
         "drink": drink,
@@ -329,6 +359,8 @@ def method_for(zh: str, en: str, items: list[tuple[str, int]]) -> str:
         "steam": steam,
         "deep_fry": deep_fry,
         "fry_bowl": fry_bowl,
+        "mussels": mussels,
+        "fries": fries,
         "skewer": skewer,
         "roast": roast,
         "pilaf": pilaf,
@@ -343,12 +375,19 @@ def method_for(zh: str, en: str, items: list[tuple[str, int]]) -> str:
     return builders[tech](bag, zh)
 
 
-def fallback_technique(items: list[tuple[str, int]]) -> str:
+def fallback_technique(zh: str, en: str, items: list[tuple[str, int]]) -> str:
     groups = group_items(items)
+    flour_g = sum(amount for _name, amount in groups.get("flour") or [])
+    protein_g = sum(amount for _name, amount in groups.get("protein") or [])
+    peanut_g = sum(amount for name, amount in items if name == "花生")
     if groups.get("grain") and groups.get("protein"):
         return "rice_top"
-    if groups.get("flour") and groups.get("protein"):
-        return "bake"
+    if peanut_g >= 50 and groups.get("protein"):
+        return "braise"
+    if flour_g >= 120 and flour_g >= protein_g and not has_any(f"{zh} {en}", "派", "餅", "撻", "蛋糕"):
+        return "noodle"
+    if groups.get("protein") and groups.get("root"):
+        return "braise"
     if groups.get("dairy") and groups.get("veg") and not groups.get("protein"):
         return "braise"
     if groups.get("protein") and (groups.get("veg") or groups.get("aromatic")) and not groups.get("liquid"):
@@ -552,10 +591,13 @@ def mash(bag: Bag, zh: str) -> str:
 
 
 def egg_pan(bag: Bag, zh: str) -> str:
+    bread = bag.pull("flour", "grain") if "早餐" in zh else ""
     aroma = bag.pull("oil", "aromatic", "veg")
     eggs = bag.pull("protein")
     season = bag.pull("salty", "heat", "spice", "sweet", "liquid", "dairy")
     steps = []
+    if bread:
+        steps.append(f"{bread}烤成吐司")
     if aroma:
         steps.append(f"{aroma}先炒軟")
     if eggs:
@@ -644,7 +686,7 @@ def couscous(bag: Bag, zh: str) -> str:
 
 
 def noodle(bag: Bag, zh: str) -> str:
-    sauce = bag.pull("protein", "aromatic", "oil", "liquid", "spice", "salty", "sweet", "heat")
+    sauce = bag.pull("protein", "aromatic", "oil", "liquid", "spice", "salty", "sweet", "heat", "dairy")
     noodle_body = bag.pull("flour", "grain")
     veg = bag.pull("veg", "legume", "root")
     steps = []
@@ -962,15 +1004,46 @@ def stir(bag: Bag, zh: str) -> str:
     meat = bag.pull("protein")
     veg = bag.pull("veg", "legume", "root")
     season = bag.pull("salty", "sweet", "acid", "liquid", "dairy")
+    grain = bag.pull("grain", "flour")
+    herb = bag.pull("herb")
     steps = []
     if aroma:
         steps.append(f"熱鍋下{aroma}爆香")
     if meat:
-        steps.append(f"{meat}快炒至變色" + (f"，下{veg}" if veg else ""))
+        steps.append(f"{meat}快炒至變色" + (f"，下{veg}" if veg else "") + (f"，拌入{herb}" if herb else ""))
     elif veg:
-        steps.append(f"{veg}炒至斷生")
+        steps.append(f"{veg}炒至斷生" + (f"，拌入{herb}" if herb else ""))
+    elif herb:
+        steps.append(f"拌入{herb}")
     if season:
         steps.append(f"以{season}調味")
+    if grain:
+        steps.append(f"{grain}蒸熟後盛在一起")
+    return join_steps(steps, zh, bag)
+
+
+def mussels(bag: Bag, zh: str) -> str:
+    base = bag.pull("aromatic", "spice", "herb", "liquid", "dairy", "salty", "heat", "oil")
+    seafood = bag.pull("protein")
+    potatoes = bag.pull("root")
+    steps = []
+    if seafood:
+        steps.append(f"{seafood}" + (f"加{base}" if base else "") + "蓋煮至開口")
+    elif base:
+        steps.append(f"{base}煮開")
+    if potatoes:
+        steps.append(f"{potatoes}炸或烤至外酥")
+    return join_steps(steps, zh, bag)
+
+
+def fries(bag: Bag, zh: str) -> str:
+    potatoes = bag.pull("root")
+    top = bag.pull("protein", "dairy", "salty", "aromatic", "spice", "oil")
+    steps = []
+    if potatoes:
+        steps.append(f"{potatoes}炸至酥")
+    if top:
+        steps.append(f"淋上{top}")
     return join_steps(steps, zh, bag)
 
 
@@ -1015,9 +1088,8 @@ def load_rows(path: Path):
 def insert_methods(headers: list[str], rows: list[list]) -> tuple[list[str], list[list], list[str]]:
     if "煮法" in headers:
         method_at = headers.index("煮法")
-        filled = sum(1 for row in rows if str(row[method_at]).strip())
-        if filled == len(rows) and headers == TARGET_HEADERS:
-            return headers, rows, []
+        headers = headers[:method_at] + headers[method_at + 1 :]
+        rows = [row[:method_at] + row[method_at + 1 :] for row in rows]
     if "食譜" not in headers:
         raise SystemExit("找不到食譜欄")
     recipe_at = headers.index("食譜")

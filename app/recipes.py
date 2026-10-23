@@ -42,7 +42,7 @@ CONDITION_BAN_TOKENS = {
     "服用抗凝血劑": ("抗凝血", "出血"),
 }
 TEACHING_DISCLAIMER = "教學示範，非中醫診斷或營養處方。食譜與禁忌／益處來自 Recipe.xls 欄位，不能取代醫師建議。"
-# H 欄是「食材:證型」；鹽／醬油幾乎每道都標了虛寒禁忌，教學篩選時略過調味料。
+# 禁忌欄是「食材:證型」；鹽／醬油幾乎每道都標了虛寒禁忌，教學篩選時略過調味料。
 SEASONING_SKIP = {
     "食鹽",
     "鹽",
@@ -92,22 +92,31 @@ def _open_sheet():
 def _rows_cached(mtime_ns: int) -> tuple[dict[str, str], ...]:
     sheet = _open_sheet()
     headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
-    last = max(sheet.ncols - 1, 0)
+    index = {name: pos for pos, name in enumerate(headers)}
+
+    def read(row: int, header: str, fallback: int | None = None) -> str:
+        col = index.get(header, fallback)
+        if col is None or col < 0 or col >= sheet.ncols:
+            return ""
+        return str(sheet.cell_value(row, col)).strip()
+
     rows: list[dict[str, str]] = []
+    allergen_fallback = sheet.ncols - 1 if "過敏原" not in index and sheet.ncols else None
     for row in range(1, sheet.nrows):
         rows.append(
             {
                 "id": str(row),
-                "country": str(sheet.cell_value(row, 0)).strip() if sheet.ncols > 0 else "",
-                "name_zh": str(sheet.cell_value(row, 1)).strip() if sheet.ncols > 1 else "",
-                "name_en": str(sheet.cell_value(row, 2)).strip() if sheet.ncols > 2 else "",
-                "name_ja": str(sheet.cell_value(row, 3)).strip() if sheet.ncols > 3 else "",
-                "name_ko": str(sheet.cell_value(row, 4)).strip() if sheet.ncols > 4 else "",
-                "recipe": str(sheet.cell_value(row, 5)).strip() if sheet.ncols > 5 else "",
-                "benefit": str(sheet.cell_value(row, 6)).strip() if sheet.ncols > 6 else "",
-                "ban": str(sheet.cell_value(row, 7)).strip() if sheet.ncols > 7 else "",
-                "nutrient": str(sheet.cell_value(row, 8)).strip() if sheet.ncols > 8 else "",
-                "allergens": str(sheet.cell_value(row, last)).strip(),
+                "country": read(row, "國家", 0),
+                "name_zh": read(row, "中文食譜", 1),
+                "name_en": read(row, "英文食譜", 2),
+                "name_ja": read(row, "日文食譜", 3),
+                "name_ko": read(row, "韓文食譜", 4),
+                "recipe": read(row, "食譜", 5),
+                "method": read(row, "煮法"),
+                "benefit": read(row, "益處"),
+                "ban": read(row, "禁忌"),
+                "nutrient": read(row, "元素"),
+                "allergens": read(row, "過敏原", allergen_fallback),
                 "_headers": "\t".join(headers),
             }
         )
@@ -287,6 +296,7 @@ def public_recipe(row: dict[str, str], lang: str, score: int) -> dict[str, str |
         "country": row.get("country") or "",
         "name": localized_name(row, lang),
         "recipe": row.get("recipe") or "",
+        "method": row.get("method") or "",
         "benefit": row.get("benefit") or "",
         "ban": row.get("ban") or "",
         "nutrient": row.get("nutrient") or "",

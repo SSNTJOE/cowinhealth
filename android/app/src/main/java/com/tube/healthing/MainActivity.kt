@@ -690,12 +690,14 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val recipe = t("食譜", "Recipe", "レシピ", "레시피")
+        val method = t("煮法", "Method", "作り方", "조리법")
         val benefit = t("益處", "Benefits", "益処", "유익")
         val ban = t("禁忌", "Contraindications", "禁忌", "금기")
         val nutrient = t("元素", "Nutrients", "栄養素", "영양소")
         val allergens = t("過敏原", "Allergens", "アレルゲン", "알레르기 유발 물질")
         binding.recipeDetail.text = listOf(
             recipe to row.optString("recipe"),
+            method to row.optString("method"),
             benefit to row.optString("benefit"),
             ban to row.optString("ban"),
             nutrient to row.optString("nutrient"),

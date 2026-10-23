@@ -107,6 +107,14 @@ async function loadMe() {
   authCard.classList.add("hidden");
   appCard.classList.remove("hidden");
   fillProfile(data.user);
+  applyUiLangChrome();
+  bindRecipePickers();
+  try {
+    await loadRecipeCountries();
+  } catch (err) {
+    const detail = document.getElementById("recipe-detail");
+    if (detail) detail.textContent = formatApiError(err);
+  }
   await startCamera();
   await loadRecords();
   if (!sessionStorage.getItem("daily-asked")) {
@@ -712,6 +720,97 @@ function renderResult(result) {
   if (result.tongue_preview) lastTonguePreviewUrl = result.tongue_preview;
   renderFaceGrid(result.face_grid, lastFacePreviewUrl);
   renderTongueGrid(result.tongue_grid, lastTonguePreviewUrl);
+  const countryPick = document.getElementById("recipe-country");
+  if (countryPick && countryPick.value) {
+    loadRecipesForCountry().catch(() => {});
+  }
+}
+
+let recipeRows = [];
+
+function showSelectedRecipe() {
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  if (!pick || !detail) return;
+  const row = recipeRows[Number(pick.value)];
+  if (!row || pick.value === "") {
+    if (pick.value === "") detail.textContent = "";
+    return;
+  }
+  const lines = [
+    ["fieldRecipe", row.recipe],
+    ["fieldMethod", row.method],
+    ["fieldBenefit", row.benefit],
+    ["fieldBan", row.ban],
+    ["fieldNutrient", row.nutrient],
+    ["fieldAllergens", row.allergens],
+  ].filter((item) => item[1]);
+  detail.textContent = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+}
+
+async function loadRecipeCountries() {
+  const select = document.getElementById("recipe-country");
+  if (!select) return;
+  const current = select.value;
+  const data = await api("/api/recipes/countries");
+  select.innerHTML = "";
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = uiText("pickCountry");
+  select.appendChild(first);
+  (data.countries || []).forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  if (current && [...select.options].some((option) => option.value === current)) {
+    select.value = current;
+  }
+}
+
+async function loadRecipesForCountry() {
+  const countrySelect = document.getElementById("recipe-country");
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  if (!countrySelect || !pick || !detail) return;
+  recipeRows = [];
+  pick.innerHTML = "";
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = uiText("pickRecipe");
+  pick.appendChild(first);
+  detail.textContent = "";
+  if (!countrySelect.value) return;
+  const data = await api("/api/recipes?" + new URLSearchParams({
+    country: countrySelect.value,
+    lang: getUiLang(),
+  }));
+  recipeRows = data.recipes || [];
+  if (!recipeRows.length) {
+    detail.textContent = uiText("emptyRecipes");
+    return;
+  }
+  recipeRows.forEach((row, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = row.name + (row.benefit_match ? " ★" : "");
+    pick.appendChild(option);
+  });
+}
+
+function bindRecipePickers() {
+  const country = document.getElementById("recipe-country");
+  const pick = document.getElementById("recipe-name");
+  if (!country || !pick || country.dataset.bound) return;
+  country.dataset.bound = "1";
+  country.addEventListener("change", () => {
+    loadRecipesForCountry().catch((err) => {
+      const detail = document.getElementById("recipe-detail");
+      if (detail) detail.textContent = formatApiError(err);
+    });
+  });
+  pick.addEventListener("change", showSelectedRecipe);
 }
 
 async function loadRecords() {
