@@ -6,6 +6,7 @@ ORGAN_META = [
     ("heart", "心", "heart_score", "heart_pattern"),
     ("liver", "肝", "liver_score", "liver_pattern"),
     ("spleen", "脾", "spleen_score", "spleen_pattern"),
+    ("stomach", "胃", "stomach_score", "stomach_pattern"),
     ("lung", "肺", "lung_score", "lung_pattern"),
     ("kidney", "腎", "kidney_score", "kidney_pattern"),
     ("gallbladder", "膽", "gallbladder_score", "gallbladder_pattern"),
@@ -28,32 +29,29 @@ PULSE_TO_ORGAN = {
     "right_cun_heavy": "lung",
     "right_cun_light": "large_intestine",
     "right_guan_heavy": "spleen",
-    "right_guan_light": "spleen",  # 胃併入脾系統（右手關輕按）
+    "right_guan_light": "stomach",
     "right_chi_heavy": "kidney",  # 命門併入腎（右手尺重按）
     "right_chi_light": "bladder",  # 三焦氣化併入膀胱
 }
 # PulseActivity 12×15s keys. Teaching: 左寸心、關肝、尺腎；右寸肺、關脾、尺腎／命門.
-# Light (fu) maps paired fu organs; 胃→脾, 命門→腎, 心包 was Pulse label but 命門 uses kidney.
+# Light (fu) maps paired fu organs; 右手關輕按=胃, 命門→腎.
 PULSE_ORGAN_NOTE = (
     "left_cun_heavy=心, left_cun_light=小腸; "
     "left_guan_heavy=肝, left_guan_light=膽; "
     "left_chi_heavy=腎, left_chi_light=膀胱; "
     "right_cun_heavy=肺, right_cun_light=大腸; "
-    "right_guan_heavy=脾, right_guan_light=脾(胃); "
+    "right_guan_heavy=脾, right_guan_light=胃; "
     "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
 )
 COLOR_HEALTH_FORMULA = (
-    "score=clamp(round(10-9*ΔE/ΔE_ref),1,10)，ΔE_ref=20（苔濕極值可用24）。"
-    "ΔE=0（近教學正常值）→10；ΔE≈ref→1。7–10 健康。"
-    "臉正常 L*65 a*12 b*20 #E2AC8A；舌質 L*53 a*23 b*12 #C86868；舌苔 L*70 a*4 b*8 #D2C8C2。"
-    "證型取 Lab 類別質心最近者；濕熱／寒濕分開。舌質／苔另用 coating_ratio 與三條鑑別。"
+    "正常規格 ΔE≤3：ΔE=0→10，貼到規格邊緣→7。超過規格：剛超出→6，ΔE_ref→1（臉／舌質 20，舌苔 24）。"
+    "7–10 正常，1–6 異常。臉正常 L*65 a*12 b*20；舌質 L*53 a*23 b*12；舌苔 L*70 a*4 b*8。"
+    "證型取有判分來源裡分數最低者；濕熱／寒濕用 mositure。7–10 不放證型圖。"
 )
 HEALTH_FORMULA = (
-    "臟腑健康度=round(mean(可用來源分數))；來源為臉色Lab、舌質Lab、舌苔Lab，"
-    "Android 另加寸關尺15秒脈頻。來源缺席不列入平均；臉／舌來源在場但該臟無對應色塊則記10（近基本色）。"
+    "臟腑分=round(mean(有判到的臉色、舌色、舌苔))。只有一項就用該分，兩項平均，三項平均。"
+    "沒有判到的項目不列入。三項都沒有則記 10（正常，不放圖）。"
     + COLOR_HEALTH_FORMULA
-    + "脈仍用 overlay_from_weights：證據<0.9→5，否則 clamp(1,10, round(5-min(最強,4)))。"
-    "脈：15秒>23→熱/實，<14→寒/虛，14–23→5。"
 )
 
 SYMPTOM_RULES = [
@@ -285,8 +283,8 @@ def evidence_from_marks(marks: list[dict[str, Any]] | None) -> dict[str, dict[st
 
 
 def organ_scores_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[str, int]:
-    """Worst (lowest) relative 1–10 score among blocks mapped to each organ; default 10."""
-    scores = {score_key: 10 for _key, _name, score_key, _pk in ORGAN_META}
+    """Lowest 1–10 score among blocks mapped to each organ. Organs with no block are omitted."""
+    scores: dict[str, int] = {}
     for block in blocks or []:
         try:
             health = int(block.get("health_score"))
@@ -296,7 +294,8 @@ def organ_scores_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dict[
         for organ in block.get("organs") or []:
             for key, _name, score_key, _pk in ORGAN_META:
                 if key == organ:
-                    scores[score_key] = min(scores[score_key], health)
+                    previous = scores.get(score_key)
+                    scores[score_key] = health if previous is None else min(previous, health)
     return scores
 
 
@@ -341,24 +340,23 @@ def organ_patterns_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dic
 def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
 ) -> tuple[dict[str, int], dict[str, Any]]:
-    """Mean of present sources per organ. Missing source omitted; present+empty color = 10."""
+    """Mean of face, tongue body, and tongue coat scores that actually exist for the organ."""
     composites: dict[str, int] = {}
     breakdown: dict[str, Any] = {}
     for key, name, score_key, _pattern_key in ORGAN_META:
         parts: dict[str, int | None] = {}
         values: list[int] = []
         for source, scores in source_scores.items():
-            if scores is None:
+            if not scores or score_key not in scores:
                 parts[source] = None
                 continue
-            missing_default = 5 if source == "pulse" else 10
-            value = int(scores.get(score_key, missing_default))
+            value = int(scores[score_key])
             parts[source] = value
             values.append(value)
         if values:
             composite = max(1, min(10, int(round(sum(values) / len(values)))))
         else:
-            composite = 5
+            composite = 10
         composites[score_key] = composite
         breakdown[key] = {
             "organ": name,

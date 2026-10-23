@@ -19,6 +19,7 @@ val ORGAN_SPOTS = listOf(
     OrganSpot("liver", "肝", 0.44f, 0.415f),
     OrganSpot("gallbladder", "膽", 0.415f, 0.445f),
     OrganSpot("spleen", "脾", 0.565f, 0.435f),
+    OrganSpot("stomach", "胃", 0.60f, 0.48f),
     OrganSpot("large_intestine", "大腸", 0.38f, 0.52f),
     OrganSpot("large_intestine", "大腸", 0.62f, 0.52f),
     OrganSpot("small_intestine", "小腸", 0.50f, 0.54f),
@@ -28,10 +29,35 @@ val ORGAN_SPOTS = listOf(
     OrganSpot("uterus", "子宮", 0.50f, 0.625f, femaleOnly = true),
 )
 
+private val SYNDROME_STICKERS = setOf(
+    "strong-hot.png",
+    "strong-cold.png",
+    "weak-hot.png",
+    "weak-cold.png",
+    "mositure.png",
+)
+
+/** Alpha for the four syndrome stickers. Null hides 7–10, which count as normal. */
+fun syndromeStickerAlpha(file: String, score: Int?): Float? {
+    if (file !in SYNDROME_STICKERS) return 1f
+    val n = score ?: return 1f
+    if (n >= 7) return null
+    val transparency = when (n.coerceIn(1, 6)) {
+        1 -> 0f
+        2 -> 0.2f
+        3 -> 0.4f
+        4 -> 0.5f
+        5 -> 0.6f
+        else -> 0.8f
+    }
+    return 1f - transparency
+}
+
 fun applyBodyOverlays(
     container: FrameLayout,
     bodyView: ImageView,
     overlays: JSONObject?,
+    scores: JSONObject?,
     female: Boolean,
     mediaUrl: (String) -> String,
     client: OkHttpClient
@@ -50,6 +76,8 @@ fun applyBodyOverlays(
         if (spot.femaleOnly && !female) return@forEach
         val file = overlays.optString(spot.key, "")
         if (file.isBlank() || file == "null") return@forEach
+        val score = scores?.optInt(spot.key + "_score", -1) ?: -1
+        val alpha = syndromeStickerAlpha(file, if (score < 0) null else score) ?: return@forEach
         val req = Request.Builder().url(mediaUrl(file)).build()
         client.newCall(req).execute().use { resp ->
             val bytes = resp.body?.bytes() ?: return@forEach
@@ -59,6 +87,7 @@ fun applyBodyOverlays(
                 val img = ImageView(container.context)
                 img.setImageBitmap(bmp)
                 img.adjustViewBounds = true
+                img.alpha = alpha
                 img.setBackgroundColor(Color.TRANSPARENT)
                 val lp = FrameLayout.LayoutParams(size, size)
                 img.x = w * spot.x - size / 2f

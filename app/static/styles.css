@@ -194,7 +194,7 @@ video, canvas, img.preview {
 }
 /* Face positioning marks. viewBox 300×400 is 3 columns × 4 rows (cell = 100×100).
    Ids match analysis: row-major, bottom row 10 | 12 | 11.
-   Pupils at cell 4 (50,150) and cell 6 (250,150). Nose bottom at cell 8 (150,300).
+   Pupils at cell 4 (50,150) and cell 6 (250,150). Nose centered on cell 8 midline (150,250).
    Lips centered on cell 12 (150,350). Hidden unless .is-face. */
 .face-guides {
   display: none;

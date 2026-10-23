@@ -58,6 +58,7 @@ SCHEMA_SQL = [
       small_intestine_score INT NOT NULL,
       bladder_score INT NOT NULL,
       uterus_score INT NOT NULL,
+      stomach_score INT NOT NULL DEFAULT 5,
       heart_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
       liver_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
       spleen_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
@@ -68,6 +69,7 @@ SCHEMA_SQL = [
       small_intestine_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
       bladder_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
       uterus_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
+      stomach_pattern VARCHAR(10) NOT NULL DEFAULT '未定',
       diet_advice VARCHAR(80) NULL,
       diet_url TEXT NULL,
       acupoint_url TEXT NULL,
@@ -110,6 +112,7 @@ EXTRA_COLUMNS = [
     ("health_records", "tongue_grid_json", "TEXT NULL"),
     ("health_records", "tongue_measurements_json", "TEXT NULL"),
     ("health_records", "organ_composite_json", "TEXT NULL"),
+    ("health_records", "stomach_score", "INT NOT NULL DEFAULT 5"),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS

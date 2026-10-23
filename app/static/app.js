@@ -10,11 +10,17 @@ const dailyDialog = document.getElementById("daily-dialog");
 const lastShots = { face: null, tongue: null };
 let lastFacePreviewUrl = null;
 let lastTonguePreviewUrl = null;
-/** Matches --align-* on #camera-stage (fractions of the stage). Video, yellow frame, dim hole, and capture share this box. */
+/** Matches --align-* on #camera-stage (fractions of the stage). Video, yellow frame, and dim hole share this box. */
 const ALIGN_FRAMES = {
   face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80, zoom: 2, yBias: 0 },
   tongue: { left: 0.36, top: 0.22, width: 0.28, height: 0.52, zoom: 3.7, yBias: 0.08 },
 };
+/**
+ * Face color JPEG vs the yellow guides. One cell is 1/4 of the guide-frame height.
+ * Shift the analysis window UP by 1/3 of a cell = (1/3) × (1/4) = 1/12 of that height.
+ * Guides are not moved. Tongue capture does not use this.
+ */
+const FACE_COLOR_SHIFT_Y = (1 / 3) * (1 / 4);
 const ALIGN_HINTS = {
   face: "對準臉：髮際以下～下巴，兩耳以內",
   tongue: "對準舌：上緣對齊上排牙齒，舌體填滿黃框",
@@ -30,6 +36,7 @@ const organs = [
   { key: "liver", name: "肝", score: "liver_score", pattern: "liver_pattern", spots: [{ x: 44, y: 41.5 }] },
   { key: "gallbladder", name: "膽", score: "gallbladder_score", pattern: "gallbladder_pattern", spots: [{ x: 41.5, y: 44.5 }] },
   { key: "spleen", name: "脾", score: "spleen_score", pattern: "spleen_pattern", spots: [{ x: 56.5, y: 43.5 }] },
+  { key: "stomach", name: "胃", score: "stomach_score", pattern: "stomach_pattern", spots: [{ x: 60, y: 48 }] },
   { key: "large_intestine", name: "大腸", score: "large_intestine_score", pattern: "large_intestine_pattern", spots: [{ x: 38, y: 52 }, { x: 62, y: 52 }] },
   { key: "small_intestine", name: "小腸", score: "small_intestine_score", pattern: "small_intestine_pattern", spots: [{ x: 50, y: 54 }] },
   { key: "kidney", name: "腎", score: "kidney_score", pattern: "kidney_pattern", spots: [{ x: 44, y: 61 }, { x: 56, y: 61 }] },
@@ -351,7 +358,7 @@ function captureTongueFrame() {
   });
 }
 
-/** Pixels shown inside the yellow face clip (2× CSS zoom + object-fit). Same window the guides divide into 12 cells. */
+/** Pixels shown inside the yellow face clip (2× CSS zoom + object-fit). The guides divide this window into 12 cells. */
 function faceClipSource(vw, vh) {
   const clip = document.getElementById("camera-clip");
   const vr = video.getBoundingClientRect();
@@ -376,10 +383,25 @@ function faceClipSource(vw, vh) {
   return coverSourceWindow(vw, vh, ew, eh, localX, localY, clipW, clipH, { x: 0.5, y: 0.5 });
 }
 
+/** Yellow-guide window translated up by FACE_COLOR_SHIFT_Y. Same width and height; top starts 1/12 of the frame higher. */
+function faceAnalysisSource(vw, vh) {
+  const source = faceClipSource(vw, vh);
+  const shift = source.srcH * FACE_COLOR_SHIFT_Y;
+  return {
+    sx: source.sx,
+    sy: source.sy - shift,
+    srcW: source.srcW,
+    srcH: source.srcH,
+    destW: source.destW,
+    destH: source.destH,
+    shift,
+  };
+}
+
 function captureFaceFrame() {
   const vw = video.videoWidth || 640;
   const vh = video.videoHeight || 480;
-  const source = faceClipSource(vw, vh);
+  const source = faceAnalysisSource(vw, vh);
   let sx = source.sx;
   let sy = source.sy;
   let srcW = source.srcW;
@@ -416,6 +438,25 @@ function captureFrame(kind) {
   return captureFaceFrame();
 }
 
+const SYNDROME_STICKERS = new Set([
+  "strong-hot.png",
+  "strong-cold.png",
+  "weak-hot.png",
+  "weak-cold.png",
+  "mositure.png",
+]);
+
+/** Opacity for the four syndrome stickers. 7–10 is normal, so those stickers are hidden. */
+function syndromeStickerOpacity(score) {
+  const transparency = { 1: 0, 2: 0.2, 3: 0.4, 4: 0.5, 5: 0.6, 6: 0.8 };
+  if (score == null || score === "") return 1;
+  const n = Math.round(Number(score));
+  if (!Number.isFinite(n)) return 1;
+  if (n >= 7) return 0;
+  const t = transparency[Math.max(1, Math.min(6, n))];
+  return 1 - t;
+}
+
 function drawOrgans(result) {
   lastResult = result;
   const box = document.getElementById("organ-pins");
@@ -424,6 +465,9 @@ function drawOrgans(result) {
     if (org.femaleOnly && currentBody !== "girl") return;
     const file = result.overlays ? result.overlays[org.key] : null;
     if (!file) return;
+    const score = result.scores ? result.scores[org.score] : result[org.score];
+    const opacity = SYNDROME_STICKERS.has(file) ? syndromeStickerOpacity(score) : 1;
+    if (opacity <= 0) return;
     const pattern = (result.patterns && result.patterns[org.pattern]) || "";
     org.spots.forEach((spot) => {
       const img = document.createElement("img");
@@ -432,6 +476,7 @@ function drawOrgans(result) {
       img.alt = org.name + pattern;
       img.style.left = spot.x + "%";
       img.style.top = spot.y + "%";
+      img.style.opacity = String(opacity);
       box.appendChild(img);
       const label = document.createElement("div");
       label.className = "sticker-label";

@@ -7,6 +7,7 @@ TREND_ORGANS = [
     {"key": "heart", "label": "心", "score_key": "heart_score", "color": "#d32f2f", "marker": "circle"},
     {"key": "liver", "label": "肝", "score_key": "liver_score", "color": "#2e7d32", "marker": "triangle"},
     {"key": "spleen", "label": "脾", "score_key": "spleen_score", "color": "#ef6c00", "marker": "square"},
+    {"key": "stomach", "label": "胃", "score_key": "stomach_score", "color": "#8d6e63", "marker": "rounded"},
     {"key": "lung", "label": "肺", "score_key": "lung_score", "color": "#1565c0", "marker": "diamond"},
     {"key": "kidney", "label": "腎", "score_key": "kidney_score", "color": "#6a1b9a", "marker": "x"},
     {"key": "gallbladder", "label": "膽", "score_key": "gallbladder_score", "color": "#f9a825", "marker": "star"},

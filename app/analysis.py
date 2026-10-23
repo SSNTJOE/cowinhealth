@@ -19,7 +19,6 @@ from .syndrome import (
     organ_patterns_from_color_blocks,
     organ_scores_from_color_blocks,
     overlay_from_pattern_label,
-    pulse_is_present,
     serialize_organ_health,
 )
 
@@ -31,6 +30,8 @@ def clamp(value: float, low: int = 1, high: int = 10) -> int:
 COLOR_DELTA_TINY = 1.0
 DELTA_E_REF = 20.0
 TONGUE_COAT_DELTA_E_REF = 24.0
+# Inside this ΔE of the teaching normal: scores 7–10. Beyond it: 1–6.
+NORMAL_DELTA_E = 3.0
 FACE_ZH_TO_ORGAN = {
     "小腸": "small_intestine",
     "大腸": "large_intestine",
@@ -38,7 +39,7 @@ FACE_ZH_TO_ORGAN = {
     "肝": "liver",
     "膽": "gallbladder",
     "脾": "spleen",
-    "胃": "spleen",
+    "胃": "stomach",
     "心": "heart",
     "腎": "kidney",
 }
@@ -83,11 +84,23 @@ def relative_delta_health_score(
     return clamp(10 - 9 * (delta_e - d_min) / span)
 
 
-def delta_e_ref_health_score(delta_e: float, ref: float = DELTA_E_REF) -> int:
-    """10 at ΔE≈0 vs teaching normal; 1 at ΔE_ref (face/舌質 20, 厚膩苔可用 24)."""
-    if ref <= 0:
+def delta_e_ref_health_score(
+    delta_e: float,
+    ref: float = DELTA_E_REF,
+    spec: float = NORMAL_DELTA_E,
+) -> int:
+    """Inside the normal ΔE spec: 10 at the teaching color, 7 at the spec edge.
+
+    Outside the spec: 6 just past the edge, 1 at ΔE_ref (face/舌質 20, 舌苔 24) or farther.
+    """
+    delta = max(0.0, float(delta_e))
+    if spec <= 0:
         return 10
-    return clamp(10 - 9 * max(0.0, float(delta_e)) / ref)
+    if delta <= spec:
+        return clamp(10 - 3 * delta / spec)
+    span = max(float(ref) - spec, 1e-6)
+    outside = min(1.0, (delta - spec) / span)
+    return clamp(6 - 5 * outside)
 
 
 def apply_relative_color_scores(
@@ -108,7 +121,7 @@ def apply_relative_color_scores(
             block["health_score"] = delta_e_ref_health_score(delta, ref)
     return {
         "formula": (
-            "score=clamp(round(10-9*ΔE/ΔE_ref),1,10)；ΔE=0→10，ΔE_ref→1；7–10 健康。"
+            "規格內（ΔE≤3）10→7；超出規格 6→1（ΔE_ref 為 1 分）。7–10 正常。"
             if mode != "minmax"
             else "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；近基準→10，最大ΔE→1。"
         ),
@@ -958,7 +971,18 @@ def average_stats(items: list[dict[str, float]]) -> dict[str, float]:
     return {key: sum(item.get(key, 0) for item in items) / n for key in keys}
 
 
+# Face color photo vs the yellow guides. One cell is 1/4 of the guide frame.
+# Web captureFaceFrame and Android FaceFrame.cropVisibleZoom move that window
+# up by 1/3 of a cell before upload. crop_cell then splits the uploaded image;
+# do not subtract this again or the lips move by 1/6 of the frame.
+FACE_COLOR_SHIFT_Y = 1.0 / 12.0
+
+
 def crop_cell(image: Image.Image, row: int, col: int, half: str | None = None) -> Image.Image:
+    """One cell of the 4×3 face grid. Rows are equal quarters of the uploaded face photo.
+
+    That photo already starts FACE_COLOR_SHIFT_Y above the yellow guides.
+    """
     left, right = col / 3.0, (col + 1) / 3.0
     top, bottom = row / 4.0, (row + 1) / 4.0
     if half == "upper":
@@ -1723,10 +1747,10 @@ def analyze_face_grid(
             lower_read = read_cell(lower_stats, lab_base, "face", lower_crop)
             if lower_read["bias"] == "實熱":
                 lower_read["meaning"] = "鼻頭實熱 → 胃火"
-                lower_read["targets"] = ["spleen"]
+                lower_read["targets"] = ["stomach"]
             elif lower_read["bias"] == "濕氣":
                 lower_read["meaning"] = "鼻翼濕氣 → 脾胃濕證"
-                lower_read["targets"] = ["spleen"]
+                lower_read["targets"] = ["spleen", "stomach"]
             reading = lower_read if (lower_read.get("score") or 0) >= (upper_read.get("score") or 0) else upper_read
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
             split = [
@@ -2944,7 +2968,12 @@ def inspect_image(
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
     else:
+        # Uploaded JPEG is the yellow frame shifted up by 1/12. Cells sample that
+        # image (after the existing background crop). No second 1/12 here.
         image, crop_info = isolate_subject(raw_image, shot_type)
+        crop_info = dict(crop_info)
+        crop_info["color_shift_y"] = -FACE_COLOR_SHIFT_Y
+        crop_info["color_shift_cell"] = "1/3"
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []
@@ -3051,19 +3080,16 @@ def analyze_session(
     pulse_notes = apply_pulse(evidence, pulse)
     _combined_scores, patterns, overlays = finalize(evidence)
 
-    face_scores = ((face_grid or {}).get("color_health") or {}).get("organ_scores") if face_grid else None
-    body_scores = ((tongue_grid or {}).get("body_color_health") or {}).get("organ_scores") if tongue_grid else None
-    coat_scores = ((tongue_grid or {}).get("coat_color_health") or {}).get("organ_scores") if tongue_grid else None
-    pulse_scores = None
-    if pulse_is_present(pulse):
-        pulse_only = empty_evidence()
-        apply_pulse(pulse_only, pulse)
-        pulse_scores = finalize(pulse_only)[0]
+    face_color = (face_grid or {}).get("color_health") or {}
+    body_color = (tongue_grid or {}).get("body_color_health") or {}
+    coat_color = (tongue_grid or {}).get("coat_color_health") or {}
+    face_scores = face_color.get("organ_scores") if face_grid else None
+    body_scores = body_color.get("organ_scores") if tongue_grid else None
+    coat_scores = coat_color.get("organ_scores") if tongue_grid else None
     source_maps = {
         "face": face_scores,
         "tongue_body": body_scores,
         "tongue_coat": coat_scores,
-        "pulse": pulse_scores,
     }
     scores, breakdown = compose_organ_health(source_maps)
     used_sources = [key for key, value in source_maps.items() if value is not None]
@@ -3090,9 +3116,35 @@ def analyze_session(
                 for key, _name, _score_key, pattern_key in ORGAN_META:
                     if key == organ and patterns.get(pattern_key) in ("待觀察", "未定", "健康", None, ""):
                         patterns[pattern_key] = "濕氣較重"
+    healthy_labels = {"健康", "待觀察", "未定", "正常", "接近正常", "接近基本色", "", None}
+    color_sources = (
+        (face_scores, face_color.get("organ_patterns") or {}),
+        (body_scores, body_color.get("organ_patterns") or {}),
+        (coat_scores, coat_color.get("organ_patterns") or {}),
+    )
+    for key, _name, score_key, pattern_key in ORGAN_META:
+        score = scores[score_key]
+        if score >= 7:
+            patterns[pattern_key] = "健康"
+            overlays[key] = None
+            continue
+        ranked: list[tuple[int, str]] = []
+        for src_scores, src_patterns in color_sources:
+            if not src_scores or score_key not in src_scores:
+                continue
+            label = src_patterns.get(key) or ""
+            ranked.append((int(src_scores[score_key]), str(label)))
+        if not ranked:
+            continue
+        _worst_score, worst_label = min(ranked, key=lambda item: item[0])
+        if worst_label not in healthy_labels:
+            patterns[pattern_key] = worst_label
+            overlay = overlay_from_pattern_label(worst_label)
+            if overlay:
+                overlays[key] = overlay
     all_findings = findings + text_notes + pulse_notes
     if not all_findings:
-        all_findings = ["資料不足，各臟腑先記 5 分（未定），不放置證型圖"]
+        all_findings = ["資料不足，各臟腑先記 10 分（正常），不放置證型圖"]
 
     return {
         "dominant_color": dominant,

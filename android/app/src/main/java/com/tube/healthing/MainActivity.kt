@@ -463,6 +463,7 @@ class MainActivity : AppCompatActivity() {
                             binding.bodyMap,
                             binding.bodyImage,
                             json.optJSONObject("overlays"),
+                            json.optJSONObject("scores"),
                             female,
                             api::mediaUrl,
                             http
