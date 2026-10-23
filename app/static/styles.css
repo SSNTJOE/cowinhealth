@@ -254,6 +254,44 @@ video, canvas, img.preview {
 table { width: 100%; border-collapse: collapse; font-size: 12px; overflow-x: auto; display: block; }
 th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: center; white-space: nowrap; }
 .note { font-size: 13px; color: var(--muted); }
+.combo { position: relative; }
+.combo-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(80, 50, 20, 0.12);
+}
+.combo-list[hidden] { display: none; }
+.combo-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.combo-list button:hover,
+.combo-list button[aria-selected="true"] {
+  background: #fff4e5;
+}
+.combo-empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
 .recipe-detail {
   white-space: pre-wrap;
   margin-top: 12px;

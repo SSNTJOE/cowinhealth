@@ -640,7 +640,7 @@ FACE_CELL_LAYOUT = [
     {"id": 5, "row": 1, "col": 1, "name": "眼", "organs": "肝", "targets": ["liver"], "kind": "eye"},
     {"id": 6, "row": 1, "col": 2, "name": "右眼", "organs": "白睛／肝膽／肺", "targets": ["liver", "lung", "gallbladder"], "kind": "eye", "side": "right"},
     {"id": 7, "row": 2, "col": 0, "name": "左頰", "organs": "顴／小腸／大腸", "targets": ["small_intestine", "large_intestine"], "kind": "cheek"},
-    {"id": 8, "row": 2, "col": 1, "name": "鼻子", "organs": "鼻／脾胃／肺", "targets": ["spleen", "lung"], "kind": "nose"},
+    {"id": 8, "row": 2, "col": 1, "name": "鼻子", "organs": "鼻／脾胃／肺", "targets": ["spleen", "stomach", "lung"], "kind": "nose"},
     {"id": 9, "row": 2, "col": 2, "name": "右頰", "organs": "顴／小腸／大腸", "targets": ["small_intestine", "large_intestine"], "kind": "cheek"},
     {"id": 10, "row": 3, "col": 0, "name": "左下頜", "organs": "腎", "targets": ["kidney"]},
     {"id": 12, "row": 3, "col": 1, "name": "唇", "organs": "脾", "targets": ["spleen"], "kind": "lip"},
@@ -819,35 +819,35 @@ TONGUE_CLASS_META = {
         "api_pattern": "實證熱證",
         "overlay": "strong-hot.png",
         "patterns": (("實證", 1.6), ("熱證", 1.8)),
-        "targets": ("spleen", "large_intestine", "heart"),
+        "targets": ("spleen", "stomach", "large_intestine", "heart"),
     },
     "虛熱": {
         "bias": "虛熱",
         "api_pattern": "虛證熱證",
         "overlay": "weak-hot.png",
         "patterns": (("虛證", 1.6), ("熱證", 1.8)),
-        "targets": ("heart", "kidney", "spleen"),
+        "targets": ("heart", "kidney", "spleen", "stomach"),
     },
     "實寒": {
         "bias": "實寒",
         "api_pattern": "實證寒證",
         "overlay": "strong-cold.png",
         "patterns": (("實證", 1.6), ("寒證", 1.8)),
-        "targets": ("heart", "kidney"),
+        "targets": ("heart", "kidney", "stomach"),
     },
     "虛寒": {
         "bias": "虛寒",
         "api_pattern": "虛證寒證",
         "overlay": "weak-cold.png",
         "patterns": (("虛證", 1.6), ("寒證", 1.8)),
-        "targets": ("spleen", "kidney"),
+        "targets": ("spleen", "stomach", "kidney"),
     },
     "濕症": {
         "bias": "濕症",
         "api_pattern": "濕氣較重",
         "overlay": DAMP_OVERLAY,
         "patterns": (("實證", 1.5),),
-        "targets": ("spleen",),
+        "targets": ("spleen", "stomach"),
     },
 }
 # Shared face and lip color table.
@@ -971,17 +971,18 @@ def average_stats(items: list[dict[str, float]]) -> dict[str, float]:
     return {key: sum(item.get(key, 0) for item in items) / n for key in keys}
 
 
-# Face color photo vs the yellow guides. One cell is 1/4 of the guide frame.
-# Web captureFaceFrame and Android FaceFrame.cropVisibleZoom move that window
-# up by 1/3 of a cell before upload. crop_cell then splits the uploaded image;
-# do not subtract this again or the lips move by 1/6 of the frame.
-FACE_COLOR_SHIFT_Y = 1.0 / 12.0
+# Face color photo vs the yellow guides. One cell is 1/4 of the analysis frame.
+# Web captureFaceFrame and Android FaceFrame.cropVisibleZoom already move the
+# face up by 1/4 of a cell and scale it to 0.9 before upload. crop_cell splits
+# that image; do not shift or scale it again.
+FACE_COLOR_SHIFT_CELLS = 0.25
+FACE_COLOR_SCALE = 0.9
 
 
 def crop_cell(image: Image.Image, row: int, col: int, half: str | None = None) -> Image.Image:
     """One cell of the 4×3 face grid. Rows are equal quarters of the uploaded face photo.
 
-    That photo already starts FACE_COLOR_SHIFT_Y above the yellow guides.
+    That photo already has the face 1/4 cell higher than the yellow guides, at 0.9×.
     """
     left, right = col / 3.0, (col + 1) / 3.0
     top, bottom = row / 4.0, (row + 1) / 4.0
@@ -1774,7 +1775,7 @@ def analyze_face_grid(
                 },
             ]
             remember(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []), upper_read)
-            remember(lower_read.get("targets") or (["spleen"] if lower_read.get("overlay") else []), lower_read)
+            remember(lower_read.get("targets") or (["spleen", "stomach"] if lower_read.get("overlay") else []), lower_read)
             face_blocks.append(make_face_block(f"face-{cell_id}-upper", upper_stats, organs_from_zh("鼻上／肺") or ["lung"]))
             face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, organs_from_zh("鼻頭／脾胃") or ["spleen"]))
         elif kind == "eye" and spec.get("side") in ("left", "right"):
@@ -1786,7 +1787,7 @@ def analyze_face_grid(
                 overlay = part.get("overlay")
                 if not overlay:
                     continue
-                organ_names = {"肺": "lung", "肝": "liver", "膽": "gallbladder", "脾": "spleen", "胃": "spleen", "心": "heart"}
+                organ_names = {"肺": "lung", "肝": "liver", "膽": "gallbladder", "脾": "spleen", "胃": "stomach", "心": "heart"}
                 organs = []
                 for token in part["organs"].replace("／", "、").split("、"):
                     for zh, key in organ_names.items():
@@ -2046,7 +2047,7 @@ TONGUE_SIXTH_NOTE = "使用者列上中下左右五塊；第六層為全舌舌�
 TONGUE_TIP_HEAT_FLAG = "心肺區偏紅，提示心火偏旺"
 TONGUE_ZONE_TARGETS = {
     "top": ("kidney",),
-    "center": ("spleen",),
+    "center": ("spleen", "stomach"),
     "bottom": ("heart", "lung"),
     "left": ("liver", "gallbladder"),
     "right": ("liver", "gallbladder"),
@@ -2272,7 +2273,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "meaning": "胃陰枯竭、全身大虛",
             "overlay": "weak-hot.png",
             "patterns": (("虛證", 2.0), ("熱證", 1.4)),
-            "targets": ("spleen",),
+            "targets": ("spleen", "stomach"),
             "score": 9.0,
         }
     yellow_dry = (
@@ -2287,7 +2288,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "meaning": "實熱亢盛、熱極傷津",
             "overlay": "strong-hot.png",
             "patterns": (("熱證", 2.2), ("實證", 1.8)),
-            "targets": ("spleen", "large_intestine"),
+            "targets": ("spleen", "stomach", "large_intestine"),
             "score": 9.0,
         }
     yellow_greasy = (
@@ -2304,7 +2305,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "overlay": "strong-hot.png",
             "patterns": (("熱證", 2.0), ("實證", 1.6)),
             "damp": True,
-            "targets": ("spleen", "large_intestine"),
+            "targets": ("spleen", "stomach", "large_intestine"),
             "score": 9.0,
         }
     white_slip = (
@@ -2320,7 +2321,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "meaning": "脾胃虛寒、寒濕內停",
             "overlay": "weak-cold.png",
             "patterns": (("虛證", 1.8), ("寒證", 2.0)),
-            "targets": ("spleen",),
+            "targets": ("spleen", "stomach"),
             "score": 9.0,
         }
     return None
@@ -2566,10 +2567,10 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                     f"中（脾胃／舌中）舌苔 b* 相對他區 {db_peer:+.1f}、L* {dL_peer:+.1f} → {meaning}（{TEACHING_NOTE}）"
                 )
                 zone_findings.append(interpretation)
-                remember(("spleen", "large_intestine"), "strong-hot.png", (("熱證", 2.0), ("實證", 1.6)), 8.0, "coat")
+                remember(("spleen", "stomach", "large_intestine"), "strong-hot.png", (("熱證", 2.0), ("實證", 1.6)), 8.0, "coat")
                 remember(("gallbladder",), "strong-hot.png", (("熱證", 1.3),), 4.0, "coat")
                 if not scorch:
-                    remember(("spleen",), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 9.0, "coat")
+                    remember(("spleen", "stomach"), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 9.0, "coat")
             elif cold_coat:
                 bias, meaning = "白厚苔", "脾胃虛寒（寒濕）"
                 interpretation = (
@@ -2577,7 +2578,7 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                     f"脾胃虛寒（寒濕）、白厚苔（{TEACHING_NOTE}）"
                 )
                 zone_findings.append(interpretation)
-                remember(("spleen",), "weak-cold.png", (("虛證", 1.8), ("寒證", 2.0)), 8.0, "coat")
+                remember(("spleen", "stomach"), "weak-cold.png", (("虛證", 1.8), ("寒證", 2.0)), 8.0, "coat")
             else:
                 coat_bias, coat_meaning = tongue_coat_from_lab(center_coat, peer)
                 if coat_bias != "苔色中性":
@@ -2974,12 +2975,12 @@ def inspect_image(
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
     else:
-        # Uploaded JPEG is the yellow frame shifted up by 1/12. Cells sample that
-        # image (after the existing background crop). No second 1/12 here.
+        # Uploaded JPEG already moved the face up by 1/4 of a cell and scaled it
+        # to 0.9. Cells sample that image (after the existing background crop).
         image, crop_info = isolate_subject(raw_image, shot_type)
         crop_info = dict(crop_info)
-        crop_info["color_shift_y"] = -FACE_COLOR_SHIFT_Y
-        crop_info["color_shift_cell"] = "1/3"
+        crop_info["color_shift_cells"] = FACE_COLOR_SHIFT_CELLS
+        crop_info["color_scale"] = FACE_COLOR_SCALE
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []

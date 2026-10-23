@@ -16,11 +16,12 @@ const ALIGN_FRAMES = {
   tongue: { left: 0.36, top: 0.22, width: 0.28, height: 0.52, zoom: 3.7, yBias: 0.08 },
 };
 /**
- * Face color JPEG vs the yellow guides. One cell is 1/4 of the guide-frame height.
- * Shift the analysis window UP by 1/3 of a cell = (1/3) × (1/4) = 1/12 of that height.
- * Guides are not moved. Tongue capture does not use this.
+ * Face color JPEG vs the yellow guides. Guides stay put. Tongue capture does not use this.
+ * One cell is 1/4 of the analysis frame. The face itself moves UP by 1/4 of a cell,
+ * and the captured window is 1/0.9 of the guide so the face draws at 0.9×.
  */
-const FACE_COLOR_SHIFT_Y = (1 / 3) * (1 / 4);
+const FACE_SHIFT_UP_CELLS = 0.25;
+const FACE_SCALE = 0.9;
 const ALIGN_HINTS = {
   face: "對準臉：髮際以下～下巴，兩耳以內",
   tongue: "對準舌：上緣對齊上排牙齒，舌體填滿黃框",
@@ -391,18 +392,22 @@ function faceClipSource(vw, vh) {
   return coverSourceWindow(vw, vh, ew, eh, localX, localY, clipW, clipH, { x: 0.5, y: 0.5 });
 }
 
-/** Yellow-guide window translated up by FACE_COLOR_SHIFT_Y. Same width and height; top starts 1/12 of the frame higher. */
+/** Guide window, then the face moves up 1/4 cell and shrinks to 0.9×. */
 function faceAnalysisSource(vw, vh) {
   const source = faceClipSource(vw, vh);
-  const shift = source.srcH * FACE_COLOR_SHIFT_Y;
+  const srcW = source.srcW / FACE_SCALE;
+  const srcH = source.srcH / FACE_SCALE;
+  const sx = source.sx + (source.srcW - srcW) / 2;
+  const syCentered = source.sy + (source.srcH - srcH) / 2;
+  const shiftUp = srcH * (FACE_SHIFT_UP_CELLS / 4);
   return {
-    sx: source.sx,
-    sy: source.sy - shift,
-    srcW: source.srcW,
-    srcH: source.srcH,
+    sx,
+    sy: syCentered + shiftUp,
+    srcW,
+    srcH,
     destW: source.destW,
     destH: source.destH,
-    shift,
+    shiftUp,
   };
 }
 
@@ -684,6 +689,18 @@ function renderComplexionHistory(records) {
   box.innerHTML = `<table><thead><tr><th>日期</th><th>臉色色碼</th><th>偏色</th><th>證型傾向</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function shownScore(score) {
+  const n = Number(score);
+  return Number.isFinite(n) ? String(n) : "10";
+}
+
+function patternLabel(score, pattern) {
+  const n = Number(score);
+  if (!Number.isFinite(n) || n >= 7) return "健康";
+  if (n === 5 && (pattern === "未定" || pattern == null || pattern === "")) return "待觀察";
+  return pattern || "";
+}
+
 function renderResult(result) {
   if (result.dominant_color) {
     document.getElementById("color-chip").style.background = result.dominant_color;
@@ -712,7 +729,9 @@ function renderResult(result) {
   organs.forEach((org) => {
     const div = document.createElement("div");
     div.className = "score";
-    div.innerHTML = `<span>${org.name}</span><b>${result.scores[org.score]}</b><small>${result.patterns[org.pattern]}</small>`;
+    const score = result.scores ? result.scores[org.score] : result[org.score];
+    const rawPattern = result.patterns ? result.patterns[org.pattern] : "";
+    div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
     scores.appendChild(div);
   });
   drawOrgans(result);
@@ -726,15 +745,64 @@ function renderResult(result) {
   }
 }
 
+let countryNames = [];
 let recipeRows = [];
+const COMBO_LIMIT = 80;
+
+function recipeLabel(row) {
+  return row.name + (row.benefit_match ? " ★" : "");
+}
+
+function closeCombo(input, list) {
+  if (!list) return;
+  list.hidden = true;
+  if (input) input.setAttribute("aria-expanded", "false");
+}
+
+function renderCombo(input, list, labels, onPick) {
+  if (!input || !list) return;
+  const query = input.value.trim().toLowerCase();
+  const matched = labels.filter((label) => String(label).toLowerCase().includes(query));
+  list.innerHTML = "";
+  if (!matched.length) {
+    const empty = document.createElement("li");
+    empty.className = "combo-empty";
+    empty.textContent = uiText("searchEmpty");
+    list.appendChild(empty);
+  } else {
+    matched.slice(0, COMBO_LIMIT).forEach((label) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        input.value = label;
+        closeCombo(input, list);
+        onPick(label);
+      });
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+    if (matched.length > COMBO_LIMIT) {
+      const more = document.createElement("li");
+      more.className = "combo-empty";
+      more.textContent = uiText("searchMore").replace("{n}", String(matched.length - COMBO_LIMIT));
+      list.appendChild(more);
+    }
+  }
+  list.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
 
 function showSelectedRecipe() {
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   if (!pick || !detail) return;
-  const row = recipeRows[Number(pick.value)];
-  if (!row || pick.value === "") {
-    if (pick.value === "") detail.textContent = "";
+  const label = pick.value.trim();
+  const row = recipeRows.find((item) => recipeLabel(item) === label);
+  if (!row) {
+    if (!label) detail.textContent = "";
     return;
   }
   const lines = [
@@ -749,68 +817,105 @@ function showSelectedRecipe() {
 }
 
 async function loadRecipeCountries() {
-  const select = document.getElementById("recipe-country");
-  if (!select) return;
-  const current = select.value;
+  const input = document.getElementById("recipe-country");
+  if (!input) return;
+  const current = input.value.trim();
   const data = await api("/api/recipes/countries");
-  select.innerHTML = "";
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = uiText("pickCountry");
-  select.appendChild(first);
-  (data.countries || []).forEach((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    select.appendChild(option);
-  });
-  if (current && [...select.options].some((option) => option.value === current)) {
-    select.value = current;
+  countryNames = data.countries || [];
+  if (current && countryNames.includes(current)) {
+    input.value = current;
   }
 }
 
 async function loadRecipesForCountry() {
-  const countrySelect = document.getElementById("recipe-country");
+  const countryInput = document.getElementById("recipe-country");
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
-  if (!countrySelect || !pick || !detail) return;
+  const list = document.getElementById("recipe-name-list");
+  if (!countryInput || !pick || !detail) return;
+  const country = countryInput.value.trim();
   recipeRows = [];
-  pick.innerHTML = "";
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = uiText("pickRecipe");
-  pick.appendChild(first);
+  pick.value = "";
+  closeCombo(pick, list);
   detail.textContent = "";
-  if (!countrySelect.value) return;
+  if (!countryNames.includes(country)) return;
   const data = await api("/api/recipes?" + new URLSearchParams({
-    country: countrySelect.value,
+    country,
     lang: getUiLang(),
   }));
   recipeRows = data.recipes || [];
   if (!recipeRows.length) {
     detail.textContent = uiText("emptyRecipes");
-    return;
   }
-  recipeRows.forEach((row, index) => {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = row.name + (row.benefit_match ? " ★" : "");
-    pick.appendChild(option);
-  });
 }
 
 function bindRecipePickers() {
   const country = document.getElementById("recipe-country");
+  const countryList = document.getElementById("recipe-country-list");
   const pick = document.getElementById("recipe-name");
+  const pickList = document.getElementById("recipe-name-list");
   if (!country || !pick || country.dataset.bound) return;
   country.dataset.bound = "1";
-  country.addEventListener("change", () => {
+  country.placeholder = uiText("pickCountry");
+  pick.placeholder = uiText("pickRecipe");
+  const showCountries = () => renderCombo(country, countryList, countryNames, (label) => {
     loadRecipesForCountry().catch((err) => {
       const detail = document.getElementById("recipe-detail");
       if (detail) detail.textContent = formatApiError(err);
     });
   });
-  pick.addEventListener("change", showSelectedRecipe);
+  const showRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), () => {
+    showSelectedRecipe();
+  });
+  country.addEventListener("focus", showCountries);
+  country.addEventListener("click", showCountries);
+  country.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCombo(country, countryList);
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const button = countryList.querySelector("button");
+    if (!button) return;
+    country.value = button.textContent;
+    closeCombo(country, countryList);
+    loadRecipesForCountry().catch((err) => {
+      const detail = document.getElementById("recipe-detail");
+      if (detail) detail.textContent = formatApiError(err);
+    });
+  });
+  country.addEventListener("input", () => {
+    showCountries();
+    const exact = countryNames.includes(country.value.trim());
+    if (exact) {
+      loadRecipesForCountry().catch((err) => {
+        const detail = document.getElementById("recipe-detail");
+        if (detail) detail.textContent = formatApiError(err);
+      });
+    } else {
+      recipeRows = [];
+      pick.value = "";
+      closeCombo(pick, pickList);
+      const detail = document.getElementById("recipe-detail");
+      if (detail) detail.textContent = "";
+    }
+  });
+  country.addEventListener("blur", () => closeCombo(country, countryList));
+  pick.addEventListener("focus", showRecipes);
+  pick.addEventListener("click", showRecipes);
+  pick.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCombo(pick, pickList);
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const button = pickList.querySelector("button");
+    if (!button) return;
+    pick.value = button.textContent;
+    closeCombo(pick, pickList);
+    showSelectedRecipe();
+  });
+  pick.addEventListener("input", () => {
+    showRecipes();
+    showSelectedRecipe();
+  });
+  pick.addEventListener("blur", () => closeCombo(pick, pickList));
 }
 
 async function loadRecords() {
@@ -846,10 +951,8 @@ async function loadRecords() {
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
       const cells = organs.map((o) => {
-        const pattern = Number(r[o.score]) >= 7 && (r[o.pattern] === "未定" || r[o.pattern] === "待觀察")
-          ? "健康"
-          : Number(r[o.score]) === 5 && r[o.pattern] === "未定" ? "待觀察" : (r[o.pattern] || "");
-        return `<td>${r[o.score]} ${pattern}</td>`;
+        const pattern = patternLabel(r[o.score], r[o.pattern]);
+        return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
       }).join("");
       return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
     })

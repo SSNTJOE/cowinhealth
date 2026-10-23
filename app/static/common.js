@@ -212,11 +212,13 @@ const UI_I18N = {
     dietLink: "網路食療搜尋連結",
     acupointLink: "穴道按摩搜尋連結",
     recipeHeading: "今日食譜（教學示範）",
-    recipeNote: "先選國家，再從通過禁忌／過敏篩選的食譜裡挑選。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。選定後顯示食材與煮法。教學示範，非診斷。",
+    recipeNote: "在國家欄打字搜尋並選定，再於食譜欄打字縮小範圍。通過禁忌／過敏篩選的食譜才會列出。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。選定後顯示食材與煮法。教學示範，非診斷。",
     country: "國家",
     recipe: "食譜",
-    pickCountry: "請選擇國家",
-    pickRecipe: "請選擇食譜",
+    pickCountry: "輸入國家搜尋",
+    pickRecipe: "輸入食譜搜尋",
+    searchEmpty: "沒有符合的項目",
+    searchMore: "還有 {n} 筆，請再輸入以縮小範圍",
     emptyRecipes: "沒有符合今日證型、禁忌與過敏條件的食譜。",
     fieldRecipe: "食譜",
     fieldMethod: "煮法",
@@ -231,11 +233,13 @@ const UI_I18N = {
     dietLink: "Diet search link",
     acupointLink: "Acupoint massage search",
     recipeHeading: "Today’s recipes (teaching demo)",
-    recipeNote: "Pick a country first. Recipes whose contraindications mention today’s patterns or your conditions are excluded, as are allergen matches. Benefits are preferred when they support today’s patterns. The selected recipe shows ingredients and the cooking method. Teaching demo, not a diagnosis.",
+    recipeNote: "Type in the country field to search, then type in the recipe field to narrow the list. Only recipes that pass today’s contraindication and allergy filters are shown. Benefits are preferred when they support today’s patterns. The selected recipe shows ingredients and the cooking method. Teaching demo, not a diagnosis.",
     country: "Country",
     recipe: "Recipe",
-    pickCountry: "Select a country",
-    pickRecipe: "Select a recipe",
+    pickCountry: "Type to search countries",
+    pickRecipe: "Type to search recipes",
+    searchEmpty: "No matches",
+    searchMore: "{n} more. Keep typing to narrow the list.",
     emptyRecipes: "No recipes pass today’s pattern, contraindication, and allergy filters.",
     fieldRecipe: "Recipe",
     fieldMethod: "Method",
@@ -250,11 +254,13 @@ const UI_I18N = {
     dietLink: "食事療法の検索リンク",
     acupointLink: "経穴マッサージ検索",
     recipeHeading: "本日のレシピ（教材デモ）",
-    recipeNote: "先に国を選びます。禁忌に本日の証型や持病が含まれるもの、アレルゲンに該当するものは除外します。益処が証型に合うものを優先。選んだレシピには材料と作り方を表示します。教材であり診断ではありません。",
+    recipeNote: "国の欄に入力して絞り込み、次にレシピ欄でも入力して範囲を狭めます。禁忌・アレルギーを通過したものだけが表示されます。益処が証型に合うものを優先。選んだレシピには材料と作り方を表示します。教材であり診断ではありません。",
     country: "国",
     recipe: "レシピ",
-    pickCountry: "国を選択",
-    pickRecipe: "レシピを選択",
+    pickCountry: "国名を入力",
+    pickRecipe: "レシピ名を入力",
+    searchEmpty: "一致する項目がありません",
+    searchMore: "ほか {n} 件。続けて入力すると絞り込めます。",
     emptyRecipes: "本日の証型・禁忌・アレルギー条件に合うレシピがありません。",
     fieldRecipe: "レシピ",
     fieldMethod: "作り方",
@@ -269,11 +275,13 @@ const UI_I18N = {
     dietLink: "식이요법 검색 링크",
     acupointLink: "혈자리 마사지 검색",
     recipeHeading: "오늘의 레시피（교육 시연）",
-    recipeNote: "먼저 국가를 고릅니다. 금기에 오늘 증형이나 질환이 있거나 알레르기가 겹치면 제외합니다. 유익이 증형에 맞는 항목을 우선합니다. 고른 레시피에는 재료와 조리법을 표시합니다. 교육용이며 진단이 아닙니다.",
+    recipeNote: "국가 칸에 입력해 찾고, 레시피 칸에도 입력해 범위를 줄입니다. 금기와 알레르기 조건을 통과한 항목만 나옵니다. 유익이 증형에 맞는 항목을 우선합니다. 고른 레시피에는 재료와 조리법을 표시합니다. 교육용이며 진단이 아닙니다.",
     country: "국가",
     recipe: "레시피",
-    pickCountry: "국가 선택",
-    pickRecipe: "레시피 선택",
+    pickCountry: "국가 입력 검색",
+    pickRecipe: "레시피 입력 검색",
+    searchEmpty: "일치하는 항목 없음",
+    searchMore: "{n}개 더 있습니다. 계속 입력하면 좁혀집니다.",
     emptyRecipes: "오늘의 증형·금기·알레르기 조건에 맞는 레시피가 없습니다.",
     fieldRecipe: "레시피",
     fieldMethod: "조리법",
@@ -336,6 +344,10 @@ function applyUiLangChrome() {
   if (countryLabel) countryLabel.textContent = uiText("country");
   const recipeLabel = document.getElementById("recipe-name-label");
   if (recipeLabel) recipeLabel.textContent = uiText("recipe");
+  const countryInput = document.getElementById("recipe-country");
+  if (countryInput) countryInput.placeholder = uiText("pickCountry");
+  const recipeInput = document.getElementById("recipe-name");
+  if (recipeInput) recipeInput.placeholder = uiText("pickRecipe");
 }
 
 function compactPatternLabel(label) {

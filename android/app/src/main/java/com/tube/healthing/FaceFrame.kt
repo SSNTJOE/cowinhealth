@@ -27,13 +27,16 @@ import kotlin.math.roundToInt
  * cell 8 vertical middle (150,250), cell 12 center (150,350).
  *
  * The on-screen guides stay on that visible frame. The JPEG for face color
- * is the same window shifted up by [COLOR_SHIFT_UP_FRACTION] (1/3 of one cell).
+ * moves the face up by 1/4 of a cell and draws it at [FACE_SCALE] (0.9×).
  */
 object FaceFrame {
     const val PREVIEW_ZOOM = 2f
 
-    /** 1/3 of a cell. A cell is 1/4 of the visible frame, so this is 1/12 of frame height. */
-    const val COLOR_SHIFT_UP_FRACTION = 1f / 12f
+    /** Face size in the color JPEG relative to the yellow-guide window. */
+    const val FACE_SCALE = 0.9f
+
+    /** Cells to move the face up. One cell is 1/4 of the analysis frame. */
+    const val FACE_SHIFT_UP_CELLS = 0.25f
 
     fun cropFileToVisiblePreview(file: File, viewW: Int, viewH: Int) {
         if (viewW < 2 || viewH < 2 || !file.isFile) return
@@ -48,7 +51,8 @@ object FaceFrame {
 
     /**
      * Color-analysis crop: the visible preview (what the yellow guides sit on),
-     * then shifted up by one-third of a cell. Guide drawing is unchanged.
+     * expanded so the face is 0.9×, then sampled lower so the face sits
+     * 1/4 of a cell higher. Guide drawing is unchanged.
      */
     fun cropVisibleZoom(bitmap: Bitmap, viewW: Int, viewH: Int): Bitmap? {
         val bw = bitmap.width.toFloat()
@@ -63,15 +67,23 @@ object FaceFrame {
         val visTop = viewH * margin
         val visRight = viewW * (1f - margin)
         val visBottom = viewH * (1f - margin)
-        val x0 = ((visLeft - offX) / fit).roundToInt().coerceIn(0, bitmap.width - 1)
-        val y0 = ((visTop - offY) / fit).roundToInt().coerceIn(0, bitmap.height - 1)
-        val x1 = ((visRight - offX) / fit).roundToInt().coerceIn(x0 + 1, bitmap.width)
-        val y1 = ((visBottom - offY) / fit).roundToInt().coerceIn(y0 + 1, bitmap.height)
+        val visW = visRight - visLeft
+        val visH = visBottom - visTop
+        val scaledW = visW / FACE_SCALE
+        val scaledH = visH / FACE_SCALE
+        val cx = (visLeft + visRight) / 2f
+        val cy = (visTop + visBottom) / 2f
+        val shiftDown = scaledH * (FACE_SHIFT_UP_CELLS / 4f)
+        val left = cx - scaledW / 2f
+        val top = cy - scaledH / 2f + shiftDown
+        val right = left + scaledW
+        val bottom = top + scaledH
+        val x0 = ((left - offX) / fit).roundToInt().coerceIn(0, bitmap.width - 1)
+        val y0 = ((top - offY) / fit).roundToInt().coerceIn(0, bitmap.height - 1)
+        val x1 = ((right - offX) / fit).roundToInt().coerceIn(x0 + 1, bitmap.width)
+        val y1 = ((bottom - offY) / fit).roundToInt().coerceIn(y0 + 1, bitmap.height)
         if (x1 <= x0 || y1 <= y0) return null
-        val shift = ((y1 - y0) * COLOR_SHIFT_UP_FRACTION).roundToInt()
-        val sy0 = (y0 - shift).coerceAtLeast(0)
-        val sy1 = (y1 - shift).coerceIn(sy0 + 1, bitmap.height)
-        return Bitmap.createBitmap(bitmap, x0, sy0, x1 - x0, sy1 - sy0)
+        return Bitmap.createBitmap(bitmap, x0, y0, x1 - x0, y1 - y0)
     }
 
     private fun mirrorHorizontal(bitmap: Bitmap): Bitmap {
@@ -171,8 +183,8 @@ class FaceGuideView @JvmOverloads constructor(
         drawEye(canvas, 0f, 100f, mirror = false)
         drawEye(canvas, 300f, 100f, mirror = true)
         canvas.save()
-        // Nose path y is 6–88.90 (mid 47.45). Cell 8 midline is y=250.
-        canvas.translate(100f, 202.55f)
+        // Nose path y is 6–88.90 (mid 47.45). Mark center is y=200, half a cell above the cell 8 midline.
+        canvas.translate(100f, 152.55f)
         canvas.drawPath(nosePath, stroke)
         canvas.restore()
         canvas.save()

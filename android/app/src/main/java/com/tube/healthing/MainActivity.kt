@@ -11,6 +11,8 @@ import android.text.method.LinkMovementMethod
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.Filter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -54,6 +56,9 @@ class MainActivity : AppCompatActivity() {
         "uterus_pattern" to "子宮"
     )
     private var recipeRows: List<JSONObject> = emptyList()
+    private var countryNames: List<String> = emptyList()
+    private var loadedCountry = ""
+    private var recipeLoadToken = 0
     private var lastPatternCsv = ""
     private var countriesLoaded = false
     private var cameraProvider: ProcessCameraProvider? = null
@@ -455,7 +460,11 @@ class MainActivity : AppCompatActivity() {
                 val country = selectedCountry()
                 Thread {
                     loadRecipeCountries()
-                    if (country.isNotBlank()) loadRecipes(country)
+                    if (country.isNotBlank()) {
+                        val token = ++recipeLoadToken
+                        loadedCountry = country
+                        loadRecipes(country, token)
+                    }
                 }.start()
                 binding.bodyImage.post {
                     Thread {
@@ -522,6 +531,8 @@ class MainActivity : AppCompatActivity() {
             "本日のレシピ（教材デモ）",
             "오늘의 레시피（교육 시연）"
         )
+        binding.recipeCountry.hint = t("輸入國家搜尋", "Type to search countries", "国名を入力", "국가 입력 검색")
+        binding.recipePick.hint = t("輸入食譜搜尋", "Type to search recipes", "レシピ名を入力", "레시피 입력 검색")
     }
 
     private fun setupLanguageSpinner() {
@@ -539,45 +550,90 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("ui_lang", code).apply()
                 applyLangChrome()
                 val country = selectedCountry()
-                if (country.isNotBlank()) {
-                    Thread { loadRecipes(country) }.start()
-                }
+                if (country.isNotBlank()) requestRecipes(country)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
     private fun setupRecipeSpinners() {
-        bindSpinner(binding.recipeCountry, listOf(t("請選擇國家", "Select a country", "国を選択", "국가 선택")))
-        bindSpinner(binding.recipePick, listOf(t("請選擇食譜", "Select a recipe", "レシピを選択", "레시피 선택")))
-        binding.recipeCountry.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (position <= 0) {
+        bindSearch(binding.recipeCountry, emptyList())
+        bindSearch(binding.recipePick, emptyList())
+        binding.recipeCountry.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val name = s?.toString()?.trim().orEmpty()
+                if (name == loadedCountry && name.isNotEmpty()) return
+                if (name in countryNames) {
+                    requestRecipes(name)
+                } else {
+                    loadedCountry = ""
+                    recipeLoadToken += 1
                     recipeRows = emptyList()
-                    bindSpinner(binding.recipePick, listOf(t("請選擇食譜", "Select a recipe", "レシピを選択", "레시피 선택")))
+                    binding.recipePick.setText("", false)
+                    bindSearch(binding.recipePick, emptyList())
                     binding.recipeDetail.text = ""
-                    return
                 }
-                Thread { loadRecipes(selectedCountry()) }.start()
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        })
+        binding.recipePick.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                showRecipeDetail(s?.toString()?.trim().orEmpty())
+            }
+        })
+        binding.recipeCountry.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) binding.recipeCountry.showDropDown()
         }
-        binding.recipePick.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                showRecipeDetail(position)
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        binding.recipeCountry.setOnClickListener { binding.recipeCountry.showDropDown() }
+        binding.recipePick.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && recipeRows.isNotEmpty()) binding.recipePick.showDropDown()
+        }
+        binding.recipePick.setOnClickListener {
+            if (recipeRows.isNotEmpty()) binding.recipePick.showDropDown()
         }
     }
 
-    private fun bindSpinner(spinner: android.widget.Spinner, items: List<String>) {
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
+    private fun bindSearch(field: AutoCompleteTextView, items: List<String>) {
+        val source = items.toList()
+        val adapter = object : ArrayAdapter<String>(
+            this,
+            android.R.layout.simple_dropdown_item_1line,
+            ArrayList(source)
+        ) {
+            private val searchFilter = object : Filter() {
+                override fun performFiltering(constraint: CharSequence?): FilterResults {
+                    val query = constraint?.toString()?.trim().orEmpty()
+                    val matched = if (query.isEmpty()) {
+                        source
+                    } else {
+                        source.filter { it.contains(query, ignoreCase = true) }
+                    }
+                    return FilterResults().apply {
+                        values = ArrayList(matched)
+                        count = matched.size
+                    }
+                }
+
+                override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
+                    clear()
+                    @Suppress("UNCHECKED_CAST")
+                    addAll((results?.values as? List<String>) ?: emptyList())
+                    if (count > 0) notifyDataSetChanged() else notifyDataSetInvalidated()
+                }
+            }
+
+            override fun getFilter(): Filter = searchFilter
+        }
+        field.setAdapter(adapter)
+        field.threshold = 1
     }
 
     private fun selectedCountry(): String {
-        val pos = binding.recipeCountry.selectedItemPosition
-        if (pos <= 0) return ""
-        return binding.recipeCountry.selectedItem?.toString().orEmpty()
+        val name = binding.recipeCountry.text?.toString()?.trim().orEmpty()
+        return if (name in countryNames) name else ""
     }
 
     private fun compactPattern(label: String): String {
@@ -636,14 +692,14 @@ class MainActivity : AppCompatActivity() {
             rememberServer()
             val data = api.recipeCountries()
             val arr = data.optJSONArray("countries") ?: JSONArray()
-            val names = ArrayList<String>(arr.length() + 1)
-            names.add(t("請選擇國家", "Select a country", "国を選択", "국가 선택"))
+            val names = ArrayList<String>(arr.length())
             for (i in 0 until arr.length()) {
                 val name = arr.optString(i).trim()
                 if (name.isNotEmpty()) names.add(name)
             }
             countriesLoaded = true
-            runOnUiThread { bindSpinner(binding.recipeCountry, names) }
+            countryNames = names
+            runOnUiThread { bindSearch(binding.recipeCountry, countryNames) }
         } catch (e: Exception) {
             runOnUiThread {
                 Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
@@ -651,15 +707,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadRecipes(countryName: String) {
+    private fun requestRecipes(countryName: String) {
+        if (countryName.isBlank()) return
+        val token = ++recipeLoadToken
+        loadedCountry = countryName
+        Thread { loadRecipes(countryName, token) }.start()
+    }
+
+    private fun loadRecipes(countryName: String, token: Int) {
         if (countryName.isBlank()) return
         try {
             rememberServer()
             val data = api.recipes(countryName, currentLang(), lastPatternCsv)
+            if (token != recipeLoadToken) return
             val arr = data.optJSONArray("recipes") ?: JSONArray()
             val rows = ArrayList<JSONObject>(arr.length())
-            val labels = ArrayList<String>(arr.length() + 1)
-            labels.add(t("請選擇食譜", "Select a recipe", "レシピを選択", "레시피 선택"))
+            val labels = ArrayList<String>(arr.length())
             for (i in 0 until arr.length()) {
                 val row = arr.optJSONObject(i) ?: continue
                 rows.add(row)
@@ -668,7 +731,9 @@ class MainActivity : AppCompatActivity() {
             }
             recipeRows = rows
             runOnUiThread {
-                bindSpinner(binding.recipePick, labels)
+                if (token != recipeLoadToken) return@runOnUiThread
+                bindSearch(binding.recipePick, labels)
+                binding.recipePick.setText("", false)
                 binding.recipeDetail.text = if (rows.isEmpty()) {
                     t(
                         "沒有符合今日證型、禁忌與過敏條件的食譜。教學示範，非診斷。",
@@ -683,10 +748,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showRecipeDetail(position: Int) {
-        val row = recipeRows.getOrNull(position - 1)
+    private fun recipeLabel(row: JSONObject): String {
+        val star = if (row.optBoolean("benefit_match")) " ★" else ""
+        return row.optString("name") + star
+    }
+
+    private fun showRecipeDetail(label: String) {
+        if (recipeRows.isEmpty()) return
+        val row = recipeRows.firstOrNull { recipeLabel(it) == label }
         if (row == null) {
-            if (position <= 0) binding.recipeDetail.text = ""
+            binding.recipeDetail.text = ""
             return
         }
         val recipe = t("食譜", "Recipe", "レシピ", "레시피")
@@ -707,6 +778,20 @@ class MainActivity : AppCompatActivity() {
             "\n\n" + t("教學示範，非診斷。", "Teaching demo, not a diagnosis.", "教材デモであり診断ではありません。", "교육 시연이며 진단이 아닙니다.")
     }
 
+    private fun healthyPatterns(scores: JSONObject?, patterns: JSONObject?): String {
+        if (patterns == null) return ""
+        val copy = JSONObject(patterns.toString())
+        val keys = copy.keys()
+        while (keys.hasNext()) {
+            val patternKey = keys.next()
+            if (!patternKey.endsWith("_pattern")) continue
+            val scoreKey = patternKey.removeSuffix("_pattern") + "_score"
+            val score = scores?.optInt(scoreKey, -1) ?: -1
+            if (score >= 7) copy.put(patternKey, "健康")
+        }
+        return copy.toString()
+    }
+
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
@@ -716,6 +801,6 @@ class MainActivity : AppCompatActivity() {
             t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "：" + json.optString("diet_url") + "\n" +
             t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "：" + json.optString("acupoint_url") + "\n" +
             "分數：" + scores + "\n" +
-            "證型：" + patterns
+            "證型：" + healthyPatterns(scores, patterns)
     }
 }

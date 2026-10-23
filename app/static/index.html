@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=cam10" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam11" />
 </head>
 <body>
   <div class="wrap">
@@ -71,7 +71,7 @@
       </div>
 
       <h3>相機擷取</h3>
-      <p class="note">請把臉或舌頭對進黃色框後再拍照。黃線維持原位。舌象只取黃框內（上緣水平線到下弧，左右貼齊）。臉部判色相片是同一黃框再往上移 1/3 格（一格是框高的 1/4），嘴唇才會落進辨識區。臉部黃框把鏡頭放大兩倍，舌頭黃框也會放大，都不必貼近鏡頭。舌象分析框就是這塊畫面，上、中、下、左、右都貼齊，不留白邊，也不含黃框以外的區域。臉部伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以這張往上移過的畫面分析。</p>
+      <p class="note">請把臉或舌頭對進黃色框後再拍照。黃線維持原位。舌象只取黃框內（上緣水平線到下弧，左右貼齊）。臉部判色相片把整張臉往上移 1/4 格（一格是框高的 1/4），並縮小到黃框的 0.9 倍。臉部黃框把鏡頭放大兩倍，舌頭黃框也會放大，都不必貼近鏡頭。舌象分析框就是這塊畫面，上、中、下、左、右都貼齊，不留白邊，也不含黃框以外的區域。臉部伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以這張往上移過的畫面分析。</p>
       <div class="camera-stage is-face" id="camera-stage">
         <div class="camera-clip" id="camera-clip">
           <video id="camera" autoplay muted playsinline webkit-playsinline></video>
@@ -89,8 +89,8 @@
             <!-- Cell 4 center (50,150) and cell 6 center (250,150). -->
             <use href="#face-eye-guide" transform="translate(0 100)"/>
             <use href="#face-eye-guide" transform="translate(300 100) scale(-1 1)"/>
-            <!-- Nose mark center on cell 8 vertical middle (150,250). Path y is 6–88.90; local mid 47.45. -->
-            <g transform="translate(100 202.55)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Nose mark center half a cell above cell 8 midline (150,200). Path y is 6–88.90; local mid 47.45. -->
+            <g transform="translate(100 152.55)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M50 6C46 24 44 42 42 56C40 68 36 74 28 78C22 81 20 86 26 88C34 91 44 86 50 80C56 86 66 91 74 88C80 86 78 81 72 78C64 74 60 68 58 56C56 42 54 24 50 6Z"/>
             </g>
             <!-- Lip mark center (50,57) on cell 12 center (150,350). -->
@@ -147,11 +147,17 @@
       <p id="links"></p>
 
       <h3 id="recipe-heading">今日食譜（教學示範）</h3>
-      <p id="recipe-note" class="note">先選國家，再從通過禁忌／過敏篩選的食譜裡挑選。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。選定後顯示食材與煮法。教學示範，非診斷。</p>
+      <p id="recipe-note" class="note">在國家欄打字搜尋並選定，再於食譜欄打字縮小範圍。通過禁忌／過敏篩選的食譜才會列出。益處欄盡量對應今日證型；數量不足時仍列出通過禁忌與過敏的食譜。選定後顯示食材與煮法。教學示範，非診斷。</p>
       <label id="recipe-country-label" for="recipe-country">國家</label>
-      <select id="recipe-country"></select>
+      <div class="combo">
+        <input id="recipe-country" type="text" autocomplete="off" placeholder="輸入國家搜尋" role="combobox" aria-expanded="false" aria-controls="recipe-country-list" />
+        <ul id="recipe-country-list" class="combo-list" role="listbox" hidden></ul>
+      </div>
       <label id="recipe-name-label" for="recipe-name">食譜</label>
-      <select id="recipe-name"></select>
+      <div class="combo">
+        <input id="recipe-name" type="text" autocomplete="off" placeholder="輸入食譜搜尋" role="combobox" aria-expanded="false" aria-controls="recipe-name-list" />
+        <ul id="recipe-name-list" class="combo-list" role="listbox" hidden></ul>
+      </div>
       <div id="recipe-detail" class="recipe-detail"></div>
 
       <h3>臟腑圖（虛／實／熱／寒）</h3>
@@ -199,7 +205,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=cam8"></script>
-  <script src="/static/app.js?v=cam13"></script>
+  <script src="/static/common.js?v=cam9"></script>
+  <script src="/static/app.js?v=cam18"></script>
 </body>
 </html>
