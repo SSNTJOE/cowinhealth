@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=cam8" />
+  <link rel="stylesheet" href="/static/styles.css?v=cam9" />
 </head>
 <body>
   <div class="wrap">
@@ -71,7 +71,7 @@
       </div>
 
       <h3>相機擷取</h3>
-      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：從上緣水平線到下弧，左右貼齊黃框兩邊）。舌頭黃框會放大鏡頭畫面，不必貼近鏡頭。舌象分析框就是這塊畫面，上、中、下、左、右都貼齊，不留白邊，也不含黃框以外的區域。臉部伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
+      <p class="note">請把臉或舌頭對進黃色框後再拍照。拍照只取黃框內畫面（臉：髮際以下到下巴、兩耳以內；舌：從上緣水平線到下弧，左右貼齊黃框兩邊）。臉部黃框把鏡頭放大兩倍，舌頭黃框也會放大，都不必貼近鏡頭。舌象分析框就是這塊畫面，上、中、下、左、右都貼齊，不留白邊，也不含黃框以外的區域。臉部伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以黃框對位結果分析。</p>
       <div class="camera-stage is-face" id="camera-stage">
         <div class="camera-clip" id="camera-clip">
           <video id="camera" autoplay muted playsinline webkit-playsinline></video>
@@ -80,17 +80,21 @@
         <div id="align-frame" class="align-frame is-face">
           <svg class="face-guides" viewBox="0 0 300 400" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true" focusable="false">
             <defs>
+              <!-- Pupil at (50,50); placed on cell centers below. Outline centered on that pupil. -->
               <g id="face-eye-guide" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M16 50Q34 36 58 38Q78 40 86 50Q78 60 58 62Q34 64 16 50Z"/>
-                <ellipse cx="64" cy="50" rx="8.5" ry="7.5"/>
+                <path d="M15 50Q33 36 57 38Q77 40 85 50Q77 60 57 62Q33 64 15 50Z"/>
+                <ellipse cx="50" cy="50" rx="8.5" ry="7.5"/>
               </g>
             </defs>
+            <!-- Cell 4 center (50,150) and cell 6 center (250,150). -->
             <use href="#face-eye-guide" transform="translate(0 100)"/>
             <use href="#face-eye-guide" transform="translate(300 100) scale(-1 1)"/>
-            <g transform="translate(100 200)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Nose bottom-center on cell 8 bottom-center (150,300). Local bottom is (50,91). -->
+            <g transform="translate(100 209)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M50 6C46 24 44 42 42 56C40 68 36 74 28 78C22 81 20 86 26 88C34 91 44 86 50 80C56 86 66 91 74 88C80 86 78 81 72 78C64 74 60 68 58 56C56 42 54 24 50 6Z"/>
             </g>
-            <g transform="translate(100 300)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Lip mark center (50,57) on cell 12 center (150,350). -->
+            <g transform="translate(100 293)" fill="none" stroke="#ffcc00" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 50Q24 36 34 36Q44 36 50 44Q56 36 66 36Q76 36 88 50Q70 56 50 54Q30 56 12 50Z"/>
               <path d="M16 54Q50 52 84 54Q72 74 50 78Q28 74 16 54Z"/>
             </g>
@@ -188,6 +192,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/static/common.js?v=cam7"></script>
-  <script src="/static/app.js?v=cam8"></script>
+  <script src="/static/app.js?v=cam9"></script>
 </body>
 </html>

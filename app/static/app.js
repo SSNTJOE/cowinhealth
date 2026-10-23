@@ -12,7 +12,7 @@ let lastFacePreviewUrl = null;
 let lastTonguePreviewUrl = null;
 /** Matches --align-* on #camera-stage (fractions of the stage). Video, yellow frame, dim hole, and capture share this box. */
 const ALIGN_FRAMES = {
-  face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80, zoom: 1, yBias: 0 },
+  face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80, zoom: 2, yBias: 0 },
   tongue: { left: 0.36, top: 0.22, width: 0.28, height: 0.52, zoom: 3.7, yBias: 0.08 },
 };
 const ALIGN_HINTS = {
@@ -247,28 +247,6 @@ function syncAlignMask() {
   dim.style.maskPosition = pos;
 }
 
-function coverDest(vw, vh, sw, sh) {
-  const videoAspect = vw / vh;
-  const stageAspect = sw / sh;
-  if (videoAspect > stageAspect) {
-    const dh = sh;
-    const dw = vw * (sh / vh);
-    return { dx: (sw - dw) / 2, dy: 0, dw, dh };
-  }
-  const dw = sw;
-  const dh = vh * (sw / vw);
-  return { dx: 0, dy: (sh - dh) / 2, dw, dh };
-}
-
-function sourceCrop(vw, vh, zoom, yBias) {
-  const z = Math.max(1, zoom || 1);
-  const srcW = vw / z;
-  const srcH = vh / z;
-  const sx = (vw - srcW) / 2;
-  const sy = Math.max(0, Math.min(vh - srcH, (vh - srcH) / 2 + (yBias || 0) * vh));
-  return { sx, sy, srcW, srcH };
-}
-
 function objectPositionFractions(value) {
   const parts = String(value || "50% 50%").trim().split(/\s+/);
   const axis = (token) => {
@@ -373,31 +351,69 @@ function captureTongueFrame() {
   });
 }
 
-function captureFrame(kind) {
-  const mode = kind === "tongue" ? "tongue" : "face";
-  setAlignMode(mode);
-  if (mode === "tongue") return captureTongueFrame();
+/** Pixels shown inside the yellow face clip (2× CSS zoom + object-fit). Same window the guides divide into 12 cells. */
+function faceClipSource(vw, vh) {
+  const clip = document.getElementById("camera-clip");
+  const vr = video.getBoundingClientRect();
+  const cr = clip ? clip.getBoundingClientRect() : null;
+  if (cr && vr.width > 2 && vr.height > 2 && cr.width > 2 && cr.height > 2) {
+    const pos = objectPositionFractions(getComputedStyle(video).objectPosition);
+    const localX = cr.left - vr.left;
+    const localY = cr.top - vr.top;
+    return coverSourceWindow(vw, vh, vr.width, vr.height, localX, localY, cr.width, cr.height, pos);
+  }
   const stage = document.getElementById("camera-stage") || video;
-  const sw = Math.max(1, stage.clientWidth || video.clientWidth || 640);
-  const sh = Math.max(1, stage.clientHeight || video.clientHeight || 480);
+  const sw = Math.max(1, stage.clientWidth || 640);
+  const sh = Math.max(1, stage.clientHeight || 480);
   const frame = ALIGN_FRAMES.face;
-  const destW = Math.max(1, Math.round(frame.width * sw));
-  const destH = Math.max(1, Math.round(frame.height * sh));
+  const clipW = frame.width * sw;
+  const clipH = frame.height * sh;
+  const zoom = frame.zoom || 1;
+  const ew = clipW * zoom;
+  const eh = clipH * zoom;
+  const localX = -((clipW - ew) / 2);
+  const localY = -((clipH - eh) / 2 + (frame.yBias || 0) * clipH);
+  return coverSourceWindow(vw, vh, ew, eh, localX, localY, clipW, clipH, { x: 0.5, y: 0.5 });
+}
+
+function captureFaceFrame() {
   const vw = video.videoWidth || 640;
   const vh = video.videoHeight || 480;
-  const { sx, sy, srcW, srcH } = sourceCrop(vw, vh, frame.zoom, frame.yBias);
-  const { dx, dy, dw, dh } = coverDest(srcW, srcH, destW, destH);
+  const source = faceClipSource(vw, vh);
+  let sx = source.sx;
+  let sy = source.sy;
+  let srcW = source.srcW;
+  let srcH = source.srcH;
+  const x0 = Math.max(0, sx);
+  const y0 = Math.max(0, sy);
+  const x1 = Math.min(vw, sx + srcW);
+  const y1 = Math.min(vh, sy + srcH);
+  if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+    sx = x0;
+    sy = y0;
+    srcW = x1 - x0;
+    srcH = y1 - y0;
+  }
+  const destW = Math.max(1, Math.round(source.destW));
+  const destH = Math.max(1, Math.round(source.destH));
   canvas.width = destW;
   canvas.height = destH;
   const ctx = canvas.getContext("2d");
   ctx.save();
   ctx.translate(destW, 0);
   ctx.scale(-1, 1);
-  ctx.drawImage(video, sx, sy, srcW, srcH, dx, dy, dw, dh);
+  ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, destW, destH);
   ctx.restore();
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
   });
+}
+
+function captureFrame(kind) {
+  const mode = kind === "tongue" ? "tongue" : "face";
+  setAlignMode(mode);
+  if (mode === "tongue") return captureTongueFrame();
+  return captureFaceFrame();
 }
 
 function drawOrgans(result) {

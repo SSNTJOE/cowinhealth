@@ -94,6 +94,8 @@ video, canvas, img.preview {
   --align-width: 45%;
   --align-height: 80%;
   --align-radius: 18px;
+  /* Face preview digital zoom. Tongue overrides this. Keep in sync with ALIGN_FRAMES.face.zoom. */
+  --align-zoom: 2;
   position: relative;
   isolation: isolate;
   width: min(100%, 560px);
@@ -143,6 +145,13 @@ video, canvas, img.preview {
   visibility: visible;
   background: #111;
 }
+.camera-stage.is-face video {
+  /* 2× so the face fills the yellow frame without leaning into the lens. */
+  width: calc(100% * var(--align-zoom));
+  height: calc(100% * var(--align-zoom));
+  left: calc((100% - 100% * var(--align-zoom)) / 2);
+  top: calc((100% - 100% * var(--align-zoom)) / 2);
+}
 .camera-stage.is-tongue video {
   /* Digital zoom so the tongue fills the smaller window without leaning in. */
   width: calc(100% * var(--align-zoom));
@@ -183,8 +192,10 @@ video, canvas, img.preview {
   z-index: 2;
   border-radius: var(--align-radius);
 }
-/* Face positioning marks. viewBox 300×400 is the 4×3 grid (cell = 100×100):
-   eyes row 1, nose row 2 col 1, lips row 3 col 1. Hidden unless .is-face. */
+/* Face positioning marks. viewBox 300×400 is 3 columns × 4 rows (cell = 100×100).
+   Ids match analysis: row-major, bottom row 10 | 12 | 11.
+   Pupils at cell 4 (50,150) and cell 6 (250,150). Nose bottom at cell 8 (150,300).
+   Lips centered on cell 12 (150,350). Hidden unless .is-face. */
 .face-guides {
   display: none;
   position: absolute;

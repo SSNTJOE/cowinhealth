@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
     private var faceFile: File? = null
     private var tongueFile: File? = null
+    private var alignKind = "face"
     private var pulseJson: String? = null
     private var female = false
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -113,8 +114,9 @@ class MainActivity : AppCompatActivity() {
                 saveProfile(nickname, birthYear, gender, height, weight, conditions, allergies)
             }.start()
         }
-        binding.shotFace.setOnClickListener { capture("face") }
-        binding.shotTongue.setOnClickListener { capture("tongue") }
+        binding.shotFace.setOnClickListener { captureAligned("face") }
+        binding.shotTongue.setOnClickListener { captureAligned("tongue") }
+        showAlign("face")
         binding.openPulse.setOnClickListener {
             pulseLauncher.launch(Intent(this, PulseActivity::class.java))
         }
@@ -310,6 +312,7 @@ class MainActivity : AppCompatActivity() {
                     capture = captureBuilder.build()
                     if (CameraBind.bindFrontOnly(this, provider, preview, capture) != null) {
                         preview.setSurfaceProvider(binding.preview.surfaceProvider)
+                        showAlign(alignKind)
                         bound = true
                         break
                     }
@@ -323,6 +326,30 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, e.message ?: "無法開啟鏡頭", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun showAlign(kind: String) {
+        alignKind = if (kind == "tongue") "tongue" else "face"
+        val face = alignKind == "face"
+        binding.faceGuide.visibility = if (face) View.VISIBLE else View.GONE
+        binding.tongueGuide.visibility = if (face) View.GONE else View.VISIBLE
+        val zoom = if (face) FaceFrame.PREVIEW_ZOOM else 1f
+        binding.preview.scaleX = zoom
+        binding.preview.scaleY = zoom
+    }
+
+    private fun captureAligned(kind: String) {
+        if (alignKind != kind) {
+            showAlign(kind)
+            val message = if (kind == "face") {
+                "臉部預覽已放大兩倍，對準黃線後再按一次"
+            } else {
+                "已切換舌頭黃框，對準後再按一次"
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            return
+        }
+        capture(kind)
     }
 
     private fun capture(kind: String) {
@@ -339,7 +366,12 @@ class MainActivity : AppCompatActivity() {
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    if (kind == "tongue") {
+                    if (kind == "face") {
+                        try {
+                            FaceFrame.cropFileToVisiblePreview(file, previewW, previewH)
+                        } catch (_: Exception) {
+                        }
+                    } else if (kind == "tongue") {
                         try {
                             TongueFrame.cropFileToYellowFrame(file, previewW, previewH)
                         } catch (_: Exception) {

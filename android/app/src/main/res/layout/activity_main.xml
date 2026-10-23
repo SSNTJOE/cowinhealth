@@ -57,20 +57,29 @@
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="280dp"
-            android:minHeight="280dp">
+            android:minHeight="280dp"
+            android:clipChildren="true">
             <androidx.camera.view.PreviewView
                 android:id="@+id/preview"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 app:implementationMode="compatible"
                 app:scaleType="fillCenter"/>
+            <com.tube.healthing.FaceGuideView
+                android:id="@+id/faceGuide"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false"
+                android:importantForAccessibility="no"/>
             <com.tube.healthing.TongueGuideView
                 android:id="@+id/tongueGuide"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clickable="false"
                 android:focusable="false"
-                android:importantForAccessibility="no"/>
+                android:importantForAccessibility="no"
+                android:visibility="gone"/>
         </FrameLayout>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
             <Button android:id="@+id/shotFace" android:text="拍臉／唇" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
