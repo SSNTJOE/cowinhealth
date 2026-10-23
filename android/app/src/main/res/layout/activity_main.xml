@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp">
@@ -53,10 +54,24 @@
         <Button android:id="@+id/saveProfile" android:text="儲存基本資料到 MySQL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/symptoms" android:hint="今日身體狀況" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/discomfort" android:hint="不舒服的地方" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <androidx.camera.view.PreviewView
-            android:id="@+id/preview"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="280dp"/>
+            android:layout_height="280dp"
+            android:minHeight="280dp">
+            <androidx.camera.view.PreviewView
+                android:id="@+id/preview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:implementationMode="compatible"
+                app:scaleType="fillCenter"/>
+            <com.tube.healthing.TongueGuideView
+                android:id="@+id/tongueGuide"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false"
+                android:importantForAccessibility="no"/>
+        </FrameLayout>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
             <Button android:id="@+id/shotFace" android:text="拍臉／唇" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
             <Button android:id="@+id/shotTongue" android:text="拍舌頭" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>

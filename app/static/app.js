@@ -269,13 +269,118 @@ function sourceCrop(vw, vh, zoom, yBias) {
   return { sx, sy, srcW, srcH };
 }
 
+function objectPositionFractions(value) {
+  const parts = String(value || "50% 50%").trim().split(/\s+/);
+  const axis = (token) => {
+    if (!token || token === "center") return 0.5;
+    if (token === "left" || token === "top") return 0;
+    if (token === "right" || token === "bottom") return 1;
+    if (String(token).endsWith("%")) return parseFloat(token) / 100;
+    return 0.5;
+  };
+  return { x: axis(parts[0]), y: axis(parts[1] || parts[0]) };
+}
+
+/** Teeth guide in .tongue-guides (viewBox 0 0 100 160, line y=12). */
+const TONGUE_TEETH_Y = 12 / 160;
+
+function tongueTeethFraction(clipRect) {
+  const line = document.querySelector("#align-frame .tongue-guides line");
+  if (!line || !clipRect || clipRect.height < 2) return TONGUE_TEETH_Y;
+  const lr = line.getBoundingClientRect();
+  const mid = lr.top + lr.height / 2;
+  const frac = (mid - clipRect.top) / clipRect.height;
+  if (!Number.isFinite(frac)) return TONGUE_TEETH_Y;
+  return Math.min(0.45, Math.max(0, frac));
+}
+
+function coverSourceWindow(vw, vh, ew, eh, localX, localY, localW, localH, pos) {
+  const scale = Math.max(ew / vw, eh / vh);
+  const offsetX = (ew - vw * scale) * pos.x;
+  const offsetY = (eh - vh * scale) * pos.y;
+  return {
+    sx: (localX - offsetX) / scale,
+    sy: (localY - offsetY) / scale,
+    srcW: localW / scale,
+    srcH: localH / scale,
+    destW: localW,
+    destH: localH,
+  };
+}
+
+/** Pixels actually shown inside the yellow tongue clip (CSS zoom + object-fit). */
+function tongueClipSource(vw, vh) {
+  const clip = document.getElementById("camera-clip");
+  const vr = video.getBoundingClientRect();
+  const cr = clip ? clip.getBoundingClientRect() : null;
+  if (cr && vr.width > 2 && vr.height > 2 && cr.width > 2 && cr.height > 2) {
+    const pos = objectPositionFractions(getComputedStyle(video).objectPosition);
+    const localX = cr.left - vr.left;
+    const localY = cr.top - vr.top;
+    return {
+      clipRect: cr,
+      source: coverSourceWindow(vw, vh, vr.width, vr.height, localX, localY, cr.width, cr.height, pos),
+    };
+  }
+  const stage = document.getElementById("camera-stage") || video;
+  const sw = Math.max(1, stage.clientWidth || 640);
+  const sh = Math.max(1, stage.clientHeight || 480);
+  const frame = ALIGN_FRAMES.tongue;
+  const clipW = frame.width * sw;
+  const clipH = frame.height * sh;
+  const zoom = frame.zoom || 1;
+  const ew = clipW * zoom;
+  const eh = clipH * zoom;
+  const localX = -((clipW - ew) / 2);
+  const localY = -((clipH - eh) / 2 + 0.12 * clipH);
+  return {
+    clipRect: null,
+    source: coverSourceWindow(vw, vh, ew, eh, localX, localY, clipW, clipH, { x: 0.5, y: 0.62 }),
+  };
+}
+
+function captureTongueFrame() {
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  const { clipRect, source } = tongueClipSource(vw, vh);
+  const topFrac = tongueTeethFraction(clipRect);
+  let sx = source.sx;
+  let sy = source.sy + source.srcH * topFrac;
+  let srcW = source.srcW;
+  let srcH = source.srcH * (1 - topFrac);
+  const x0 = Math.max(0, sx);
+  const y0 = Math.max(0, sy);
+  const x1 = Math.min(vw, sx + srcW);
+  const y1 = Math.min(vh, sy + srcH);
+  if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+    sx = x0;
+    sy = y0;
+    srcW = x1 - x0;
+    srcH = y1 - y0;
+  }
+  const destW = Math.max(1, Math.round(source.destW));
+  const destH = Math.max(1, Math.round(source.destH * (1 - topFrac)));
+  canvas.width = destW;
+  canvas.height = destH;
+  const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.translate(destW, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, destW, destH);
+  ctx.restore();
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
+  });
+}
+
 function captureFrame(kind) {
   const mode = kind === "tongue" ? "tongue" : "face";
   setAlignMode(mode);
+  if (mode === "tongue") return captureTongueFrame();
   const stage = document.getElementById("camera-stage") || video;
   const sw = Math.max(1, stage.clientWidth || video.clientWidth || 640);
   const sh = Math.max(1, stage.clientHeight || video.clientHeight || 480);
-  const frame = ALIGN_FRAMES[mode];
+  const frame = ALIGN_FRAMES.face;
   const destW = Math.max(1, Math.round(frame.width * sw));
   const destH = Math.max(1, Math.round(frame.height * sh));
   const vw = video.videoWidth || 640;

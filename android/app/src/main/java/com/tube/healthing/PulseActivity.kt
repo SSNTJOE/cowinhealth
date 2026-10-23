@@ -15,6 +15,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import com.tube.healthing.databinding.ActivityPulseBinding
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -64,12 +65,29 @@ class PulseActivity : AppCompatActivity() {
         showStep()
         binding.start.setOnClickListener { startMeasure() }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permission.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED
         ) {
             startCamera()
-        } else {
-            permission.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    override fun onPause() {
+        try {
+            camera?.cameraControl?.enableTorch(false)
+        } catch (_: Exception) {
+        }
+        cameraProvider?.unbindAll()
+        camera = null
+        super.onPause()
     }
 
     private fun showStep() {
@@ -81,8 +99,10 @@ class PulseActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@addListener
             binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             try {
                 val provider = future.get()
@@ -153,7 +173,6 @@ class PulseActivity : AppCompatActivity() {
             camera?.cameraControl?.enableTorch(false)
         } catch (_: Exception) {
         }
-        cameraProvider?.unbindAll()
         executor.shutdown()
         super.onDestroy()
     }

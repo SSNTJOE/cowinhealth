@@ -409,9 +409,11 @@ def health():
 
 @app.get("/api/flags")
 def health_flag_options():
+    options = list(allergy_options())
     return {
         "conditions": list(CONDITION_OPTIONS),
-        "allergies": list(allergy_options()),
+        "allergies": options,
+        "allergy_options": options,
     }
 
 

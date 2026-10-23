@@ -2922,13 +2922,29 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     return tongue_grid, findings, colors
 
 
+def frame_tongue_image(image: Image.Image) -> tuple[Image.Image, dict[str, Any]]:
+    """Client already cropped the yellow frame: teeth line → bottom arc, full width.
+
+    Keep that rectangle. Zone fractions are of this image, so the grid matches the frame.
+    """
+    rgb = image.convert("RGB")
+    return rgb, {
+        "method": "yellow_frame",
+        "box": [0.0, 0.0, 1.0, 1.0],
+        "preview": _encode_preview_png(rgb),
+    }
+
+
 def inspect_image(
     image_bytes: bytes,
     shot_type: str,
     personal_lab: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    image, crop_info = isolate_subject(raw_image, shot_type)
+    if shot_type == "tongue":
+        image, crop_info = frame_tongue_image(raw_image)
+    else:
+        image, crop_info = isolate_subject(raw_image, shot_type)
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []

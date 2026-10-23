@@ -42,37 +42,32 @@ object CameraBind {
             .build()
     }
 
-    fun bind(
+    fun bindFacing(
         owner: LifecycleOwner,
         provider: ProcessCameraProvider,
-        preferred: CameraSelector,
+        facing: CameraSelector,
         vararg useCases: UseCase
     ): Camera? {
-        val order = linkedSetOf(preferred, CameraSelector.DEFAULT_BACK_CAMERA, CameraSelector.DEFAULT_FRONT_CAMERA)
-        for (selector in order) {
-            if (!provider.hasCamera(selector)) continue
-            try {
-                provider.unbindAll()
-                return provider.bindToLifecycle(owner, selector, *useCases)
-            } catch (_: Exception) {
-            }
+        if (!provider.hasCamera(facing)) return null
+        return try {
+            provider.unbindAll()
+            provider.bindToLifecycle(owner, facing, *useCases)
+        } catch (_: Exception) {
+            null
         }
-        return null
     }
+
+    /** Face / tongue: front camera only. Do not fall back to the rear lens. */
+    fun bindFrontOnly(
+        owner: LifecycleOwner,
+        provider: ProcessCameraProvider,
+        vararg useCases: UseCase
+    ): Camera? = bindFacing(owner, provider, CameraSelector.DEFAULT_FRONT_CAMERA, *useCases)
 
     /** Pulse / PPG: rear camera only. Never silently switch to the selfie lens. */
     fun bindRearOnly(
         owner: LifecycleOwner,
         provider: ProcessCameraProvider,
         vararg useCases: UseCase
-    ): Camera? {
-        val rear = CameraSelector.DEFAULT_BACK_CAMERA
-        if (!provider.hasCamera(rear)) return null
-        return try {
-            provider.unbindAll()
-            provider.bindToLifecycle(owner, rear, *useCases)
-        } catch (_: Exception) {
-            null
-        }
-    }
+    ): Camera? = bindFacing(owner, provider, CameraSelector.DEFAULT_BACK_CAMERA, *useCases)
 }

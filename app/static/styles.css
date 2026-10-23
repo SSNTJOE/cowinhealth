@@ -371,6 +371,20 @@ dialog {
   inset: 0;
   pointer-events: none;
 }
+/* Analysis box wraps the yellow-frame photo (teeth line → bottom arc) with no side gaps. */
+#tongue-grid-stage {
+  aspect-ratio: auto;
+  height: auto;
+  border-radius: 0;
+}
+#tongue-grid-stage img {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  object-fit: fill;
+}
 .tongue-zone {
   position: absolute;
   border: 1px solid rgba(255, 255, 255, 0.78);

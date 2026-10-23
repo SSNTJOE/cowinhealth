@@ -3,6 +3,7 @@ package com.tube.healthing
 import android.widget.CheckBox
 import android.widget.LinearLayout
 import org.json.JSONArray
+import org.json.JSONObject
 
 object HealthFlags {
     val CONDITIONS = listOf(
@@ -24,6 +25,28 @@ object HealthFlags {
             if (label.isNotEmpty()) out.add(label)
         }
         return out
+    }
+
+    fun jsonLabelsFrom(obj: JSONObject?, vararg keys: String): List<String> {
+        if (obj == null) return emptyList()
+        for (key in keys) {
+            if (!obj.has(key) || obj.isNull(key)) continue
+            val labels = jsonLabels(asArray(obj.opt(key)))
+            if (labels.isNotEmpty()) return labels
+        }
+        return emptyList()
+    }
+
+    private fun asArray(raw: Any?): JSONArray? {
+        return when (raw) {
+            is JSONArray -> raw
+            is Collection<*> -> JSONArray(raw)
+            is String -> {
+                val text = raw.trim()
+                if (text.startsWith("[")) JSONArray(text) else null
+            }
+            else -> null
+        }
     }
 
     fun inflate(parent: LinearLayout, options: List<String>) {

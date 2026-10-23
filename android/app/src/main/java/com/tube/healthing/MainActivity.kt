@@ -14,13 +14,13 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import com.tube.healthing.databinding.ActivityMainBinding
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private var recipeRows: List<JSONObject> = emptyList()
     private var lastPatternCsv = ""
     private var countriesLoaded = false
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var flagAllergyOptions: List<String> = emptyList()
 
     private val permission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -76,6 +78,8 @@ class MainActivity : AppCompatActivity() {
 
         HealthFlags.inflate(binding.conditionsGroup, HealthFlags.CONDITIONS)
         HealthFlags.inflate(binding.allergiesGroup, HealthFlags.ALLERGIES)
+        binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        binding.preview.scaleType = PreviewView.ScaleType.FILL_CENTER
         binding.server.setText(prefs.getString("base_url", "http://10.0.2.2:8000"))
         binding.result.movementMethod = LinkMovementMethod.getInstance()
         binding.dietLink.movementMethod = LinkMovementMethod.getInstance()
@@ -132,6 +136,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        cameraProvider?.unbindAll()
+        imageCapture = null
+        super.onPause()
+    }
+
     private fun rememberServer() {
         val url = binding.server.text.toString().trim().trimEnd('/')
         prefs.edit().putString("base_url", url).apply()
@@ -154,11 +164,11 @@ class MainActivity : AppCompatActivity() {
                 binding.email.text.toString(),
                 binding.password.text.toString()
             )
-            val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
+            val flags = flagsOrNull()
             runOnUiThread {
                 applyFlagOptions(flags)
-                applyUser(me.optJSONObject("user"))
+                applyUser(me.optJSONObject("user"), flags)
                 Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
             }
             refreshTrend()
@@ -176,11 +186,14 @@ class MainActivity : AppCompatActivity() {
                 binding.email.text.toString(),
                 binding.password.text.toString()
             )
-            val flags = runCatching { api.flags() }.getOrNull()
             val me = api.me()
+            val flags = flagsOrNull()
             runOnUiThread {
                 applyFlagOptions(flags)
-                applyUser(me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")))
+                applyUser(
+                    me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")),
+                    flags
+                )
                 Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
             }
             refreshTrend()
@@ -190,24 +203,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun flagsOrNull(): JSONObject? = runCatching { api.flags() }.getOrNull()
+
     private fun applyFlagOptions(flags: JSONObject?) {
         val keptConditions = JSONArray(HealthFlags.selectedJson(binding.conditionsGroup))
         val keptAllergies = JSONArray(HealthFlags.selectedJson(binding.allergiesGroup))
-        val conditions = HealthFlags.jsonLabels(flags?.optJSONArray("conditions"))
+        val conditions = HealthFlags.jsonLabelsFrom(flags, "conditions")
         if (conditions.isNotEmpty()) {
             HealthFlags.inflate(binding.conditionsGroup, conditions)
             HealthFlags.apply(binding.conditionsGroup, keptConditions)
         }
-        val options = HealthFlags.jsonLabels(
-            flags?.optJSONArray("allergy_options") ?: flags?.optJSONArray("allergies")
-        )
-        if (options.isNotEmpty()) {
+        val options = HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
+        if (options.isNotEmpty() && (flagAllergyOptions.isEmpty() || options.size >= flagAllergyOptions.size)) {
+            flagAllergyOptions = options
             HealthFlags.inflate(binding.allergiesGroup, options)
             HealthFlags.apply(binding.allergiesGroup, keptAllergies)
         }
     }
 
-    private fun applyUser(user: JSONObject?) {
+    private fun applyUser(user: JSONObject?, flags: JSONObject? = null) {
         if (user == null) return
         binding.anon.text = "匿名 ID：" + user.optString("user_id")
         binding.nickname.setText(jsonText(user, "nickname"))
@@ -221,8 +235,11 @@ class MainActivity : AppCompatActivity() {
             else -> binding.genderGroup.clearCheck()
         }
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
-        val allergyOptions = HealthFlags.jsonLabels(user.optJSONArray("allergy_options"))
+        val allergyOptions = HealthFlags.jsonLabelsFrom(user, "allergy_options").ifEmpty {
+            HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
+        }.ifEmpty { flagAllergyOptions }
         if (allergyOptions.isNotEmpty()) {
+            flagAllergyOptions = allergyOptions
             HealthFlags.inflate(binding.allergiesGroup, allergyOptions)
         }
         HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
@@ -255,38 +272,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
-        // ScrollView + SurfaceView makes the emulator scale a tiny camera buffer into blocks.
+        // TextureView works inside ScrollView; SurfaceView (PERFORMANCE) stays black.
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        binding.preview.scaleType = PreviewView.ScaleType.FILL_CENTER
+        if (!binding.preview.isAttachedToWindow) return
+        if (binding.preview.width == 0 || binding.preview.height == 0) {
+            binding.preview.post { startCamera() }
+            return
+        }
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
+            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@addListener
+            if (!binding.preview.isAttachedToWindow) return@addListener
+            if (binding.preview.width == 0 || binding.preview.height == 0) {
+                binding.preview.post { startCamera() }
+                return@addListener
+            }
             try {
                 val provider = providerFuture.get()
+                cameraProvider = provider
                 var capture: ImageCapture? = null
                 var bound = false
-                for (size in CameraBind.trySizes()) {
-                    val selector = CameraBind.resolution(size)
-                    val preview = Preview.Builder()
-                        .setResolutionSelector(selector)
-                        .build()
-                        .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
-                    capture = ImageCapture.Builder()
-                        .setResolutionSelector(selector)
-                        .build()
-                    if (CameraBind.bind(
-                            this,
-                            provider,
-                            CameraSelector.DEFAULT_FRONT_CAMERA,
-                            preview,
-                            capture
-                        ) != null
-                    ) {
+                val attempts = buildList {
+                    add(null)
+                    addAll(CameraBind.trySizes())
+                }
+                for (size in attempts) {
+                    val previewBuilder = Preview.Builder()
+                    val captureBuilder = ImageCapture.Builder()
+                    if (size != null) {
+                        val selector = CameraBind.resolution(size)
+                        previewBuilder.setResolutionSelector(selector)
+                        captureBuilder.setResolutionSelector(selector)
+                    }
+                    val preview = previewBuilder.build()
+                    capture = captureBuilder.build()
+                    if (CameraBind.bindFrontOnly(this, provider, preview, capture) != null) {
+                        preview.setSurfaceProvider(binding.preview.surfaceProvider)
                         bound = true
                         break
                     }
                 }
                 imageCapture = if (bound) capture else null
                 if (!bound) {
-                    Toast.makeText(this, "模擬器沒有可用鏡頭，請把 Camera 設成 VirtualScene 或 Webcam", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "打不開前置鏡頭（臉／舌）。模擬器請把 Front camera 設成 Webcam 或 Emulated。", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 imageCapture = null
@@ -302,11 +332,19 @@ class MainActivity : AppCompatActivity() {
         }
         val file = File(cacheDir, "$kind.jpg")
         val options = ImageCapture.OutputFileOptions.Builder(file).build()
+        val previewW = binding.preview.width
+        val previewH = binding.preview.height
         capture.takePicture(
             options,
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    if (kind == "tongue") {
+                        try {
+                            TongueFrame.cropFileToYellowFrame(file, previewW, previewH)
+                        } catch (_: Exception) {
+                        }
+                    }
                     if (kind == "face") faceFile = file else tongueFile = file
                     runOnUiThread { Toast.makeText(this@MainActivity, "已拍$kind", Toast.LENGTH_SHORT).show() }
                 }
@@ -330,8 +368,10 @@ class MainActivity : AppCompatActivity() {
             rememberServer()
             api.updateProfile(nickname, birthYear, gender, height, weight, conditionsJson, allergiesJson)
             val me = api.me()
+            val flags = flagsOrNull()
             runOnUiThread {
-                applyUser(me.optJSONObject("user"))
+                applyFlagOptions(flags)
+                applyUser(me.optJSONObject("user"), flags)
                 Toast.makeText(this, "已寫入 MySQL，網站與 App 會看到同一份資料", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
