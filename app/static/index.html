@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=cam11" />
+  <link rel="stylesheet" href="/static/styles.css?v=body1" />
 </head>
 <body>
   <div class="wrap">
@@ -154,7 +154,8 @@
       <p id="links"></p>
 
       <h3 id="recipe-heading">今日食譜（教學示範）</h3>
-      <p id="recipe-note" class="note">國家欄輸入開頭文字並選定（拉丁字母不分大小寫）。食譜欄點開即列出該國通過篩選的全部食譜，打字可再縮小。分數 1–5 且證型為實熱、實寒、虛熱、虛寒時，排除禁忌欄有相同臟腑證型的食譜（含胃；女生含子宮）。6 分、7–10 分與沒有分數者不排除。過敏與特殊疾病仍排除。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。</p>
+      <p id="recipe-note" class="note">國家欄只列出過濾後仍有食譜的國家，輸入開頭文字並選定（拉丁字母不分大小寫）。食譜欄點開即列出該國全部可用食譜，打字可再縮小。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。</p>
+      <button type="button" id="recipe-body-advice" class="recipe-body-toggle" aria-pressed="false">依身體狀況建議</button>
       <label id="recipe-country-label" for="recipe-country">國家</label>
       <div class="combo">
         <input id="recipe-country" type="text" autocomplete="off" placeholder="輸入國家搜尋" role="combobox" aria-expanded="false" aria-controls="recipe-country-list" />
@@ -181,7 +182,7 @@
         <div id="organ-pins"></div>
       </div>
       <div id="scores" class="scores"></div>
-      <p class="note">臉色、舌色、舌苔各自對教學正常值。規格內（ΔE≤3）記 7–10，越接近正常越靠近 10，貼到規格邊緣為 7。超過規格記 1–6，剛超出為 6，離越遠越靠近 1。臟腑最終分只平均有判到的項目：一項用該分，兩項或三項再平均。7–10 不放證型圖；1–6 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，6 分 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。子宮只在女生圖上。臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</p>
+      <p class="note">臉色、舌色、舌苔各自對教學正常值。規格內（ΔE≤3）記 7–10，越接近正常越靠近 10，貼到規格邊緣為 7。超過規格記 1–6，剛超出為 6，離越遠越靠近 1。臟腑最終分只平均有判到的項目：一項用該分，兩項或三項再平均。7–10 不放證型圖；1–6 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，6 分 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。<span class="uterus-note hidden">子宮只在女生圖上。</span>臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。<span class="uterus-note hidden">照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</span></p>
       <p class="note" id="disclaimer"></p>
 
       <h3>臟腑分數趨勢</h3>
@@ -212,7 +213,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=recipe1"></script>
-  <script src="/static/app.js?v=recipe2"></script>
+  <script src="/static/common.js?v=country1"></script>
+  <script src="/static/app.js?v=uterus2"></script>
 </body>
 </html>

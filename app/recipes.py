@@ -143,6 +143,63 @@ def countries(prefix: str | None = None) -> list[str]:
     return ordered
 
 
+def recipe_excluded(
+    row: dict[str, str],
+    allergy_tokens: list[str],
+    condition_tokens: list[str],
+    organ_tags: list[str],
+) -> bool:
+    if recipe_contains_allergen(row.get("allergens") or "", allergy_tokens):
+        return True
+    ban = row.get("ban") or ""
+    if _text_has_any(ban, condition_tokens):
+        return True
+    return ban_has_pattern(ban, organ_tags)
+
+
+def _filter_context(
+    patterns: dict[str, str] | None,
+    allergies: list[str] | None,
+    conditions: list[str] | None,
+    scores: dict | None,
+    female: bool,
+    by_body: bool,
+) -> tuple[list[str], list[str], list[str]]:
+    organ_tags = active_contraindications(scores, patterns, female) if by_body else []
+    return organ_tags, condition_ban_tokens(conditions), allergy_exclude_tokens(allergies)
+
+
+def usable_countries(
+    prefix: str | None = None,
+    patterns: dict[str, str] | None = None,
+    pattern_labels: list[str] | None = None,
+    allergies: list[str] | None = None,
+    conditions: list[str] | None = None,
+    scores: dict | None = None,
+    female: bool = False,
+    by_body: bool = False,
+) -> list[str]:
+    """Countries that still have at least one recipe after the active filters."""
+    del pattern_labels
+    needle = (prefix or "").strip().casefold()
+    organ_tags, condition_tokens, allergy_tokens = _filter_context(
+        patterns, allergies, conditions, scores, female, by_body
+    )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for row in recipe_rows():
+        name = row.get("country") or ""
+        if not name or name in seen:
+            continue
+        if needle and not name.casefold().startswith(needle):
+            continue
+        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags):
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return ordered
+
+
 def allergen_labels() -> tuple[str, ...]:
     seen: set[str] = set()
     labels: list[str] = []
@@ -370,6 +427,7 @@ def filter_recipes(
     conditions: list[str] | None = None,
     scores: dict | None = None,
     female: bool = False,
+    by_body: bool = False,
     limit: int | None = None,
 ) -> dict:
     del pattern_labels  # tags without a 1–5 score must not filter
@@ -377,20 +435,16 @@ def filter_recipes(
     if not wanted:
         raise ValueError("請選擇國家")
     lang = normalize_lang(lang)
-    organ_tags = active_contraindications(scores, patterns, female)
-    condition_tokens = condition_ban_tokens(conditions)
-    allergy_tokens = allergy_exclude_tokens(allergies)
+    # Off: allergens (and listed conditions) only. On: also today's 1–5 organ patterns, including 脾／胃.
+    organ_tags, condition_tokens, allergy_tokens = _filter_context(
+        patterns, allergies, conditions, scores, female, by_body
+    )
     matched: list[tuple[int, dict[str, str]]] = []
     safe: list[tuple[int, dict[str, str]]] = []
     for row in recipe_rows():
         if (row.get("country") or "") != wanted:
             continue
-        if recipe_contains_allergen(row.get("allergens") or "", allergy_tokens):
-            continue
-        ban = row.get("ban") or ""
-        if _text_has_any(ban, condition_tokens):
-            continue
-        if ban_has_pattern(ban, organ_tags):
+        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags):
             continue
         score = benefit_score(row.get("benefit") or "", organ_tags)
         item = (score, row)
@@ -407,6 +461,7 @@ def filter_recipes(
     return {
         "country": wanted,
         "lang": lang,
+        "by_body": bool(by_body),
         "patterns": organ_tags,
         "count": len(recipes),
         "benefit_matches": len(matched),

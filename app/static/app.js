@@ -47,6 +47,37 @@ const organs = [
 const SPLEEN_STOMACH_PATTERNS = ["脾實熱", "脾實寒", "脾虛熱", "脾虛寒", "胃實熱", "胃實寒", "胃虛熱", "胃虛寒"];
 let currentBody = "boy";
 let lastResult = null;
+
+function showsFemaleOrgans() {
+  return currentBody === "girl";
+}
+
+function visibleOrgans() {
+  if (showsFemaleOrgans()) return organs;
+  return organs.filter((org) => !org.femaleOnly);
+}
+
+function withoutUterusStatement(text) {
+  const value = String(text || "");
+  if (showsFemaleOrgans() || !value.includes("子宮")) return value;
+  const kept = [];
+  let buf = "";
+  for (const ch of value) {
+    buf += ch;
+    if (ch === "。" || ch === "；" || ch === "\n") {
+      if (!buf.includes("子宮")) kept.push(buf);
+      buf = "";
+    }
+  }
+  if (buf && !buf.includes("子宮")) kept.push(buf);
+  return kept.join("").trim();
+}
+
+function syncUterusNotes() {
+  document.querySelectorAll(".uterus-note").forEach((node) => {
+    node.classList.toggle("hidden", !showsFemaleOrgans());
+  });
+}
 let trendChart = null;
 const TREND_POINT_STYLE = {
   circle: "circle",
@@ -77,7 +108,11 @@ function setBodyImage(kind) {
   const img = document.getElementById("body-img");
   img.src = currentBody === "girl" ? "/media/girl-body.png" : "/media/boy-body.png";
   img.alt = currentBody === "girl" ? "女生五臟六腑圖" : "男生五臟六腑圖";
-  if (lastResult) drawOrgans(lastResult);
+  syncUterusNotes();
+  if (lastResult) {
+    renderScoreCards(lastResult);
+    drawOrgans(lastResult);
+  }
 }
 
 function applyUserBodyImage(user) {
@@ -475,8 +510,7 @@ function drawOrgans(result) {
   lastResult = result;
   const box = document.getElementById("organ-pins");
   box.innerHTML = "";
-  organs.forEach((org) => {
-    if (org.femaleOnly && currentBody !== "girl") return;
+  visibleOrgans().forEach((org) => {
     const file = result.overlays ? result.overlays[org.key] : null;
     if (!file) return;
     const score = result.scores ? result.scores[org.score] : result[org.score];
@@ -549,7 +583,7 @@ function renderFaceGrid(grid, previewUrl) {
   }
   const flagBox = document.getElementById("face-lab-flags");
   if (flagBox) {
-    const flags = grid.flags || [];
+    const flags = (grid.flags || []).filter((item) => showsFemaleOrgans() || !String(item.text || "").includes("子宮"));
     if (flags.length) {
       flagBox.textContent = flags.map((item) => item.text).join("；") + "（教學示範）";
       flagBox.classList.remove("hidden");
@@ -712,6 +746,20 @@ function patternLabel(score, pattern) {
   return pattern || "";
 }
 
+function renderScoreCards(result) {
+  const scores = document.getElementById("scores");
+  if (!scores || !result) return;
+  scores.innerHTML = "";
+  visibleOrgans().forEach((org) => {
+    const div = document.createElement("div");
+    div.className = "score";
+    const score = result.scores ? result.scores[org.score] : result[org.score];
+    const rawPattern = result.patterns ? result.patterns[org.pattern] : "";
+    div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
+    scores.appendChild(div);
+  });
+}
+
 function renderResult(result) {
   if (result.dominant_color) {
     document.getElementById("color-chip").style.background = result.dominant_color;
@@ -723,11 +771,14 @@ function renderResult(result) {
   findings.innerHTML = "";
   (result.findings || []).forEach((text) => {
     if (hidesSpleenStomachPatternList(text)) return;
+    const line = withoutUterusStatement(text);
+    if (!line) return;
     const li = document.createElement("li");
-    li.textContent = text;
+    li.textContent = line;
     findings.appendChild(li);
   });
-  document.getElementById("advice").textContent = result.diet_advice ? "食療整理：" + result.diet_advice : "";
+  const advice = withoutUterusStatement(result.diet_advice || "");
+  document.getElementById("advice").textContent = advice ? "食療整理：" + advice : "";
   const links = document.getElementById("links");
   links.innerHTML = "";
   if (result.diet_url) {
@@ -736,30 +787,19 @@ function renderResult(result) {
   if (result.acupoint_url) {
     links.innerHTML += `<a href="${result.acupoint_url}" target="_blank" rel="noreferrer">穴道按摩搜尋</a>`;
   }
-  const scores = document.getElementById("scores");
-  scores.innerHTML = "";
-  organs.forEach((org) => {
-    const div = document.createElement("div");
-    div.className = "score";
-    const score = result.scores ? result.scores[org.score] : result[org.score];
-    const rawPattern = result.patterns ? result.patterns[org.pattern] : "";
-    div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
-    scores.appendChild(div);
-  });
+  renderScoreCards(result);
   drawOrgans(result);
   if (result.face_preview) lastFacePreviewUrl = result.face_preview;
   if (result.tongue_preview) lastTonguePreviewUrl = result.tongue_preview;
   renderFaceGrid(result.face_grid, lastFacePreviewUrl);
   renderTongueGrid(result.tongue_grid, lastTonguePreviewUrl);
-  const countryPick = document.getElementById("recipe-country");
-  if (countryPick && countryPick.value) {
-    loadRecipesForCountry({ keepSelection: selectedRecipeId != null }).catch(() => {});
-  }
+  refreshRecipeChoices({ keepSelection: selectedRecipeId != null }).catch(() => {});
 }
 
 let countryNames = [];
 let recipeRows = [];
 let selectedRecipeId = null;
+let recipeByBody = false;
 
 function recipeLabel(row) {
   return row.name + (row.benefit_match ? " ★" : "");
@@ -799,7 +839,7 @@ function closeCombo(input, list) {
   if (input) input.setAttribute("aria-expanded", "false");
 }
 
-function renderCombo(input, list, labels, onPick, mode) {
+function renderCombo(input, list, labels, onPick, mode, emptyText) {
   if (!input || !list) return;
   const query = mode === "all" ? "" : input.value.trim();
   const matched = labels.filter((label) => {
@@ -811,7 +851,7 @@ function renderCombo(input, list, labels, onPick, mode) {
   if (!matched.length) {
     const empty = document.createElement("li");
     empty.className = "combo-empty";
-    empty.textContent = uiText("searchEmpty");
+    empty.textContent = emptyText || uiText("searchEmpty");
     list.appendChild(empty);
   } else {
     matched.forEach((label) => {
@@ -863,22 +903,11 @@ function showSelectedRecipe() {
   detail.textContent = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
 }
 
-async function loadRecipeCountries() {
-  const input = document.getElementById("recipe-country");
-  if (!input) return;
-  const current = input.value.trim();
-  const data = await api("/api/recipes/countries");
-  countryNames = data.countries || [];
-  if (current && countryNames.includes(current)) {
-    input.value = current;
-  }
-}
-
-function recipeQueryParams(country) {
+function recipeFilterParams() {
   const params = new URLSearchParams({
-    country,
     lang: getUiLang(),
     female: currentBody === "girl" ? "1" : "0",
+    by_body: recipeByBody ? "1" : "0",
   });
   if (!lastResult) return params;
   const scores = {};
@@ -892,6 +921,43 @@ function recipeQueryParams(country) {
   params.set("scores", JSON.stringify(scores));
   params.set("patterns", JSON.stringify(patterns));
   return params;
+}
+
+function recipeQueryParams(country) {
+  const params = recipeFilterParams();
+  params.set("country", country);
+  return params;
+}
+
+function clearRecipeSelection() {
+  recipeRows = [];
+  selectedRecipeId = null;
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  const list = document.getElementById("recipe-name-list");
+  if (pick) pick.value = "";
+  if (detail) detail.textContent = "";
+  closeCombo(pick, list);
+}
+
+async function loadRecipeCountries() {
+  const input = document.getElementById("recipe-country");
+  if (!input) return;
+  const current = input.value.trim();
+  const data = await api("/api/recipes/countries?" + recipeFilterParams().toString());
+  countryNames = data.countries || [];
+  if (current && !countryNames.includes(current)) {
+    input.value = "";
+    clearRecipeSelection();
+  }
+}
+
+async function refreshRecipeChoices(options) {
+  const keepSelection = Boolean(options && options.keepSelection);
+  await loadRecipeCountries();
+  const countryInput = document.getElementById("recipe-country");
+  if (!countryInput || !countryNames.includes(countryInput.value.trim())) return;
+  await loadRecipesForCountry({ keepSelection });
 }
 
 async function loadRecipesForCountry(options) {
@@ -911,9 +977,7 @@ async function loadRecipesForCountry(options) {
     detail.textContent = "";
   }
   if (!countryNames.includes(country)) {
-    recipeRows = [];
-    selectedRecipeId = null;
-    pick.value = "";
+    clearRecipeSelection();
     return;
   }
   const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
@@ -929,7 +993,7 @@ async function loadRecipesForCountry(options) {
   }
   selectedRecipeId = null;
   pick.value = "";
-  detail.textContent = recipeRows.length ? "" : uiText("emptyRecipes");
+  detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
 }
 
 async function reloadRecipesForLanguage() {
@@ -947,6 +1011,17 @@ function bindRecipePickers() {
   country.dataset.bound = "1";
   country.placeholder = uiText("pickCountry");
   pick.placeholder = uiText("pickRecipe");
+  const bodyBtn = document.getElementById("recipe-body-advice");
+  if (bodyBtn) {
+    bodyBtn.addEventListener("click", () => {
+      recipeByBody = bodyBtn.getAttribute("aria-pressed") !== "true";
+      bodyBtn.setAttribute("aria-pressed", recipeByBody ? "true" : "false");
+      refreshRecipeChoices({ keepSelection: true }).catch((err) => {
+        const detail = document.getElementById("recipe-detail");
+        if (detail) detail.textContent = formatApiError(err);
+      });
+    });
+  }
   const showCountries = () => renderCombo(country, countryList, countryNames, (label) => {
     rememberRecipeChoice("");
     loadRecipesForCountry().catch((err) => {
@@ -954,14 +1029,33 @@ function bindRecipePickers() {
       if (detail) detail.textContent = formatApiError(err);
     });
   }, "prefix");
-  const showAllRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
-    rememberRecipeChoice(label);
-    showSelectedRecipe();
-  }, "all");
-  const filterRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
-    rememberRecipeChoice(label);
-    showSelectedRecipe();
-  }, "contains");
+  const usableRecipeLabels = () => {
+    if (!countryNames.includes(country.value.trim())) return null;
+    return recipeRows.map(recipeLabel);
+  };
+  const showAllRecipes = () => {
+    const labels = usableRecipeLabels();
+    if (!labels) {
+      closeCombo(pick, pickList);
+      showCountries();
+      return;
+    }
+    renderCombo(pick, pickList, labels, (label) => {
+      rememberRecipeChoice(label);
+      showSelectedRecipe();
+    }, "all");
+  };
+  const filterRecipes = () => {
+    const labels = usableRecipeLabels();
+    if (!labels) {
+      closeCombo(pick, pickList);
+      return;
+    }
+    renderCombo(pick, pickList, labels, (label) => {
+      rememberRecipeChoice(label);
+      showSelectedRecipe();
+    }, "contains");
+  };
   country.addEventListener("focus", showCountries);
   country.addEventListener("click", showCountries);
   country.addEventListener("keydown", (event) => {
@@ -1045,15 +1139,16 @@ async function loadRecords() {
     disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
   });
   renderComplexionHistory(data.records);
-  const head = ["日期", "狀況", ...organs.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
+  const shownOrgans = visibleOrgans();
+  const head = ["日期", "狀況", ...shownOrgans.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
   const rows = data.records
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
-      const cells = organs.map((o) => {
+      const cells = shownOrgans.map((o) => {
         const pattern = patternLabel(r[o.score], r[o.pattern]);
         return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
       }).join("");
-      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
+      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${withoutUterusStatement(r.diet_advice || "")}</td></tr>`;
     })
     .join("");
   box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -1062,8 +1157,8 @@ async function loadRecords() {
 function renderTrend(trend) {
   const empty = document.getElementById("trend-empty");
   const canvas = document.getElementById("trend-chart");
-  const organs = (trend && trend.organs) || [];
-  const hasPoints = organs.some((org) => (org.points || []).length);
+  const trendOrgans = ((trend && trend.organs) || []).filter((org) => showsFemaleOrgans() || org.key !== "uterus");
+  const hasPoints = trendOrgans.some((org) => (org.points || []).length);
   if (empty) empty.classList.toggle("hidden", hasPoints);
   if (typeof Chart === "undefined" || !canvas) return;
   if (trendChart) {
@@ -1071,12 +1166,12 @@ function renderTrend(trend) {
     trendChart = null;
   }
   if (!hasPoints) return;
-  const labels = (organs[0].points || []).map((pt) => (pt.t || "").replace("T", " ").slice(0, 16));
+  const labels = (trendOrgans[0].points || []).map((pt) => (pt.t || "").replace("T", " ").slice(0, 16));
   trendChart = new Chart(canvas, {
     type: "line",
     data: {
       labels,
-      datasets: organs.map((org) => ({
+      datasets: trendOrgans.map((org) => ({
         label: org.label,
         data: (org.points || []).map((pt) => pt.y),
         borderColor: org.color,

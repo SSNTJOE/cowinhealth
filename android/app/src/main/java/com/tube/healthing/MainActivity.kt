@@ -65,7 +65,6 @@ class MainActivity : AppCompatActivity() {
     private var judgmentReady = false
     private var selectedRecipeId = -1
     @Volatile private var recipeShowAllPasses = 0
-    private var countriesLoaded = false
     private var cameraProvider: ProcessCameraProvider? = null
     private var flagAllergyOptions: List<String> = emptyList()
 
@@ -182,9 +181,9 @@ class MainActivity : AppCompatActivity() {
                 applyFlagOptions(flags)
                 applyUser(me.optJSONObject("user"), flags)
                 Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
+                refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
-            loadRecipeCountries()
             loadLatestAdvice()
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
@@ -207,9 +206,9 @@ class MainActivity : AppCompatActivity() {
                     flags
                 )
                 Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
+                refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
-            loadRecipeCountries()
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
         }
@@ -415,6 +414,7 @@ class MainActivity : AppCompatActivity() {
                 applyFlagOptions(flags)
                 applyUser(me.optJSONObject("user"), flags)
                 Toast.makeText(this, "已寫入 MySQL，網站與 App 會看到同一份資料", Toast.LENGTH_SHORT).show()
+                refreshRecipeChoices(keepSelection = true)
             }
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
@@ -462,15 +462,7 @@ class MainActivity : AppCompatActivity() {
                 binding.result.text = pretty(json)
                 bindAdvice(json)
                 refreshTrend()
-                val country = selectedCountry()
-                Thread {
-                    loadRecipeCountries()
-                    if (country.isNotBlank()) {
-                        val token = ++recipeLoadToken
-                        loadedCountry = country
-                        loadRecipes(country, token)
-                    }
-                }.start()
+                refreshRecipeChoices(keepSelection = true)
                 binding.bodyImage.post {
                     Thread {
                         applyBodyOverlays(
@@ -509,7 +501,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val data = api.records()
-                runOnUiThread { TrendCharts.bind(binding.trendChart, data.optJSONObject("trend")) }
+                runOnUiThread { TrendCharts.bind(binding.trendChart, data.optJSONObject("trend"), female) }
             } catch (_: Exception) {
             }
         }.start()
@@ -536,6 +528,14 @@ class MainActivity : AppCompatActivity() {
             "本日のレシピ（教材デモ）",
             "오늘의 레시피（교육 시연）"
         )
+        binding.recipeNote.text = t(
+            "國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。",
+            "Countries listed still have a usable recipe. With “依身體狀況建議” off, only allergens are excluded. With it on, today’s reading also filters contraindications.",
+            "表示する国は、絞り込み後にレシピが残っている国だけです。「依身體狀況建議」を選んでいないときはアレルゲンだけを除きます。選んだときだけ、今日の検出で禁忌を除きます。",
+            "나라는 걸러낸 뒤 레시피가 남은 곳만 나옵니다. 「依身體狀況建議」를 끄면 알레르기만 제외하고, 켰을 때만 오늘 검사로 금기를 제외합니다."
+        )
+        binding.recipeBodyAdvice.textOn = "依身體狀況建議"
+        binding.recipeBodyAdvice.textOff = "依身體狀況建議"
         binding.recipeCountry.hint = t("輸入國家開頭", "Type a country prefix", "国名の先頭を入力", "국가 앞글자 입력")
         binding.recipePick.hint = t("點開列出食譜，或輸入縮小", "Open to list recipes, or type to narrow", "開くと一覧、入力で絞り込み", "열면 목록, 입력하면 좁힘")
     }
@@ -607,6 +607,9 @@ class MainActivity : AppCompatActivity() {
             if (hasFocus) revealRecipeList()
         }
         binding.recipePick.setOnClickListener { revealRecipeList() }
+        binding.recipeBodyAdvice.setOnCheckedChangeListener { _, _ ->
+            refreshRecipeChoices(keepSelection = true)
+        }
     }
 
     private fun showCountryMenu() {
@@ -620,6 +623,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun revealRecipeList() {
+        if (selectedCountry().isBlank()) {
+            showCountryMenu()
+            return
+        }
         if (recipeRows.isEmpty()) return
         synchronized(this) { recipeShowAllPasses = 2 }
         binding.recipePick.adapter?.filter?.filter("") {
@@ -735,24 +742,58 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadRecipeCountries() {
-        if (countriesLoaded) return
-        try {
+    private fun refreshRecipeChoices(keepSelection: Boolean = true) {
+        val byBody = binding.recipeBodyAdvice.isChecked
+        val country = binding.recipeCountry.text?.toString()?.trim().orEmpty()
+        val keepId = if (keepSelection) selectedRecipeId else -1
+        val scores = if (judgmentReady) lastScoresJson else ""
+        val patterns = if (judgmentReady) lastPatternsJson else ""
+        val lang = currentLang()
+        val isFemale = female
+        Thread {
+            val names = fetchUsableCountries(byBody, scores, patterns, lang, isFemale, country) ?: return@Thread
+            if (country.isNotBlank() && country in names) {
+                val token = ++recipeLoadToken
+                loadedCountry = country
+                loadRecipes(country, token, keepId, byBody)
+            }
+        }.start()
+    }
+
+    private fun fetchUsableCountries(
+        byBody: Boolean,
+        scores: String,
+        patterns: String,
+        lang: String,
+        isFemale: Boolean,
+        currentCountry: String
+    ): List<String>? {
+        return try {
             rememberServer()
-            val data = api.recipeCountries()
+            val data = api.recipeCountries(lang, scores, patterns, isFemale, byBody)
             val arr = data.optJSONArray("countries") ?: JSONArray()
             val names = ArrayList<String>(arr.length())
             for (i in 0 until arr.length()) {
                 val name = arr.optString(i).trim()
                 if (name.isNotEmpty()) names.add(name)
             }
-            countriesLoaded = true
             countryNames = names
-            runOnUiThread { bindSearch(binding.recipeCountry, countryNames, prefix = true) }
-        } catch (e: Exception) {
             runOnUiThread {
-                Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
+                bindSearch(binding.recipeCountry, names, prefix = true)
+                if (currentCountry.isNotEmpty() && currentCountry !in names) {
+                    loadedCountry = ""
+                    selectedRecipeId = -1
+                    recipeRows = emptyList()
+                    binding.recipeCountry.setText("", false)
+                    binding.recipePick.setText("", false)
+                    bindSearch(binding.recipePick, emptyList(), revealAll = true)
+                    binding.recipeDetail.text = ""
+                }
             }
+            names
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+            null
         }
     }
 
@@ -762,16 +803,17 @@ class MainActivity : AppCompatActivity() {
         if (!keepSelection) selectedRecipeId = -1
         val token = ++recipeLoadToken
         loadedCountry = countryName
-        Thread { loadRecipes(countryName, token, keepId) }.start()
+        val byBody = binding.recipeBodyAdvice.isChecked
+        Thread { loadRecipes(countryName, token, keepId, byBody) }.start()
     }
 
-    private fun loadRecipes(countryName: String, token: Int, keepId: Int) {
+    private fun loadRecipes(countryName: String, token: Int, keepId: Int, byBody: Boolean) {
         if (countryName.isBlank()) return
         try {
             rememberServer()
             val scores = if (judgmentReady) lastScoresJson else ""
             val patterns = if (judgmentReady) lastPatternsJson else ""
-            val data = api.recipes(countryName, currentLang(), scores, patterns, female)
+            val data = api.recipes(countryName, currentLang(), scores, patterns, female, byBody)
             if (token != recipeLoadToken) return
             val arr = data.optJSONArray("recipes") ?: JSONArray()
             val rows = ArrayList<JSONObject>(arr.length())
@@ -794,12 +836,21 @@ class MainActivity : AppCompatActivity() {
                     selectedRecipeId = -1
                     binding.recipePick.setText("", false)
                     binding.recipeDetail.text = if (rows.isEmpty()) {
-                        t(
-                            "沒有符合今日分數、禁忌與過敏條件的食譜。教學示範，非診斷。",
-                            "No recipes pass today’s score, contraindication, and allergy filters. Teaching demo, not a diagnosis.",
-                            "本日の点数・禁忌・アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                            "오늘의 점수·금기·알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                        )
+                        if (byBody) {
+                            t(
+                                "沒有符合今日檢測與過敏條件的食譜。教學示範，非診斷。",
+                                "No recipes pass today’s reading and allergy filters. Teaching demo, not a diagnosis.",
+                                "今日の検出とアレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                                "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                            )
+                        } else {
+                            t(
+                                "沒有符合過敏條件的食譜。教學示範，非診斷。",
+                                "No recipes pass the allergy filter. Teaching demo, not a diagnosis.",
+                                "アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                                "알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                            )
+                        }
                     } else ""
                 }
             }
@@ -840,6 +891,18 @@ class MainActivity : AppCompatActivity() {
             "\n\n" + t("教學示範，非診斷。", "Teaching demo, not a diagnosis.", "教材デモであり診断ではありません。", "교육 시연이며 진단이 아닙니다.")
     }
 
+    private fun withoutMaleUterus(source: JSONObject?): JSONObject? {
+        if (female || source == null) return source
+        val copy = JSONObject()
+        val keys = source.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key == "uterus" || key.startsWith("uterus_")) continue
+            copy.put(key, source.get(key))
+        }
+        return copy
+    }
+
     private fun healthyPatterns(scores: JSONObject?, patterns: JSONObject?): String {
         if (patterns == null) return ""
         val copy = JSONObject(patterns.toString())
@@ -854,15 +917,33 @@ class MainActivity : AppCompatActivity() {
         return copy.toString()
     }
 
+    private fun withoutMaleUterusText(text: String): String {
+        if (female || !text.contains("子宮")) return text
+        val kept = StringBuilder()
+        val buf = StringBuilder()
+        for (ch in text) {
+            buf.append(ch)
+            if (ch == '。' || ch == '；' || ch == '\n') {
+                val sentence = buf.toString()
+                if (!sentence.contains("子宮")) kept.append(sentence)
+                buf.clear()
+            }
+        }
+        if (buf.isNotEmpty() && !buf.contains("子宮")) kept.append(buf)
+        return kept.toString().trim()
+    }
+
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
         rememberJudgment(json)
+        val shownScores = withoutMaleUterus(scores)
+        val shownPatterns = withoutMaleUterus(patterns)
         return "匿名紀錄已寫入 MySQL（教學參考，非診斷）\n" +
-            "食療：" + json.optString("diet_advice") + "\n" +
+            "食療：" + withoutMaleUterusText(json.optString("diet_advice")) + "\n" +
             t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "：" + json.optString("diet_url") + "\n" +
             t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "：" + json.optString("acupoint_url") + "\n" +
-            "分數：" + scores + "\n" +
-            "證型：" + healthyPatterns(scores, patterns)
+            "分數：" + shownScores + "\n" +
+            "證型：" + healthyPatterns(shownScores, shownPatterns)
     }
 }

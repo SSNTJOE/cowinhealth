@@ -95,8 +95,20 @@ class ApiClient(
         }
     }
 
-    fun recipeCountries(): JSONObject {
-        val req = Request.Builder().url("$baseUrl/api/recipes/countries").get().build()
+    fun recipeCountries(
+        lang: String,
+        scores: String,
+        patterns: String,
+        female: Boolean,
+        byBody: Boolean = false
+    ): JSONObject {
+        val url = "$baseUrl/api/recipes/countries".toHttpUrl().newBuilder()
+            .addQueryParameter("lang", lang)
+            .addQueryParameter("female", if (female) "1" else "0")
+            .addQueryParameter("by_body", if (byBody) "1" else "0")
+        if (scores.isNotBlank()) url.addQueryParameter("scores", scores)
+        if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
+        val req = Request.Builder().url(url.build()).auth().get().build()
         client.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取國家列表失敗"))
@@ -109,12 +121,14 @@ class ApiClient(
         lang: String,
         scores: String,
         patterns: String,
-        female: Boolean
+        female: Boolean,
+        byBody: Boolean = false
     ): JSONObject {
         val url = "$baseUrl/api/recipes".toHttpUrl().newBuilder()
             .addQueryParameter("country", country)
             .addQueryParameter("lang", lang)
             .addQueryParameter("female", if (female) "1" else "0")
+            .addQueryParameter("by_body", if (byBody) "1" else "0")
         if (scores.isNotBlank()) url.addQueryParameter("scores", scores)
         if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
         val req = Request.Builder().url(url.build()).auth().get().build()

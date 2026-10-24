@@ -34,8 +34,8 @@ from .health_flags import (
     user_allergies,
     user_conditions,
 )
-from .recipes import TEACHING_DISCLAIMER, countries as recipe_countries_list, filter_recipes, split_csv
-from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, overlay_from_pattern_label
+from .recipes import TEACHING_DISCLAIMER, filter_recipes, split_csv, usable_countries
+from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
 
 logger = logging.getLogger(__name__)
@@ -292,6 +292,23 @@ def decode_image(upload: UploadFile | None, image_base64: str | None) -> bytes |
         raise HTTPException(status_code=400, detail="Base64 圖片無法解析") from exc
 
 
+def _stored_organ_score(scores: dict, key: str):
+    if isinstance(scores, dict) and key in scores and scores[key] is not None:
+        return scores[key]
+    if key == "uterus_score":
+        return 0
+    raise KeyError(key)
+
+
+def _stored_organ_pattern(patterns: dict, key: str) -> str:
+    value = patterns.get(key) if isinstance(patterns, dict) else None
+    if value not in (None, ""):
+        return value
+    if key == "uterus_pattern":
+        return "未定"
+    raise KeyError(key)
+
+
 def insert_record(user_id: str, result: dict, extra: dict) -> int:
     record_date = datetime.now()
     columns = [
@@ -333,8 +350,8 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         colors.get("lip_color"),
         colors.get("tongue_body_color"),
         colors.get("tongue_coat_color"),
-        *[result["scores"][key] for key in ORGAN_KEYS],
-        *[result["patterns"][key] for key in PATTERN_KEYS],
+        *[_stored_organ_score(result["scores"], key) for key in ORGAN_KEYS],
+        *[_stored_organ_pattern(result["patterns"], key) for key in PATTERN_KEYS],
         extra.get("diet_advice"),
         extra.get("diet_url"),
         extra.get("acupoint_url"),
@@ -472,28 +489,14 @@ def _is_female(explicit: str | None, profile: dict | None) -> bool:
     return (profile or {}).get("gender") == "female"
 
 
-@app.get("/api/recipes/countries")
-def api_recipe_countries(prefix: str | None = None):
-    try:
-        names = recipe_countries_list(prefix)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="找不到 Recipe.xls") from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"countries": names, "prefix": (prefix or "").strip(), "disclaimer": TEACHING_DISCLAIMER}
-
-
-@app.get("/api/recipes")
-def api_recipes(
+def _recipe_filter_args(
     request: Request,
-    country: str,
-    lang: str = "zh",
-    patterns: str | None = None,
-    scores: str | None = None,
-    allergies: str | None = None,
-    conditions: str | None = None,
-    female: str | None = None,
-):
+    patterns: str | None,
+    scores: str | None,
+    allergies: str | None,
+    conditions: str | None,
+    female: str | None,
+) -> dict:
     user_id = current_user_id(request)
     profile = fetch_user(user_id) if user_id else None
     allergy_list = split_csv(allergies) if allergies is not None else user_allergies(profile)
@@ -510,15 +513,64 @@ def api_recipes(
         score_map, pattern_map = latest_record_judgment(user_id)
     else:
         score_map, pattern_map = {}, {}
+    return {
+        "patterns": pattern_map,
+        "scores": score_map,
+        "allergies": allergy_list,
+        "conditions": condition_list,
+        "female": _is_female(female, profile),
+    }
+
+
+@app.get("/api/recipes/countries")
+def api_recipe_countries(
+    request: Request,
+    prefix: str | None = None,
+    lang: str = "zh",
+    patterns: str | None = None,
+    scores: str | None = None,
+    allergies: str | None = None,
+    conditions: str | None = None,
+    female: str | None = None,
+    by_body: bool = False,
+):
+    del lang  # country names stay column 1; lang is accepted so the client can reuse recipe params
+    args = _recipe_filter_args(request, patterns, scores, allergies, conditions, female)
+    try:
+        names = usable_countries(prefix, by_body=by_body, **args)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到 Recipe.xls") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "countries": names,
+        "prefix": (prefix or "").strip(),
+        "by_body": bool(by_body),
+        "disclaimer": TEACHING_DISCLAIMER,
+    }
+
+
+@app.get("/api/recipes")
+def api_recipes(
+    request: Request,
+    country: str,
+    lang: str = "zh",
+    patterns: str | None = None,
+    scores: str | None = None,
+    allergies: str | None = None,
+    conditions: str | None = None,
+    female: str | None = None,
+    by_body: bool = False,
+):
+    args = _recipe_filter_args(request, patterns, scores, allergies, conditions, female)
+    allergy_list = args["allergies"]
+    condition_list = args["conditions"]
     try:
         payload = filter_recipes(
             country=country,
             lang=lang,
-            patterns=pattern_map,
-            scores=score_map,
-            female=_is_female(female, profile),
-            allergies=allergy_list,
-            conditions=condition_list,
+            by_body=by_body,
+            **args,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -837,6 +889,8 @@ def records(request: Request):
             rows = cur.fetchall()
     finally:
         conn.close()
+    profile = fetch_user(user_id) or {}
+    female = profile.get("gender") == "female"
     for row in rows:
         row["record_date"] = iso_time(row.get("record_date"))
         row["overlays"] = {
@@ -870,4 +924,6 @@ def records(request: Request):
         health = row.get("organ_health")
         if isinstance(health, dict) and isinstance(health.get("pattern_scores"), dict):
             row["pattern_scores"] = health["pattern_scores"]
-    return {"user_id": user_id, "records": rows, "trend": build_trend(rows)}
+        if not female:
+            omit_uterus_judgment(row)
+    return {"user_id": user_id, "records": rows, "trend": build_trend(rows, include_uterus=female)}

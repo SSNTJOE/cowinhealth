@@ -124,6 +124,24 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingTop="8dp"/>
+        <TextView
+            android:id="@+id/recipeNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="13sp"
+            android:text="國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。"/>
+        <ToggleButton
+            android:id="@+id/recipeBodyAdvice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="false"
+            android:minHeight="48dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:textOff="依身體狀況建議"
+            android:textOn="依身體狀況建議"/>
         <AutoCompleteTextView
             android:id="@+id/recipeCountry"
             android:layout_width="match_parent"
