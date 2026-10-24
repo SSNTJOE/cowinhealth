@@ -64,6 +64,29 @@ input, select, textarea {
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.cct-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 8px 0 10px;
+}
+.cct-picker .cct-label {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+.cct-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  width: auto;
+}
+.cct-picker input {
+  width: auto;
+  padding: 0;
+}
 button {
   border: 0;
   border-radius: 999px;

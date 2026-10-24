@@ -144,12 +144,14 @@ class ApiClient(
         discomfort: String,
         face: File?,
         tongue: File?,
-        pulseJson: String?
+        pulseJson: String?,
+        colorTemperatureK: Int = 4200
     ): JSONObject {
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("symptoms", symptoms)
             .addFormDataPart("discomfort", discomfort)
             .addFormDataPart("include_pulse", "1")
+            .addFormDataPart("color_temperature_k", colorTemperatureK.toString())
         if (pulseJson != null) builder.addFormDataPart("pulse_json", pulseJson)
         val jpeg = "image/jpeg".toMediaType()
         if (face != null) builder.addFormDataPart("face", "face.jpg", face.asRequestBody(jpeg))

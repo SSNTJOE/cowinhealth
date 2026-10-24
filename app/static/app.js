@@ -1204,11 +1204,19 @@ function renderTrend(trend) {
   });
 }
 
+function selectedColorTemperatureK() {
+  const picked = document.querySelector('input[name="color_temperature_k"]:checked');
+  const value = picked ? String(picked.value) : "4200";
+  if (value === "2700" || value === "4200" || value === "6500") return value;
+  return "4200";
+}
+
 async function sendRecord(extraShot) {
   camMsg.textContent = "傳送中…";
   const body = new FormData();
   body.append("symptoms", document.getElementById("symptoms").value);
   body.append("discomfort", document.getElementById("discomfort").value);
+  body.append("color_temperature_k", selectedColorTemperatureK());
   if (extraShot) {
     const blob = await captureFrame(extraShot);
     if (!blob) throw new Error("無法擷取畫面");

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=body1" />
+  <link rel="stylesheet" href="/static/styles.css?v=cct1" />
 </head>
 <body>
   <div class="wrap">
@@ -79,6 +79,12 @@
 
       <h3>相機擷取</h3>
       <p class="note">請把臉或舌頭對進黃色框後再拍照。黃線維持原位。舌象只取黃框內（上緣水平線到下弧，左右貼齊）。臉部判色相片把整張臉往上移 1/4 格（一格是框高的 1/4），並縮小到黃框的 0.9 倍。臉部黃框把鏡頭放大兩倍，舌頭黃框也會放大，都不必貼近鏡頭。舌象分析框就是這塊畫面，上、中、下、左、右都貼齊，不留白邊，也不含黃框以外的區域。臉部伺服器會再嘗試去掉剩餘背景；自動去背失敗時仍以這張往上移過的畫面分析。</p>
+      <div class="cct-picker" role="radiogroup" aria-label="環境色溫">
+        <span class="cct-label">環境色溫</span>
+        <label><input type="radio" name="color_temperature_k" value="2700" />暖光 2700K</label>
+        <label><input type="radio" name="color_temperature_k" value="4200" checked />白光 4200K</label>
+        <label><input type="radio" name="color_temperature_k" value="6500" />冷光 6500K</label>
+      </div>
       <div class="camera-stage is-face" id="camera-stage">
         <div class="camera-clip" id="camera-clip">
           <video id="camera" autoplay muted playsinline webkit-playsinline></video>
@@ -214,6 +220,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/static/common.js?v=country1"></script>
-  <script src="/static/app.js?v=uterus2"></script>
+  <script src="/static/app.js?v=cct1"></script>
 </body>
 </html>

@@ -810,6 +810,7 @@ async def analyze(
     discomfort: str | None = Form(default=None),
     pulse_json: str | None = Form(default=None),
     include_pulse: str | None = Form(default=None),
+    color_temperature_k: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
@@ -839,6 +840,7 @@ async def analyze(
         personal_lab=personal_lab,
         confirm_with_pulse=confirm_with_pulse,
         female=(profile or {}).get("gender") == "female",
+        color_temperature_k=color_temperature_k,
     )
     advice = build_advice(
         result["findings"],

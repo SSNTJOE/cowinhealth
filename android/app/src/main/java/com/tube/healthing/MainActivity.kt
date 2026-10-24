@@ -438,6 +438,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun selectedColorTemperatureK(): Int {
+        return when (binding.cctGroup.checkedRadioButtonId) {
+            binding.cct2700.id -> 2700
+            binding.cct6500.id -> 6500
+            else -> 4200
+        }
+    }
+
     private fun save() {
         if (!pulseReady(pulseJson)) {
             runOnUiThread {
@@ -456,7 +464,8 @@ class MainActivity : AppCompatActivity() {
                 binding.discomfort.text.toString(),
                 faceFile,
                 tongueFile,
-                pulseJson
+                pulseJson,
+                selectedColorTemperatureK()
             )
             runOnUiThread {
                 binding.result.text = pretty(json)

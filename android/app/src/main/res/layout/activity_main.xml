@@ -81,6 +81,33 @@
                 android:importantForAccessibility="no"
                 android:visibility="gone"/>
         </FrameLayout>
+        <TextView
+            android:text="環境色溫"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"/>
+        <RadioGroup
+            android:id="@+id/cctGroup"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <RadioButton
+                android:id="@+id/cct2700"
+                android:text="暖光 2700K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+            <RadioButton
+                android:id="@+id/cct4200"
+                android:text="白光 4200K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"/>
+            <RadioButton
+                android:id="@+id/cct6500"
+                android:text="冷光 6500K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+        </RadioGroup>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
             <Button android:id="@+id/shotFace" android:text="拍臉／唇" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
             <Button android:id="@+id/shotTongue" android:text="拍舌頭" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
