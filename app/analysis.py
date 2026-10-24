@@ -1659,9 +1659,144 @@ def analyze_eye_subregions(
     return subregions, best, notes
 
 
+def _lab_shift(stats: dict[str, float], base: dict[str, float]) -> tuple[float, float, float]:
+    sample_l, sample_a, sample_b = _lab_channels(stats)
+    base_l, base_a, base_b = _lab_channels(base)
+    return sample_l - base_l, sample_a - base_a, sample_b - base_b
+
+
+def _face_green(stats: dict[str, float], base: dict[str, float]) -> bool:
+    _dl, da, _db = _lab_shift(stats, base)
+    return da <= -4 or stats.get("green_ratio", 0) >= 0.10 or stats.get("purple_ratio", 0) >= 0.12
+
+
+def _face_dark(stats: dict[str, float], base: dict[str, float]) -> bool:
+    dl, _da, _db = _lab_shift(stats, base)
+    return dl <= -8 or stats.get("dark_ratio", 0) >= 0.20
+
+
+def _face_pale(stats: dict[str, float], base: dict[str, float]) -> bool:
+    dl, da, _db = _lab_shift(stats, base)
+    return dl >= 8 and da <= -3
+
+
+def _face_wan(stats: dict[str, float], base: dict[str, float]) -> bool:
+    """蒼白之外的暗淡：血色與飽和下降，但還沒暗到發烏。"""
+    dl, da, db = _lab_shift(stats, base)
+    return -6 < dl < 8 and da <= -4 and db <= -3 and stats.get("s", 1) <= max(0.08, base.get("s", 0.25) - 0.06)
+
+
+def _face_dusky(stats: dict[str, float], base: dict[str, float]) -> bool:
+    dl, da, db = _lab_shift(stats, base)
+    return dl <= -8 and da <= -3 and db <= -4
+
+
+def _melasma_patch(stats: dict[str, float], base: dict[str, float]) -> bool:
+    """黃褐斑：比周圍臉更黃褐，不是整片潮紅。"""
+    dl, da, db = _lab_shift(stats, base)
+    return db >= 4 and dl <= 1 and da < 5
+
+
+def _uterus_block(label: str, api_pattern: str, overlay: str, strength: float, note: str) -> dict[str, Any]:
+    # ΔE 6–18 stays on the 1–6 side of the face color scale (7–10 would clear the sticker).
+    delta = round(6 + 12 * max(0.0, min(1.0, strength)), 2)
+    return {
+        "label": label,
+        "organs": ["uterus"],
+        "delta_e": delta,
+        "class_label": api_pattern,
+        "api_pattern": api_pattern,
+        "overlay": overlay,
+        "note": note,
+    }
+
+
+def uterus_face_blocks(
+    stats_by_id: dict[int, dict[str, float]],
+    nose_lower: dict[str, float] | None,
+    complexion: dict[str, float],
+    female: bool,
+) -> list[dict[str, Any]]:
+    """Female face colors that map onto 子宮. A photo cannot confirm fibroids or repeated acne."""
+    if not female or not complexion:
+        return []
+    blocks: list[dict[str, Any]] = []
+    normal = FACE_NORMAL_LAB
+    # Cheeks, jaw, chin, and the nose are the regions being judged, so they stay out of this reference.
+    reference_stats = [
+        stats_by_id[cell_id]
+        for cell_id in (1, 2, 3, 5)
+        if cell_id in stats_by_id
+    ]
+    local_base = average_stats(reference_stats) if reference_stats else complexion
+    if _face_green(complexion, normal) or _face_dark(complexion, normal) or _face_dusky(complexion, normal):
+        dl, da, _db = _lab_shift(complexion, normal)
+        strength = max(abs(dl) / 18, abs(min(da, 0)) / 10, complexion.get("dark_ratio", 0))
+        blocks.append(
+            _uterus_block(
+                "face-uterus-shi-han",
+                "實證寒證",
+                "strong-cold.png",
+                strength,
+                "面色發青、發烏或暗沉 → 子宮實寒",
+            )
+        )
+    elif _face_pale(complexion, normal) or _face_wan(complexion, normal):
+        dl, da, _db = _lab_shift(complexion, normal)
+        strength = max(abs(dl) / 16, abs(min(da, 0)) / 10)
+        blocks.append(
+            _uterus_block(
+                "face-uterus-pale",
+                "虛證寒證",
+                "weak-cold.png",
+                strength,
+                "面色蒼白或暗淡 → 子宮虛寒（教學對應血色不足，不能由照片判斷肌瘤、肌腺症或內膜異位）",
+            )
+        )
+    else:
+        chin = stats_by_id.get(12)
+        if chin and nose_lower:
+            def local_off(stats: dict[str, float]) -> bool:
+                dl, da, _db = _lab_shift(stats, local_base)
+                dark = dl <= -6 or stats.get("dark_ratio", 0) >= 0.16
+                green = da <= -3 or stats.get("green_ratio", 0) >= 0.08 or stats.get("purple_ratio", 0) >= 0.10
+                pale = dl >= 6 and da <= -2
+                return dark or green or pale
+
+            if local_off(chin) and local_off(nose_lower):
+                dl, da, _db = _lab_shift(chin, local_base)
+                strength = max(abs(dl) / 14, abs(da) / 10, chin.get("dark_ratio", 0))
+                blocks.append(
+                    _uterus_block(
+                        "face-uterus-chin",
+                        "虛證寒證",
+                        "weak-cold.png",
+                        strength,
+                        "下巴第12格與人中（第8格下）偏暗、發青或發白 → 子宮虛寒",
+                    )
+                )
+    melasma_ids = [
+        cell_id
+        for cell_id in (7, 9, 10, 11)
+        if cell_id in stats_by_id and _melasma_patch(stats_by_id[cell_id], local_base)
+    ]
+    if len(melasma_ids) >= 2 and (7 in melasma_ids or 9 in melasma_ids):
+        blocks.append(
+            _uterus_block(
+                "face-uterus-melasma",
+                "虛證熱證",
+                "weak-hot.png",
+                0.45 + 0.15 * (len(melasma_ids) - 2),
+                f"第{'、'.join(str(cell_id) for cell_id in melasma_ids)}格黃褐斑 → 子宮虛熱（教學對應雌激素波動，非檢驗數值）",
+            )
+        )
+    return blocks
+
+
 def analyze_face_grid(
     image: Image.Image,
     personal_lab: dict[str, Any] | None = None,
+    female: bool = False,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
     findings: list[str] = []
     cells: list[dict[str, Any]] = []
@@ -1718,6 +1853,7 @@ def analyze_face_grid(
         return reading
 
     lip_color = None
+    nose_lower_stats: dict[str, float] | None = None
     for spec in FACE_CELL_LAYOUT:
         cell_id = spec["id"]
         kind = spec.get("kind") or "face"
@@ -1750,6 +1886,7 @@ def analyze_face_grid(
             upper_stats = region_stats(upper_crop)
             lower_stats = region_stats(lower_crop)
             stats_by_id[cell_id] = lower_stats
+            nose_lower_stats = lower_stats
             stats = lower_stats
             upper_read = read_cell(upper_stats, lab_base, "face", upper_crop)
             lower_read = read_cell(lower_stats, lab_base, "face", lower_crop)
@@ -1877,6 +2014,27 @@ def analyze_face_grid(
         )
 
     by_id = {cell["id"]: cell for cell in cells}
+    for block in uterus_face_blocks(stats_by_id, nose_lower_stats, complexion_stats, female):
+        face_blocks.append(block)
+        findings.append(f"{block['note']}（{TEACHING_NOTE}）")
+        pattern_name = "實寒" if block["api_pattern"] == "實證寒證" else "虛熱" if block["api_pattern"] == "虛證熱證" else "虛寒"
+        evidence_kind = ("虛證", "熱證") if pattern_name == "虛熱" else ("實證", "寒證") if pattern_name == "實寒" else ("虛證", "寒證")
+        flags.append(
+            {
+                "id": block["label"],
+                "cells": [7, 9, 10, 11] if pattern_name == "虛熱" else [8, 12],
+                "pattern": pattern_name,
+                "text": block["note"],
+            }
+        )
+        remember(
+            ["uterus"],
+            {
+                "overlay": block["overlay"],
+                "patterns": ((evidence_kind[0], 1.6), (evidence_kind[1], 1.6)),
+                "score": float(block["delta_e"]),
+            },
+        )
     color_health = apply_relative_color_scores(face_blocks)
     score_by_label = {block["label"]: block for block in face_blocks}
 
@@ -2998,6 +3156,7 @@ def inspect_image(
     image_bytes: bytes,
     shot_type: str,
     personal_lab: dict[str, Any] | None = None,
+    female: bool = False,
 ) -> dict[str, Any]:
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
     if shot_type == "tongue":
@@ -3025,7 +3184,7 @@ def inspect_image(
         tongue_grid, grid_findings, colors = analyze_tongue_grid(image)
         findings.extend(grid_findings)
     else:
-        face_grid, grid_findings, colors = analyze_face_grid(image, personal_lab=personal_lab)
+        face_grid, grid_findings, colors = analyze_face_grid(image, personal_lab=personal_lab, female=female)
         findings.extend(grid_findings)
 
     if not findings:
@@ -3067,9 +3226,15 @@ def analyze_session(
     pulse: dict[str, Any] | None = None,
     personal_lab: dict[str, Any] | None = None,
     confirm_with_pulse: bool = False,
+    female: bool = False,
 ) -> dict[str, Any]:
     color_reports = [
-        inspect_image(raw, shot_type, personal_lab=personal_lab if shot_type == "face" else None)
+        inspect_image(
+            raw,
+            shot_type,
+            personal_lab=personal_lab if shot_type == "face" else None,
+            female=female,
+        )
         for shot_type, raw in images
     ]
     findings: list[str] = []

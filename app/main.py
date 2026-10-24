@@ -783,6 +783,7 @@ async def analyze(
         pulse,
         personal_lab=personal_lab,
         confirm_with_pulse=confirm_with_pulse,
+        female=(profile or {}).get("gender") == "female",
     )
     advice = build_advice(
         result["findings"],
