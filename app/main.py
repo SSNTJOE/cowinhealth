@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import hmac
 import json
 import os
@@ -21,6 +22,7 @@ from .advice import build_advice
 from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
+from .deviation import record_deviation
 from .health_flags import (
     CONDITION_SET,
     CONDITION_OPTIONS,
@@ -36,6 +38,7 @@ from .recipes import TEACHING_DISCLAIMER, countries as recipe_countries_list, fi
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, overlay_from_pattern_label
 from .trend import build_trend, iso_time
 
+logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MEDIA_ALIASES = {
     "boy-body.pgn": "boy-body.png",
@@ -801,6 +804,10 @@ async def analyze(
         "pulse_json": pulse_json,
     }
     insert_record(user_id, result, extra)
+    try:
+        record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
+    except Exception:
+        logger.exception("檢測差異沒有寫入 deviation.xls")
     return result
 
 

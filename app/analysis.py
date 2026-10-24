@@ -2621,7 +2621,195 @@ def _lab_baseline(stats: dict[str, float]) -> dict[str, float]:
     }
 
 
-def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+def _uterus_stasis_spot_ratio(seg: dict[str, Any], spec: dict[str, float]) -> float:
+    """Share of upper-zone tongue-body pixels that are darker and bluer, or darker and redder, than the zone median."""
+    x0, y0, x1, y1 = _box_xy(spec, seg["width"], seg["height"])
+    labs: list[tuple[float, float, float]] = []
+    width = seg["width"]
+    for y in range(y0, y1):
+        row = y * width
+        for x in range(x0, x1):
+            idx = row + x
+            if seg["coat_mask"][idx] >= 128:
+                continue
+            labs.append(seg["lab"][idx])
+    if len(labs) < 12:
+        return 0.0
+    med_l = _median([pixel[0] for pixel in labs])
+    med_a = _median([pixel[1] for pixel in labs])
+    med_b = _median([pixel[2] for pixel in labs])
+    spots = 0
+    for light, a_star, b_star in labs:
+        dark_purple = light <= med_l - 8 and b_star <= med_b - 5
+        dark_red = light <= med_l - 10 and a_star >= med_a + 6
+        if dark_purple or dark_red:
+            spots += 1
+    return spots / float(len(labs))
+
+
+def _uterus_tongue_block(
+    label: str,
+    source: str,
+    api_pattern: str,
+    overlay: str,
+    patterns: tuple[tuple[str, float], ...],
+    strength: float,
+    note: str,
+) -> dict[str, Any]:
+    delta = round(6 + 12 * max(0.15, min(1.0, strength)), 2)
+    return {
+        "label": label,
+        "source": source,
+        "organs": ["uterus"],
+        "delta_e": delta,
+        "class_label": api_pattern,
+        "api_pattern": api_pattern,
+        "overlay": overlay,
+        "patterns": patterns,
+        "note": note,
+    }
+
+
+def uterus_tongue_blocks(
+    top: dict[str, Any],
+    center_body: dict[str, float],
+    other_coat_ratio: float,
+    spot_ratio: float,
+    female: bool,
+) -> list[dict[str, Any]]:
+    """Upper tongue zone only. A photo cannot confirm pelvic disease."""
+    if not female or not top:
+        return []
+    normal = TONGUE_BODY_NORMAL
+    body = top["raw_body"] if top.get("raw_body_count", 0) >= TONGUE_LAB_THRESHOLDS["min_mask_pixels"] else {}
+    coat = top["raw_coat"] if top.get("raw_coat_count", 0) >= TONGUE_LAB_THRESHOLDS["min_mask_pixels"] else None
+    all_n = max(1.0, float((top.get("all") or {}).get("pixel_count") or 1))
+    coat_ratio = float(top.get("raw_coat_count") or 0) / all_n
+    scant = coat_ratio <= TONGUE_LAB_THRESHOLDS["root_peel_coat_max"] or (
+        coat_ratio <= 0.22 and other_coat_ratio >= coat_ratio + TONGUE_LAB_THRESHOLDS["root_peel_coat_gap"]
+    )
+    blocks: list[dict[str, Any]] = []
+    body_ready = float(body.get("pixel_count") or 0) >= TONGUE_LAB_THRESHOLDS["min_mask_pixels"]
+    body_pattern = ""
+    if body_ready:
+        a_star = float(body.get("a_star") or 0)
+        b_star = float(body.get("b_star") or 0)
+        light = float(body.get("L") or 0)
+        da_center = a_star - float(center_body.get("a_star") or a_star)
+        purple = (
+            b_star <= normal["b_star"] - 7
+            or float(body.get("purple_ratio") or 0) >= 0.10
+            or (b_star - float(center_body.get("b_star") or b_star) <= -6 and b_star <= 8)
+        )
+        dark_red = (a_star >= 26 and light <= 40) or (
+            float(body.get("dark_ratio") or 0) >= 0.15 and a_star >= 22 and light <= 46
+        )
+        spots = 0.02 <= spot_ratio <= 0.35
+        bright_red = a_star >= 36 and light >= 48 and b_star >= 8
+        deep_red = a_star >= 42 and light >= 40 and b_star >= 6
+        pale = a_star <= 16 or (a_star <= 18 and light >= 62) or (
+            da_center <= -6 and a_star <= 18 and light >= float(center_body.get("L") or light)
+        )
+        if purple or dark_red or spots:
+            kind = "瘀斑瘀點" if spots and not (purple or dark_red) else "暗紅、青紫或瘀斑瘀點"
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-stasis",
+                    "body",
+                    "實證寒證",
+                    "strong-cold.png",
+                    (("實證", 1.6), ("寒證", 1.6)),
+                    max(spot_ratio * 4, (40 - light) / 20, (normal["b_star"] - b_star) / 12),
+                    f"上區舌質{kind} → 子宮血瘀，計為實寒",
+                )
+            )
+            body_pattern = "實寒"
+        elif (bright_red or deep_red or a_star >= 34) and scant:
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-yin-heat",
+                    "body",
+                    "虛證熱證",
+                    "weak-hot.png",
+                    (("虛證", 1.6), ("熱證", 1.6)),
+                    (a_star - normal["a_star"]) / 18,
+                    "上區舌紅而少苔或無苔 → 子宮虛熱",
+                )
+            )
+            body_pattern = "虛熱"
+        elif bright_red or deep_red:
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-excess-heat",
+                    "body",
+                    "實證熱證",
+                    "strong-hot.png",
+                    (("實證", 1.6), ("熱證", 1.6)),
+                    (a_star - normal["a_star"]) / 18,
+                    "上區舌質鮮紅或深紅 → 子宮實熱",
+                )
+            )
+            body_pattern = "實熱"
+        elif pale:
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-pale",
+                    "body",
+                    "虛證寒證",
+                    "weak-cold.png",
+                    (("虛證", 1.6), ("寒證", 1.6)),
+                    (normal["a_star"] - a_star) / 14,
+                    "上區舌質淡白、無血色 → 子宮虛寒",
+                )
+            )
+            body_pattern = "虛寒"
+    if coat is not None and coat_ratio >= 0.45:
+        coat_b = float(coat.get("b_star") or 0)
+        coat_l = float(coat.get("L") or 0)
+        coat_s = float(coat.get("s") or 1)
+        if coat_b >= TONGUE_LAB_THRESHOLDS["coat_yellow_b"] and 55 <= coat_l <= 82:
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-damp-heat",
+                    "coat",
+                    "濕熱證",
+                    DAMP_OVERLAY,
+                    (("實證", 1.5),),
+                    (coat_b - TONGUE_COAT_NORMAL["b_star"]) / 16,
+                    "上區黃膩苔 → 子宮濕熱（教學對應濕熱蘊結；不能由照片判斷盆腔炎、子宮內膜炎或多囊性卵巢症候群）",
+                )
+            )
+        elif coat_l >= TONGUE_LAB_THRESHOLDS["coat_white_L"] and coat_b <= 14 and coat_s <= 0.32:
+            blocks.append(
+                _uterus_tongue_block(
+                    "tongue-uterus-damp-cold",
+                    "coat",
+                    "寒濕證",
+                    DAMP_OVERLAY,
+                    (("實證", 1.5),),
+                    coat_ratio,
+                    "上區白膩苔 → 子宮寒濕（寒濕阻滯）",
+                )
+            )
+    elif scant and body_pattern not in ("虛熱", "虛寒"):
+        blocks.append(
+            _uterus_tongue_block(
+                "tongue-uterus-yin-blood",
+                "coat",
+                "虛證熱證" if body_ready and float(body.get("a_star") or 0) >= 28 else "虛證寒證",
+                "weak-hot.png" if body_ready and float(body.get("a_star") or 0) >= 28 else "weak-cold.png",
+                (("虛證", 1.8), ("熱證", 1.4)) if body_ready and float(body.get("a_star") or 0) >= 28 else (("虛證", 1.8), ("寒證", 1.4)),
+                0.55 + max(0.0, 0.22 - coat_ratio),
+                "上區少苔、剝落苔或無苔 → 子宮陰血極度虧虛",
+            )
+        )
+    return blocks
+
+
+def analyze_tongue_grid(
+    image: Image.Image,
+    female: bool = False,
+) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
     findings: list[str] = []
     marks: list[dict[str, Any]] = []
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
@@ -2999,6 +3187,23 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     for block in body_blocks + coat_blocks:
         block["class_label"] = bianzheng.get("label")
         block["api_pattern"] = bianzheng.get("api_pattern")
+    top_spec = next(spec for spec in TONGUE_ZONE_LAYOUT if spec["id"] == "top")
+    other_coat_ratios = []
+    for zone_id in ("center", "left", "right", "bottom"):
+        zone_n = max(1.0, float(packed[zone_id]["all"].get("pixel_count") or 1))
+        other_coat_ratios.append(float(packed[zone_id]["raw_coat_count"] or 0) / zone_n)
+    other_coat_ratio = sum(other_coat_ratios) / len(other_coat_ratios)
+    for block in uterus_tongue_blocks(
+        packed["top"],
+        center_body,
+        other_coat_ratio,
+        _uterus_stasis_spot_ratio(seg, top_spec),
+        female,
+    ):
+        target = body_blocks if block["source"] == "body" else coat_blocks
+        target.append(block)
+        findings.append(f"{block['note']}（{TEACHING_NOTE}）")
+        remember(("uterus",), block["overlay"], block["patterns"], float(block["delta_e"]), block["source"])
     colors["tongue_body_color"] = f"{bianzheng['bias']}／{bianzheng['meaning']}"
     remember(
         bianzheng.get("targets") or (),
@@ -3181,7 +3386,7 @@ def inspect_image(
     face_grid = None
     tongue_grid = None
     if shot_type == "tongue":
-        tongue_grid, grid_findings, colors = analyze_tongue_grid(image)
+        tongue_grid, grid_findings, colors = analyze_tongue_grid(image, female=female)
         findings.extend(grid_findings)
     else:
         face_grid, grid_findings, colors = analyze_face_grid(image, personal_lab=personal_lab, female=female)
