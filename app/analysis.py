@@ -19,6 +19,7 @@ from .syndrome import (
     apply_pattern_scores_to_evidence,
     organ_patterns_from_color_blocks,
     organ_scores_from_color_blocks,
+    omit_uterus_judgment,
     overlay_from_pattern_label,
     pattern_kinds_gained,
     score_spleen_stomach_symptoms,
@@ -634,16 +635,54 @@ def hsv_label(stats: dict[str, float]) -> str:
 
 
 # 4 rows × 3 columns. Row 4 visual order is 10 | 12 lips (center) | 11.
-# Cells 4 and 5 are the eyes. Cell 8 is the nose. Cell 12 lips use the redder pixels only.
+# Cells 4 and 6 are the eyes. Cell 12 lips use the redder pixels only.
+# Judgment (not the yellow guides): cell 5 upper half is 心. The lower half of
+# today's cell 5 joins the original cell 8. That taller center-column rectangle
+# splits into equal upper/lower halves, and each half into left/middle/right.
+_FACE_ROW = 1.0 / 4.0
+_FACE_CELL5_TOP = 1 * _FACE_ROW
+_FACE_CELL5_BOTTOM = 2 * _FACE_ROW
+_FACE_CELL5_MID = (_FACE_CELL5_TOP + _FACE_CELL5_BOTTOM) / 2.0
+_FACE_CELL8_BOTTOM = 3 * _FACE_ROW
+_FACE_CELL8_MID = (_FACE_CELL5_MID + _FACE_CELL8_BOTTOM) / 2.0
+_FACE_X_LEFT = 1.0 / 3.0
+_FACE_X_RIGHT = 2.0 / 3.0
+_FACE_X_STRIP = (_FACE_X_RIGHT - _FACE_X_LEFT) / 3.0
+_FACE_X = (
+    _FACE_X_LEFT,
+    _FACE_X_LEFT + _FACE_X_STRIP,
+    _FACE_X_LEFT + 2.0 * _FACE_X_STRIP,
+    _FACE_X_RIGHT,
+)
+
+
+def _face_box(left: float, top: float, right: float, bottom: float) -> dict[str, float]:
+    return {"left": left, "top": top, "right": right, "bottom": bottom}
+
+
+def _center_strip(index: int, top: float, bottom: float) -> dict[str, float]:
+    return _face_box(_FACE_X[index], top, _FACE_X[index + 1], bottom)
+
+
+FACE_CELL5_UPPER_BOX = _face_box(_FACE_X_LEFT, _FACE_CELL5_TOP, _FACE_X_RIGHT, _FACE_CELL5_MID)
+FACE_CELL8_BOX = _face_box(_FACE_X_LEFT, _FACE_CELL5_MID, _FACE_X_RIGHT, _FACE_CELL8_BOTTOM)
+FACE_CELL8_ZONES = [
+    {"id": "gallbladder_left", "part": "upper", "side": "left", "name": "膽左", "organs": "膽", "targets": ["gallbladder"], "box": _center_strip(0, _FACE_CELL5_MID, _FACE_CELL8_MID)},
+    {"id": "liver", "part": "upper", "side": "middle", "name": "肝", "organs": "肝", "targets": ["liver"], "box": _center_strip(1, _FACE_CELL5_MID, _FACE_CELL8_MID)},
+    {"id": "gallbladder_right", "part": "upper", "side": "right", "name": "膽右", "organs": "膽", "targets": ["gallbladder"], "box": _center_strip(2, _FACE_CELL5_MID, _FACE_CELL8_MID)},
+    {"id": "stomach_left", "part": "lower", "side": "left", "name": "胃左", "organs": "胃", "targets": ["stomach"], "box": _center_strip(0, _FACE_CELL8_MID, _FACE_CELL8_BOTTOM)},
+    {"id": "spleen", "part": "lower", "side": "middle", "name": "脾", "organs": "脾", "targets": ["spleen"], "box": _center_strip(1, _FACE_CELL8_MID, _FACE_CELL8_BOTTOM)},
+    {"id": "stomach_right", "part": "lower", "side": "right", "name": "胃右", "organs": "胃", "targets": ["stomach"], "box": _center_strip(2, _FACE_CELL8_MID, _FACE_CELL8_BOTTOM)},
+]
 FACE_CELL_LAYOUT = [
     {"id": 1, "row": 0, "col": 0, "name": "左側面", "organs": "左臉", "targets": []},
     {"id": 2, "row": 0, "col": 1, "name": "額頭", "organs": "額頭／心／咽喉／肺", "targets": ["heart", "lung"]},
     {"id": 3, "row": 0, "col": 2, "name": "右側面", "organs": "右臉", "targets": []},
     {"id": 4, "row": 1, "col": 0, "name": "左眼", "organs": "白睛／肝膽／肺", "targets": ["liver", "lung", "gallbladder"], "kind": "eye", "side": "left"},
-    {"id": 5, "row": 1, "col": 1, "name": "眼", "organs": "肝", "targets": ["liver"], "kind": "eye"},
+    {"id": 5, "row": 1, "col": 1, "name": "兩眼之間上半", "organs": "心", "targets": ["heart"], "box": FACE_CELL5_UPPER_BOX},
     {"id": 6, "row": 1, "col": 2, "name": "右眼", "organs": "白睛／肝膽／肺", "targets": ["liver", "lung", "gallbladder"], "kind": "eye", "side": "right"},
     {"id": 7, "row": 2, "col": 0, "name": "左頰", "organs": "顴／小腸／大腸", "targets": ["small_intestine", "large_intestine"], "kind": "cheek"},
-    {"id": 8, "row": 2, "col": 1, "name": "鼻子", "organs": "鼻／脾胃／肺", "targets": ["spleen", "stomach", "lung"], "kind": "nose"},
+    {"id": 8, "row": 2, "col": 1, "name": "含第5格下半", "organs": "肝／膽／脾／胃", "targets": ["liver", "gallbladder", "spleen", "stomach"], "kind": "nose", "box": FACE_CELL8_BOX},
     {"id": 9, "row": 2, "col": 2, "name": "右頰", "organs": "顴／小腸／大腸", "targets": ["small_intestine", "large_intestine"], "kind": "cheek"},
     {"id": 10, "row": 3, "col": 0, "name": "左下頜", "organs": "腎", "targets": ["kidney"]},
     {"id": 12, "row": 3, "col": 1, "name": "唇", "organs": "脾", "targets": ["spleen"], "kind": "lip"},
@@ -656,13 +695,19 @@ COMPLEXION_EXCLUDED_IDS = (4, 6)
 FACE_CELL_MAPPING = {
     "forehead_heart_fire": {"cell": 2, "name": "額頭", "note": "使用者「區塊3額頭心火」：本格以 cell 2 為額頭；cell 3 是右側面，不當作額頭"},
     "forehead_user_alt_block": 3,
-    "nose_tip_stomach_fire": {"cell": 8, "half": "lower", "name": "鼻頭"},
-    "nose_wing_damp": {"cell": 8, "half": "lower", "name": "鼻翼"},
+    "cell5_upper_heart": {"cell": 5, "name": "兩眼之間上半", "organs": "心", "box": FACE_CELL5_UPPER_BOX, "note": "第5格上一半另判心；額頭第2格心火仍保留"},
+    "cell8_enlarged": {"cell": 8, "name": "第8格", "box": FACE_CELL8_BOX, "note": "第5格下半加原本第8格，中欄不變"},
+    "liver_upper_middle": next(zone for zone in FACE_CELL8_ZONES if zone["id"] == "liver"),
+    "gallbladder_upper_sides": [zone for zone in FACE_CELL8_ZONES if zone["id"].startswith("gallbladder_")],
+    "spleen_lower_middle": next(zone for zone in FACE_CELL8_ZONES if zone["id"] == "spleen"),
+    "stomach_lower_sides": [zone for zone in FACE_CELL8_ZONES if zone["id"].startswith("stomach_")],
+    "nose_tip_stomach_fire": {"cell": 8, "part": "lower", "sides": ["left", "right"], "name": "胃", "note": "第8格下半左右，不是兩頰"},
+    "nose_wing_damp": {"cell": 8, "part": "lower", "side": "middle", "name": "脾", "note": "第8格下半中間"},
     "cheek_yin_vacuity": {"cells": [7, 9], "name": "兩頰"},
     "chin_yang_vacuity": {"cells": [10, 11], "name": "下頜"},
     "lips_cold_stasis": {"cell": 12, "name": "唇"},
     "left_eye": {"cell": 4, "name": "左眼"},
-    "right_eye": {"cell": 6, "name": "右眼", "note": "使用者區塊4、6為眼；第5格仍為兩眼之間／肝"},
+    "right_eye": {"cell": 6, "name": "右眼", "note": "第4、6格仍為眼；第5格上一半為心，肝在第8格上半中間"},
 }
 EYE_SUBREGION_MAP = {
     "sclera": {"name": "白睛", "organs": "肺／肝膽", "box": {"left": 0.16, "top": 0.34, "right": 0.84, "bottom": 0.68}},
@@ -982,10 +1027,20 @@ FACE_COLOR_SHIFT_CELLS = 0.25
 FACE_COLOR_SCALE = 0.9
 
 
+def face_cell_box(spec: dict[str, Any]) -> dict[str, float]:
+    """Judgment rectangle. Cells 5 and 8 carry their own boxes; the other cells stay on the 4×3 grid."""
+    custom = spec.get("box")
+    if custom:
+        return dict(custom)
+    row, col = spec["row"], spec["col"]
+    return _face_box(col / 3.0, row / 4.0, (col + 1) / 3.0, (row + 1) / 4.0)
+
+
 def crop_cell(image: Image.Image, row: int, col: int, half: str | None = None) -> Image.Image:
     """One cell of the 4×3 face grid. Rows are equal quarters of the uploaded face photo.
 
     That photo already has the face 1/4 cell higher than the yellow guides, at 0.9×.
+    Cells 5 and 8 judgment crops use face_cell_box / FACE_CELL8_ZONES instead of this grid.
     """
     left, right = col / 3.0, (col + 1) / 3.0
     top, bottom = row / 4.0, (row + 1) / 4.0
@@ -1805,7 +1860,8 @@ def analyze_face_grid(
     crops: dict[int, Image.Image] = {}
 
     for spec in FACE_CELL_LAYOUT:
-        crop = crop_cell(image, spec["row"], spec["col"])
+        box = face_cell_box(spec)
+        crop = crop_box(image, box["left"], box["top"], box["right"], box["bottom"])
         crops[spec["id"]] = crop
         stats_by_id[spec["id"]] = region_stats(crop)
 
@@ -1881,58 +1937,66 @@ def analyze_face_grid(
                 lip_organs = [organ for organ in lip_organs if organ != drop]
             face_blocks.append(make_face_block(f"face-{cell_id}", stats, lip_organs))
         elif kind == "nose":
-            upper_crop = crop_cell(image, spec["row"], spec["col"], "upper")
-            lower_crop = crop_cell(image, spec["row"], spec["col"], "lower")
-            upper_stats = region_stats(upper_crop)
-            lower_stats = region_stats(lower_crop)
-            stats_by_id[cell_id] = lower_stats
-            nose_lower_stats = lower_stats
-            stats = lower_stats
-            upper_read = read_cell(upper_stats, lab_base, "face", upper_crop)
-            lower_read = read_cell(lower_stats, lab_base, "face", lower_crop)
-            if lower_read["bias"] == "實熱":
-                lower_read["meaning"] = "鼻頭實熱 → 胃火"
-                lower_read["targets"] = ["stomach"]
-            elif lower_read["bias"] == "濕氣":
-                lower_read["meaning"] = "鼻翼濕氣 → 脾胃濕證"
-                lower_read["targets"] = ["spleen"]
-            reading = lower_read if (lower_read.get("score") or 0) >= (upper_read.get("score") or 0) else upper_read
-            targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
-            split = [
-                {
-                    "part": "upper",
-                    "organs": "鼻上／肺",
-                    "hex": hex_from_stats(upper_stats),
-                    "lab": compact_lab(upper_stats),
-                    "bias": upper_read["bias"],
-                    "meaning": upper_read["meaning"],
-                    "overlay": upper_read.get("overlay"),
-                },
-                {
-                    "part": "lower",
-                    "organs": "鼻頭／脾胃",
-                    "hex": hex_from_stats(lower_stats),
-                    "lab": compact_lab(lower_stats),
-                    "bias": lower_read["bias"],
-                    "meaning": lower_read["meaning"],
-                    "overlay": lower_read.get("overlay"),
-                },
-            ]
-            remember(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []), upper_read)
-            lower_targets = list(lower_read.get("targets") or [])
-            if not lower_targets and lower_read.get("overlay"):
-                lower_targets = ["stomach"] if lower_read.get("bias") == "實熱" else ["spleen"]
-            if "spleen" in lower_targets and "stomach" in lower_targets:
-                drop = "spleen" if lower_read.get("bias") == "實熱" else "stomach"
-                lower_targets = [organ for organ in lower_targets if organ != drop]
-            lower_read["targets"] = lower_targets
-            if reading is lower_read:
-                targets = list(lower_targets) if lower_read.get("overlay") else []
-            else:
-                targets = list(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []))
-            remember(lower_targets, lower_read)
-            face_blocks.append(make_face_block(f"face-{cell_id}-upper", upper_stats, organs_from_zh("鼻上／肺") or ["lung"]))
-            face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, lower_targets or ["spleen"]))
+            # 人中 for the existing uterus rule stays on the original cell-8 lower half.
+            nose_lower_stats = region_stats(crop_cell(image, spec["row"], spec["col"], "lower"))
+            stats = stats_by_id[cell_id]
+            split = []
+            reading = {
+                "bias": "接近基本色",
+                "meaning": "未見明顯色差",
+                "overlay": None,
+                "patterns": (),
+                "score": 0.0,
+                "cr": None,
+                "cb": None,
+                "d_cr": None,
+                "d_cb": None,
+            }
+            for zone in FACE_CELL8_ZONES:
+                zbox = zone["box"]
+                zcrop = crop_box(image, zbox["left"], zbox["top"], zbox["right"], zbox["bottom"])
+                zstats = region_stats(zcrop)
+                zread = read_cell(zstats, lab_base, "face", zcrop)
+                zone_targets = list(zone["targets"])
+                if zone_targets == ["stomach"] and zread["bias"] == "實熱":
+                    zread["meaning"] = "第8格下半左右實熱 → 胃"
+                elif zone_targets == ["spleen"] and zread["bias"] == "濕氣":
+                    zread["meaning"] = "第8格下半中間濕氣 → 脾"
+                elif zone_targets == ["liver"] and zread["bias"] == "實熱":
+                    zread["meaning"] = "第8格上半中間實熱 → 肝"
+                elif zone_targets == ["gallbladder"] and zread["bias"] == "實熱":
+                    zread["meaning"] = "第8格上半左右實熱 → 膽"
+                zread["targets"] = zone_targets
+                remember(zone_targets, zread)
+                block_label = f"face-{cell_id}-{zone['id']}"
+                face_blocks.append(make_face_block(block_label, zstats, zone_targets))
+                split.append(
+                    {
+                        "id": zone["id"],
+                        "part": zone["part"],
+                        "side": zone["side"],
+                        "name": zone["name"],
+                        "organs": zone["organs"],
+                        "box": dict(zbox),
+                        "block_label": block_label,
+                        "hex": hex_from_stats(zstats),
+                        "lab": compact_lab(zstats),
+                        "bias": zread["bias"],
+                        "meaning": zread["meaning"],
+                        "overlay": zread.get("overlay"),
+                    }
+                )
+                if (zread.get("score") or 0) >= (reading.get("score") or 0):
+                    reading = zread
+            band_name = {"upper": "上", "lower": "下"}
+            side_name = {"left": "左", "middle": "中", "right": "右"}
+            reading = dict(reading)
+            reading["meaning"] = "；".join(
+                f"{band_name.get(part['part'], '')}{side_name.get(part['side'], '')}{part['organs']}{part['bias']}"
+                for part in split
+            )
+            reading["targets"] = []
+            targets = []
         elif kind == "eye" and spec.get("side") in ("left", "right"):
             stats = stats_by_id[cell_id]
             subregions, reading, eye_notes = analyze_eye_subregions(crops[cell_id], lab_base, spec["side"], cell_id)
@@ -1977,6 +2041,11 @@ def analyze_face_grid(
             if cell_id == 2 and reading["bias"] == "實熱":
                 reading["meaning"] = "額頭實熱 → 心火（區塊對應第2格；使用者所稱區塊3為本格右側面）"
                 reading["targets"] = ["heart"]
+            elif cell_id == 5 and reading["bias"] == "實熱":
+                reading["meaning"] = "第5格上半實熱 → 心"
+                reading["targets"] = ["heart"]
+            elif cell_id == 5 and reading.get("overlay"):
+                reading["targets"] = ["heart"]
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
 
         lab_stats = stats_by_id[cell_id]
@@ -2008,6 +2077,7 @@ def analyze_face_grid(
                 "da": reading.get("da"),
                 "db": reading.get("db"),
                 "dS": reading.get("dS"),
+                "box": face_cell_box(spec),
                 "split": split,
                 "subregions": subregions if kind == "eye" and spec.get("side") else None,
             }
@@ -2046,7 +2116,9 @@ def analyze_face_grid(
             cell["class_label"] = whole.get("class_label")
             cell["api_pattern"] = whole.get("api_pattern")
         for part in cell.get("split") or []:
-            item = score_by_label.get(f"face-{cell['id']}-{part.get('part')}")
+            item = score_by_label.get(part.get("block_label") or "") or score_by_label.get(
+                f"face-{cell['id']}-{part.get('id') or part.get('part')}"
+            )
             if item:
                 part["delta_e"] = item["delta_e"]
                 part["health_score"] = item["health_score"]
@@ -2075,11 +2147,16 @@ def analyze_face_grid(
                     return part.get("bias") or ""
         return cell.get("bias") or ""
 
-    nose_lower = bias_of(8, "lower")
-    if nose_lower == "實熱":
-        flags.append({"id": "stomach_fire", "cells": [8], "half": "lower", "pattern": "實熱", "text": "鼻頭實熱 → 胃火"})
+    def zone_bias(zone_id: str) -> str:
+        for part in (by_id.get(8) or {}).get("split") or []:
+            if part.get("id") == zone_id:
+                return part.get("bias") or ""
+        return ""
+
+    if zone_bias("stomach_left") == "實熱" or zone_bias("stomach_right") == "實熱":
+        flags.append({"id": "stomach_fire", "cells": [8], "part": "lower", "sides": ["left", "right"], "pattern": "實熱", "text": "第8格下半左右實熱 → 胃"})
         remember(["stomach"], {"overlay": "strong-hot.png", "patterns": (("實證", 1.6), ("熱證", 2.0)), "score": 9.0})
-        findings.append(f"鼻頭（第8格下段）實熱 → 胃火（{TEACHING_NOTE}）")
+        findings.append(f"第8格下半左右實熱 → 胃（{TEACHING_NOTE}）")
     if bias_of(2) == "實熱":
         flags.append({"id": "heart_fire_forehead", "cells": [2], "pattern": "實熱", "text": "額頭（第2格）實熱 → 心火"})
         remember(["heart"], {"overlay": "strong-hot.png", "patterns": (("實證", 1.6), ("熱證", 2.0)), "score": 9.0})
@@ -2097,10 +2174,10 @@ def analyze_face_grid(
         remember(["spleen", "kidney"], {"overlay": "weak-cold.png", "patterns": (("虛證", 1.8), ("寒證", 1.6)), "score": 8.0})
         findings.append(f"第10、11格下頜枯白 → 脾腎陽虛（{TEACHING_NOTE}）")
     damp_names = ("濕氣", "濕熱", "寒濕")
-    if nose_lower in damp_names and bias_of(7) in damp_names and bias_of(9) in damp_names:
-        flags.append({"id": "spleen_damp", "cells": [7, 8, 9], "half": "lower", "pattern": "濕氣", "text": "鼻翼與兩頰晦黃低飽和 → 脾胃濕證"})
+    if zone_bias("spleen") in damp_names and bias_of(7) in damp_names and bias_of(9) in damp_names:
+        flags.append({"id": "spleen_damp", "cells": [7, 8, 9], "part": "lower", "side": "middle", "pattern": "濕氣", "text": "第8格下半中間與兩頰晦黃低飽和 → 脾"})
         remember(["spleen"], {"overlay": DAMP_OVERLAY, "patterns": (("實證", 1.8),), "score": 9.0})
-        findings.append(f"鼻翼（第8格下）與第7、9格晦黃低S → 脾胃濕證（{TEACHING_NOTE}）")
+        findings.append(f"第8格下半中間（脾）與第7、9格晦黃低S → 脾（{TEACHING_NOTE}）")
 
     def sub_bias(cell_id: int, sub_id: str) -> str:
         for part in (by_id.get(cell_id) or {}).get("subregions") or []:
@@ -2180,6 +2257,20 @@ def analyze_face_grid(
         "cols": 3,
         "layout": "4x3",
         "numbering": "row4 visual 10 | 12 lips | 11",
+        "regions": {
+            "cell5_upper": FACE_CELL5_UPPER_BOX,
+            "cell8": FACE_CELL8_BOX,
+            "zones": [
+                {
+                    "id": zone["id"],
+                    "organs": zone["organs"],
+                    "part": zone["part"],
+                    "side": zone["side"],
+                    "box": zone["box"],
+                }
+                for zone in FACE_CELL8_ZONES
+            ],
+        },
         "cell_mapping": FACE_CELL_MAPPING,
         "cells": cells,
         "measurements": measurements,
@@ -3344,6 +3435,183 @@ def analyze_tongue_grid(
     return tongue_grid, findings, colors
 
 
+# Ambient CCT is a global illuminant, not a per-organ white balance.
+# Kim et al. (2002) Planckian locus: CCT -> xy -> XYZ (Y=1).
+# Bradford (sharpened von Kries) then maps that white onto D65.
+DEFAULT_COLOR_TEMPERATURE_K = 4200
+COLOR_TEMPERATURE_CHOICES = (2700, 4200, 6500)
+_D65_XYZ = (0.95047, 1.0, 1.08883)
+_BRADFORD = (
+    (0.8951, 0.2664, -0.1614),
+    (-0.7502, 1.7135, 0.0367),
+    (0.0389, -0.0685, 1.0296),
+)
+_RGB_TO_XYZ = (
+    (0.4124564, 0.3575761, 0.1804375),
+    (0.2126729, 0.7151522, 0.0721750),
+    (0.0193339, 0.1191920, 0.9503041),
+)
+_XYZ_TO_RGB = (
+    (3.2404542, -1.5371385, -0.4985314),
+    (-0.9692660, 1.8760108, 0.0415560),
+    (0.0556434, -0.2040259, 1.0572252),
+)
+
+
+def _mat_vec(matrix: tuple[tuple[float, float, float], ...], vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )
+
+
+def _mat_mul(
+    left: tuple[tuple[float, float, float], ...],
+    right: tuple[tuple[float, float, float], ...],
+) -> tuple[tuple[float, float, float], ...]:
+    return tuple(
+        tuple(
+            left[row][0] * right[0][col] + left[row][1] * right[1][col] + left[row][2] * right[2][col]
+            for col in range(3)
+        )
+        for row in range(3)
+    )
+
+
+def _mat_inv(matrix: tuple[tuple[float, float, float], ...]) -> tuple[tuple[float, float, float], ...]:
+    a, b, c = matrix[0]
+    d, e, f = matrix[1]
+    g, h, i = matrix[2]
+    aa = e * i - f * h
+    bb = f * g - d * i
+    cc = d * h - e * g
+    dd = c * h - b * i
+    ee = a * i - c * g
+    ff = b * g - a * h
+    gg = b * f - c * e
+    hh = c * d - a * f
+    ii = a * e - b * d
+    det = a * aa + b * bb + c * cc
+    return (
+        (aa / det, dd / det, gg / det),
+        (bb / det, ee / det, hh / det),
+        (cc / det, ff / det, ii / det),
+    )
+
+
+_BRADFORD_INV = _mat_inv(_BRADFORD)
+_SRGB_TO_LINEAR = tuple(
+    (channel / 255.0) / 12.92
+    if (channel / 255.0) <= 0.04045
+    else ((channel / 255.0 + 0.055) / 1.055) ** 2.4
+    for channel in range(256)
+)
+
+
+def normalize_color_temperature_k(value: int | float | str | None) -> int:
+    """Map a request to 暖光 2700K, 白光 4200K, or 冷光 6500K. Missing values stay at 4200K."""
+    if value is None or value == "":
+        return DEFAULT_COLOR_TEMPERATURE_K
+    try:
+        kelvin = int(round(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return DEFAULT_COLOR_TEMPERATURE_K
+    if kelvin in COLOR_TEMPERATURE_CHOICES:
+        return kelvin
+    return min(COLOR_TEMPERATURE_CHOICES, key=lambda choice: abs(choice - kelvin))
+
+
+def planckian_xy(cct: float) -> tuple[float, float]:
+    """CIE xy on the Planckian locus (Kim et al. 2002)."""
+    temperature = float(cct)
+    if temperature < 4000.0:
+        x = (
+            -0.2661239e9 / temperature**3
+            - 0.2343589e6 / temperature**2
+            + 0.8776956e3 / temperature
+            + 0.179910
+        )
+        y = -1.1063814 * x**3 - 1.34811020 * x**2 + 2.18555832 * x - 0.20219683
+    else:
+        x = (
+            -3.0258469e9 / temperature**3
+            + 2.1070379e6 / temperature**2
+            + 0.2226347e3 / temperature
+            + 0.240390
+        )
+        y = -0.9549476 * x**3 - 1.37418593 * x**2 + 2.09137015 * x - 0.16748867
+    return x, y
+
+
+def _xy_y_to_xyz(x: float, y: float) -> tuple[float, float, float]:
+    return (x / y, 1.0, (1.0 - x - y) / y)
+
+
+def _bradford_xyz_matrix(
+    source_xyz: tuple[float, float, float],
+    dest_xyz: tuple[float, float, float],
+) -> tuple[tuple[float, float, float], ...]:
+    source_cone = _mat_vec(_BRADFORD, source_xyz)
+    dest_cone = _mat_vec(_BRADFORD, dest_xyz)
+    scaled = tuple(
+        tuple((dest_cone[row] / source_cone[row]) * _BRADFORD[row][col] for col in range(3))
+        for row in range(3)
+    )
+    return _mat_mul(_BRADFORD_INV, scaled)
+
+
+def _rgb_adapt_matrix(cct: int) -> tuple[tuple[float, float, float], ...]:
+    x, y = planckian_xy(cct)
+    adapt = _bradford_xyz_matrix(_xy_y_to_xyz(x, y), _D65_XYZ)
+    return _mat_mul(_XYZ_TO_RGB, _mat_mul(adapt, _RGB_TO_XYZ))
+
+
+_RGB_ADAPT_MATRIX = {choice: _rgb_adapt_matrix(choice) for choice in COLOR_TEMPERATURE_CHOICES}
+
+
+def _linear_to_srgb_channel(channel: float) -> int:
+    if channel <= 0.0:
+        return 0
+    if channel >= 1.0:
+        return 255
+    if channel <= 0.0031308:
+        encoded = 12.92 * channel
+    else:
+        encoded = 1.055 * (channel ** (1.0 / 2.4)) - 0.055
+    return max(0, min(255, int(round(encoded * 255.0))))
+
+
+def _adapt_rgb_pixel(
+    r: int,
+    g: int,
+    b: int,
+    matrix: tuple[tuple[float, float, float], ...],
+) -> tuple[int, int, int]:
+    linear_r = _SRGB_TO_LINEAR[r]
+    linear_g = _SRGB_TO_LINEAR[g]
+    linear_b = _SRGB_TO_LINEAR[b]
+    out_r = matrix[0][0] * linear_r + matrix[0][1] * linear_g + matrix[0][2] * linear_b
+    out_g = matrix[1][0] * linear_r + matrix[1][1] * linear_g + matrix[1][2] * linear_b
+    out_b = matrix[2][0] * linear_r + matrix[2][1] * linear_g + matrix[2][2] * linear_b
+    return (
+        _linear_to_srgb_channel(out_r),
+        _linear_to_srgb_channel(out_g),
+        _linear_to_srgb_channel(out_b),
+    )
+
+
+def adapt_rgb_image(image: Image.Image, color_temperature_k: int | float | str | None) -> Image.Image:
+    """Remove one shared illuminant cast. Local differences, including a yellower coat, stay."""
+    cct = normalize_color_temperature_k(color_temperature_k)
+    matrix = _RGB_ADAPT_MATRIX[cct]
+    source = image.convert("RGB")
+    adapted = [_adapt_rgb_pixel(r, g, b, matrix) for r, g, b in source.getdata()]
+    out = Image.new("RGB", source.size)
+    out.putdata(adapted)
+    return out
+
+
 def frame_tongue_image(image: Image.Image) -> tuple[Image.Image, dict[str, Any]]:
     """Client already cropped the yellow frame: teeth line → bottom arc, full width.
 
@@ -3362,7 +3630,9 @@ def inspect_image(
     shot_type: str,
     personal_lab: dict[str, Any] | None = None,
     female: bool = False,
+    color_temperature_k: int | float | str | None = None,
 ) -> dict[str, Any]:
+    cct = normalize_color_temperature_k(color_temperature_k)
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
@@ -3373,6 +3643,8 @@ def inspect_image(
         crop_info = dict(crop_info)
         crop_info["color_shift_cells"] = FACE_COLOR_SHIFT_CELLS
         crop_info["color_scale"] = FACE_COLOR_SCALE
+    # One illuminant for the whole frame, before 臉色 YCrCb and 舌色／舌苔 Lab.
+    image = adapt_rgb_image(image, cct)
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []
@@ -3421,6 +3693,7 @@ def inspect_image(
         "tongue_grid": tongue_grid,
         "crop": crop_info,
         "preview": crop_info.get("preview"),
+        "color_temperature_k": cct,
     }
 
 
@@ -3432,13 +3705,16 @@ def analyze_session(
     personal_lab: dict[str, Any] | None = None,
     confirm_with_pulse: bool = False,
     female: bool = False,
+    color_temperature_k: int | float | str | None = None,
 ) -> dict[str, Any]:
+    cct = normalize_color_temperature_k(color_temperature_k)
     color_reports = [
         inspect_image(
             raw,
             shot_type,
             personal_lab=personal_lab if shot_type == "face" else None,
             female=female,
+            color_temperature_k=cct,
         )
         for shot_type, raw in images
     ]
@@ -3477,7 +3753,7 @@ def analyze_session(
             tongue_preview = report["preview"]
 
     evidence = empty_evidence()
-    text_notes = apply_text(evidence, f"{symptoms} {discomfort}")
+    text_notes = apply_text(evidence, f"{symptoms} {discomfort}", include_uterus=female)
     pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")
     apply_pattern_scores_to_evidence(evidence, pattern_scores)
     text_notes.extend(pattern_notes)
@@ -3485,16 +3761,20 @@ def analyze_session(
         organ: dict(evidence[organ])
         for organ in ("spleen", "stomach")
     }
-    apply_color_findings(evidence, findings)
+    apply_color_findings(evidence, findings, include_uterus=female)
     for mark in (face_grid or {}).get("marks") or []:
+        if not female and mark.get("organ") == "uterus":
+            continue
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     for mark in (tongue_grid or {}).get("marks") or []:
+        if not female and mark.get("organ") == "uterus":
+            continue
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     pulse_notes = apply_pulse(evidence, pulse)
     for organ, name in (("spleen", "脾"), ("stomach", "胃")):
         for kind in pattern_kinds_gained(evidence[organ], pattern_baseline[organ]):
             pattern_scores[f"{name}{kind}"] += 1
-    _combined_scores, patterns, overlays = finalize(evidence)
+    _combined_scores, patterns, overlays = finalize(evidence, include_uterus=female)
 
     face_color = (face_grid or {}).get("color_health") or {}
     body_color = (tongue_grid or {}).get("body_color_health") or {}
@@ -3507,7 +3787,7 @@ def analyze_session(
         "tongue_body": body_scores,
         "tongue_coat": coat_scores,
     }
-    scores, breakdown = compose_organ_health(source_maps)
+    scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
     used_sources = [key for key, value in source_maps.items() if value is not None]
     organ_health = serialize_organ_health(scores, breakdown, used_sources)
     organ_health["pattern_scores"] = pattern_scores
@@ -3517,6 +3797,8 @@ def analyze_session(
             if not label or label in ("健康", "待觀察", "未定"):
                 continue
             for key, _name, _score_key, pattern_key in ORGAN_META:
+                if not female and key == "uterus":
+                    continue
                 if key == organ:
                     patterns[pattern_key] = label
                     overlay = overlay_from_pattern_label(label)
@@ -3528,9 +3810,13 @@ def analyze_session(
     merge_color_patterns(((tongue_grid or {}).get("coat_color_health") or {}).get("organ_patterns"))
     for grid in (face_grid, tongue_grid):
         for organ, filename in ((grid or {}).get("organ_overlays") or {}).items():
+            if not female and organ == "uterus":
+                continue
             overlays[organ] = filename
             if filename == DAMP_OVERLAY:
                 for key, _name, _score_key, pattern_key in ORGAN_META:
+                    if not female and key == "uterus":
+                        continue
                     if key == organ and patterns.get(pattern_key) in ("待觀察", "未定", "健康", None, ""):
                         patterns[pattern_key] = "濕氣較重"
     healthy_labels = {"健康", "待觀察", "未定", "正常", "接近正常", "接近基本色", "", None}
@@ -3540,6 +3826,8 @@ def analyze_session(
         (coat_scores, coat_color.get("organ_patterns") or {}),
     )
     for key, _name, score_key, pattern_key in ORGAN_META:
+        if not female and key == "uterus":
+            continue
         score = scores[score_key]
         if score >= 7:
             patterns[pattern_key] = "健康"
@@ -3560,10 +3848,12 @@ def analyze_session(
             if overlay:
                 overlays[key] = overlay
     all_findings = findings + text_notes + pulse_notes
+    if not female:
+        all_findings = [item for item in all_findings if "子宮" not in str(item)]
     if not all_findings:
         all_findings = ["資料不足，各臟腑先記 10 分（正常），不放置證型圖"]
 
-    return {
+    result = {
         "dominant_color": dominant,
         "hsv": hsv,
         "color_label": color_label,
@@ -3580,5 +3870,9 @@ def analyze_session(
         "face_preview": face_preview,
         "tongue_preview": tongue_preview,
         "crop": crops,
+        "color_temperature_k": cct,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }
+    if not female:
+        omit_uterus_judgment(result)
+    return result

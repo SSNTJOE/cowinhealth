@@ -433,12 +433,11 @@ dialog {
 .face-grid-overlay {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(4, 1fr);
   pointer-events: none;
 }
 .face-cell {
+  position: absolute;
+  box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.72);
   color: #fff;
   text-shadow: 0 1px 2px #000;
@@ -449,6 +448,11 @@ dialog {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  overflow: hidden;
+}
+.face-cell.strip {
+  font-size: 10px;
+  padding: 2px 3px;
 }
 .face-cell strong { font-size: 13px; }
 .face-cell.split { padding: 0; }

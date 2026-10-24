@@ -23,7 +23,7 @@ import com.github.mikephil.charting.utils.ViewPortHandler
 import org.json.JSONObject
 
 object TrendCharts {
-    fun bind(chart: CombinedChart, trend: JSONObject?) {
+    fun bind(chart: CombinedChart, trend: JSONObject?, female: Boolean = true) {
         chart.description.isEnabled = false
         chart.setDrawGridBackground(false)
         chart.axisRight.isEnabled = false
@@ -62,6 +62,7 @@ object TrendCharts {
         val scatterData = ScatterData()
         for (i in 0 until organs.length()) {
             val organ = organs.optJSONObject(i) ?: continue
+            if (!female && organ.optString("key") == "uterus") continue
             val color = Color.parseColor(organ.optString("color", "#888888"))
             val points = organ.optJSONArray("points") ?: continue
             val lineEntries = ArrayList<Entry>()

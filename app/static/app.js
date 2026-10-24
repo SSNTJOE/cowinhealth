@@ -536,8 +536,25 @@ function drawOrgans(result) {
   });
 }
 
-function cellByPosition(cells, row, col) {
-  return (cells || []).find((cell) => cell.row === row && cell.col === col);
+function frameBox(cell) {
+  const box = cell && cell.box;
+  if (box && box.right > box.left && box.bottom > box.top) return box;
+  const row = cell ? Number(cell.row) || 0 : 0;
+  const col = cell ? Number(cell.col) || 0 : 0;
+  return { left: col / 3, top: row / 4, right: (col + 1) / 3, bottom: (row + 1) / 4 };
+}
+
+function placeFrame(el, box) {
+  el.style.left = (box.left * 100) + "%";
+  el.style.top = (box.top * 100) + "%";
+  el.style.width = ((box.right - box.left) * 100) + "%";
+  el.style.height = ((box.bottom - box.top) * 100) + "%";
+}
+
+function stripWhere(part) {
+  const band = part.part === "upper" ? "上" : part.part === "lower" ? "下" : "";
+  const side = part.side === "left" ? "左" : part.side === "right" ? "右" : part.side === "middle" ? "中" : "";
+  return band + side;
 }
 
 function renderFaceGrid(grid, previewUrl) {
@@ -557,30 +574,37 @@ function renderFaceGrid(grid, previewUrl) {
   }
   const overlay = document.getElementById("face-grid-overlay");
   overlay.innerHTML = "";
-  for (let row = 0; row < 4; row += 1) {
-    for (let col = 0; col < 3; col += 1) {
-      const cell = cellByPosition(grid.cells, row, col);
-      const box = document.createElement("div");
-      box.className = "face-cell" + (cell && cell.split ? " split" : "");
-      if (!cell) {
-        overlay.appendChild(box);
-        continue;
-      }
-      if (cell.split) {
-        cell.split.forEach((part) => {
-          const half = document.createElement("div");
-          half.className = "half";
-          const tag = part.part === "upper" ? "上" : "下";
-          const lab = part.lab ? `L${Math.round(part.lab.L)} a${part.lab.a >= 0 ? "+" : ""}${Math.round(part.lab.a)} b${part.lab.b >= 0 ? "+" : ""}${Math.round(part.lab.b)}` : "";
-          half.innerHTML = `<strong>8${tag}</strong> ${part.organs}<br>${lab}<br>${part.bias}`;
-          box.appendChild(half);
-        });
-      } else {
-        box.innerHTML = `<strong>${cell.id}</strong> ${cell.organs}<br>${cell.name}<br>${cell.lab_text || ""}<br>${cell.bias || ""}`;
-      }
-      overlay.appendChild(box);
+  const orderedCells = [...grid.cells].sort((a, b) => (a.row - b.row) || (a.col - b.col) || (a.id - b.id));
+  orderedCells.forEach((cell) => {
+    const strips = (cell.split || []).filter((part) => part.box);
+    if (strips.length) {
+      strips.forEach((part) => {
+        const strip = document.createElement("div");
+        strip.className = "face-cell strip";
+        placeFrame(strip, part.box);
+        const where = stripWhere(part);
+        strip.innerHTML = `<strong>${part.organs}</strong>${where ? " " + where : ""}<br>${part.bias || ""}`;
+        overlay.appendChild(strip);
+      });
+      return;
     }
-  }
+    const box = document.createElement("div");
+    box.className = "face-cell" + (cell.split ? " split" : "");
+    placeFrame(box, frameBox(cell));
+    if (cell.split) {
+      cell.split.forEach((part) => {
+        const half = document.createElement("div");
+        half.className = "half";
+        const tag = part.part === "upper" ? "上" : "下";
+        const lab = part.lab ? `L${Math.round(part.lab.L)} a${part.lab.a >= 0 ? "+" : ""}${Math.round(part.lab.a)} b${part.lab.b >= 0 ? "+" : ""}${Math.round(part.lab.b)}` : "";
+        half.innerHTML = `<strong>8${tag}</strong> ${part.organs}<br>${lab}<br>${part.bias}`;
+        box.appendChild(half);
+      });
+    } else {
+      box.innerHTML = `<strong>${cell.id}</strong> ${cell.organs}<br>${cell.name}<br>${cell.lab_text || ""}<br>${cell.bias || ""}`;
+    }
+    overlay.appendChild(box);
+  });
   const flagBox = document.getElementById("face-lab-flags");
   if (flagBox) {
     const flags = (grid.flags || []).filter((item) => showsFemaleOrgans() || !String(item.text || "").includes("子宮"));
@@ -606,8 +630,9 @@ function renderFaceGrid(grid, previewUrl) {
     card.className = "face-cell-card";
     const splitHtml = (cell.split || [])
       .map((part) => {
-        const tag = part.part === "upper" ? "上段肝膽" : "下段脾胃";
-        return `<div><span class="swatch" style="background:${part.hex}"></span>${tag} ${part.hex} ${part.bias} → ${part.meaning}</div>`;
+        const where = stripWhere(part);
+        const title = where ? `${where}${part.organs}` : (part.organs || "");
+        return `<div><span class="swatch" style="background:${part.hex}"></span>${title} ${part.hex} ${part.bias} → ${part.meaning}</div>`;
       })
       .join("");
     const hsv = cell.hsv || {};

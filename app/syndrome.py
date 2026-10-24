@@ -88,10 +88,16 @@ def add(evidence: dict[str, dict[str, float]], organ: str, pattern: str, weight:
         evidence[organ][pattern] += weight
 
 
-def apply_text(evidence: dict[str, dict[str, float]], text: str) -> list[str]:
+def apply_text(
+    evidence: dict[str, dict[str, float]],
+    text: str,
+    include_uterus: bool = True,
+) -> list[str]:
     notes: list[str] = []
     blob = text or ""
     for keywords, organ, pattern, weight in SYMPTOM_RULES:
+        if not include_uterus and organ == "uterus":
+            continue
         if any(word in blob for word in keywords):
             add(evidence, organ, pattern, weight)
             notes.append(f"陳述「{'／'.join(keywords[:2])}」偏向{ORGAN_LABEL[organ]}{pattern}")
@@ -221,7 +227,11 @@ def pattern_kinds_gained(weights: dict[str, float], baseline: dict[str, float] |
     return gained
 
 
-def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[str]) -> None:
+def apply_color_findings(
+    evidence: dict[str, dict[str, float]],
+    findings: list[str],
+    include_uterus: bool = True,
+) -> None:
     mapping = [
         ("胃火", "stomach", "熱證", 2.0),
         ("胃火", "stomach", "實證", 1.6),
@@ -307,6 +317,8 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
     ]
     joined = " ".join(findings)
     for needle, organ, pattern, weight in mapping:
+        if not include_uterus and organ == "uterus":
+            continue
         if needle in joined:
             add(evidence, organ, pattern, weight)
 
@@ -371,11 +383,14 @@ def overlay_from_weights(weights: dict[str, float]) -> tuple[str, int, str | Non
 
 def finalize(
     evidence: dict[str, dict[str, float]],
+    include_uterus: bool = True,
 ) -> tuple[dict[str, int], dict[str, str], dict[str, str | None]]:
     scores: dict[str, int] = {}
     patterns: dict[str, str] = {}
     overlays: dict[str, str | None] = {}
     for key, _name, score_key, pattern_key in ORGAN_META:
+        if not include_uterus and key == "uterus":
+            continue
         label, score, overlay = overlay_from_weights(evidence[key])
         patterns[pattern_key] = label
         scores[score_key] = score
@@ -462,11 +477,14 @@ def organ_patterns_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dic
 
 def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
+    include_uterus: bool = True,
 ) -> tuple[dict[str, int], dict[str, Any]]:
     """Mean of face, tongue body, and tongue coat scores that actually exist for the organ."""
     composites: dict[str, int] = {}
     breakdown: dict[str, Any] = {}
     for key, name, score_key, _pattern_key in ORGAN_META:
+        if not include_uterus and key == "uterus":
+            continue
         parts: dict[str, int | None] = {}
         values: list[int] = []
         for source, scores in source_scores.items():
@@ -525,3 +543,98 @@ def overlay_from_pattern_label(label: str | None) -> str | None:
         "濕症": "mositure.png",
     }
     return mapping.get(label or "")
+
+
+def _strip_uterus_sentences(text: str) -> str:
+    kept: list[str] = []
+    buf: list[str] = []
+    for ch in text:
+        buf.append(ch)
+        if ch in "。；\n":
+            sentence = "".join(buf)
+            if "子宮" not in sentence:
+                kept.append(sentence)
+            buf = []
+    tail = "".join(buf)
+    if tail and "子宮" not in tail:
+        kept.append(tail)
+    return "".join(kept).strip()
+
+
+def _omit_uterus_color_health(health: Any) -> None:
+    if not isinstance(health, dict):
+        return
+    scores = health.get("organ_scores")
+    if isinstance(scores, dict):
+        scores.pop("uterus_score", None)
+    patterns = health.get("organ_patterns")
+    if isinstance(patterns, dict):
+        patterns.pop("uterus", None)
+    blocks = health.get("blocks")
+    if isinstance(blocks, list):
+        health["blocks"] = [
+            block
+            for block in blocks
+            if isinstance(block, dict) and "uterus" not in (block.get("organs") or [])
+        ]
+
+
+def _omit_uterus_grid(grid: Any) -> None:
+    if not isinstance(grid, dict):
+        return
+    marks = grid.get("marks")
+    if isinstance(marks, list):
+        grid["marks"] = [
+            mark for mark in marks if not (isinstance(mark, dict) and mark.get("organ") == "uterus")
+        ]
+    overlays = grid.get("organ_overlays")
+    if isinstance(overlays, dict):
+        overlays.pop("uterus", None)
+    flags = grid.get("flags")
+    if isinstance(flags, list):
+        grid["flags"] = [
+            flag
+            for flag in flags
+            if not (isinstance(flag, dict) and "子宮" in str(flag.get("text") or ""))
+        ]
+    for cell in grid.get("cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        for field in ("interpretation", "meaning", "reading"):
+            value = cell.get(field)
+            if isinstance(value, str) and "子宮" in value:
+                cell[field] = _strip_uterus_sentences(value)
+    for key in ("color_health", "body_color_health", "coat_color_health"):
+        _omit_uterus_color_health(grid.get(key))
+
+
+def omit_uterus_judgment(payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop uterus score, syndrome, icon, and 子宮 statements. Other organs stay."""
+    payload.pop("uterus_score", None)
+    payload.pop("uterus_pattern", None)
+    scores = payload.get("scores")
+    if isinstance(scores, dict):
+        scores.pop("uterus_score", None)
+    patterns = payload.get("patterns")
+    if isinstance(patterns, dict):
+        patterns.pop("uterus_pattern", None)
+    overlays = payload.get("overlays")
+    if isinstance(overlays, dict):
+        overlays.pop("uterus", None)
+    findings = payload.get("findings")
+    if isinstance(findings, list):
+        payload["findings"] = [item for item in findings if "子宮" not in str(item)]
+    advice = payload.get("diet_advice")
+    if isinstance(advice, str) and "子宮" in advice:
+        payload["diet_advice"] = _strip_uterus_sentences(advice)
+    health = payload.get("organ_health")
+    if isinstance(health, dict):
+        nested = health.get("scores")
+        if isinstance(nested, dict):
+            nested.pop("uterus_score", None)
+        organs = health.get("organs")
+        if isinstance(organs, dict):
+            organs.pop("uterus", None)
+    for grid_key in ("face_grid", "tongue_grid"):
+        _omit_uterus_grid(payload.get(grid_key))
+    return payload

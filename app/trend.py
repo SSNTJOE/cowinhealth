@@ -27,10 +27,11 @@ def iso_time(value) -> str:
     return text[:19]
 
 
-def build_trend(rows: list[dict]) -> dict:
+def build_trend(rows: list[dict], include_uterus: bool = True) -> dict:
     chronological = list(reversed(rows or []))
+    specs = TREND_ORGANS if include_uterus else [item for item in TREND_ORGANS if item["key"] != "uterus"]
     organs = []
-    for spec in TREND_ORGANS:
+    for spec in specs:
         points = []
         for row in chronological:
             raw = row.get(spec["score_key"])
