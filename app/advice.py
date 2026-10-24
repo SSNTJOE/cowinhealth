@@ -85,6 +85,12 @@ def local_fallback(
         core = "少油膩戒酒精，清淡蔬食為主。"
     elif "服用抗凝血劑" in conditions:
         core = "蔬菜份量求穩定，菠菜勿突然過量。"
+    elif any(token in blob for token in ("脾實寒", "脾虛寒")) and any(token in blob for token in ("胃實寒", "胃虛寒")):
+        core = "脾寒與胃寒分開看：脾宜溫脾，胃宜溫胃，可食薑棗茶、小米粥，避免生冷冰品。"
+    elif any(token in blob for token in ("脾實寒", "脾虛寒")):
+        core = "脾寒宜溫脾，可食薑棗茶、小米粥，避免生冷冰品。"
+    elif any(token in blob for token in ("胃實寒", "胃虛寒")):
+        core = "胃寒宜溫胃，可食薑棗茶、小米粥，避免生冷冰品。"
     elif any(word in blob for word in ("寒", "怕冷", "遲脈", "淡白")):
         core = "宜溫補脾胃，可食薑棗茶、小米粥，避免生冷冰品。"
     elif any(word in blob for word in ("熱", "口乾", "數脈", "舌尖紅", "黃苔")):

@@ -42,24 +42,37 @@ CONDITION_BAN_TOKENS = {
     "服用抗凝血劑": ("抗凝血", "出血"),
 }
 TEACHING_DISCLAIMER = "教學示範，非中醫診斷或營養處方。食譜與禁忌／益處來自 Recipe.xls 欄位，不能取代醫師建議。"
-# 禁忌欄是「食材:證型」；鹽／醬油幾乎每道都標了虛寒禁忌，教學篩選時略過調味料。
-SEASONING_SKIP = {
-    "食鹽",
-    "鹽",
-    "醬油",
-    "醋",
-    "胡椒",
-    "花生油",
-    "麻油",
-    "油",
-    "白糖",
-    "糖",
-    "冰糖",
-    "黃酒",
-    "八角",
-    "花椒",
-    "月桂葉",
-}
+# Header row of Recipe.xls (0-based), read with xlrd:
+# 0 國家, 1 中文食譜, 2 英文食譜, 3 日文食譜, 4 韓文食譜,
+# 5 食譜, 6 煮法, 7 益處, 8 禁忌, 9 元素, 10 過敏原.
+# Names are one column per homepage language. 食譜／煮法／益處／元素 are single columns.
+COLUMN_FIELDS = (
+    ("country", "國家"),
+    ("name_zh", "中文食譜"),
+    ("name_en", "英文食譜"),
+    ("name_ja", "日文食譜"),
+    ("name_ko", "韓文食譜"),
+    ("recipe", "食譜"),
+    ("method", "煮法"),
+    ("benefit", "益處"),
+    ("ban", "禁忌"),
+    ("nutrient", "元素"),
+    ("allergens", "過敏原"),
+)
+# 禁忌篩選只用這些臟腑。膀胱不列入。子宮只在女生。
+CONTRAINDICATION_ORGANS = (
+    ("liver", "肝", "liver_score", "liver_pattern"),
+    ("heart", "心", "heart_score", "heart_pattern"),
+    ("spleen", "脾", "spleen_score", "spleen_pattern"),
+    ("lung", "肺", "lung_score", "lung_pattern"),
+    ("kidney", "腎", "kidney_score", "kidney_pattern"),
+    ("gallbladder", "膽", "gallbladder_score", "gallbladder_pattern"),
+    ("small_intestine", "小腸", "small_intestine_score", "small_intestine_pattern"),
+    ("stomach", "胃", "stomach_score", "stomach_pattern"),
+    ("large_intestine", "大腸", "large_intestine_score", "large_intestine_pattern"),
+)
+UTERUS_ORGAN = ("uterus", "子宮", "uterus_score", "uterus_pattern")
+FILTER_PATTERNS = frozenset({"實熱", "實寒", "虛熱", "虛寒"})
 
 
 def split_tokens(text: str | None) -> list[str]:
@@ -94,32 +107,18 @@ def _rows_cached(mtime_ns: int) -> tuple[dict[str, str], ...]:
     headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
     index = {name: pos for pos, name in enumerate(headers)}
 
-    def read(row: int, header: str, fallback: int | None = None) -> str:
-        col = index.get(header, fallback)
+    def read(row: int, header: str) -> str:
+        col = index.get(header)
         if col is None or col < 0 or col >= sheet.ncols:
             return ""
         return str(sheet.cell_value(row, col)).strip()
 
     rows: list[dict[str, str]] = []
-    allergen_fallback = sheet.ncols - 1 if "過敏原" not in index and sheet.ncols else None
     for row in range(1, sheet.nrows):
-        rows.append(
-            {
-                "id": str(row),
-                "country": read(row, "國家", 0),
-                "name_zh": read(row, "中文食譜", 1),
-                "name_en": read(row, "英文食譜", 2),
-                "name_ja": read(row, "日文食譜", 3),
-                "name_ko": read(row, "韓文食譜", 4),
-                "recipe": read(row, "食譜", 5),
-                "method": read(row, "煮法"),
-                "benefit": read(row, "益處"),
-                "ban": read(row, "禁忌"),
-                "nutrient": read(row, "元素"),
-                "allergens": read(row, "過敏原", allergen_fallback),
-                "_headers": "\t".join(headers),
-            }
-        )
+        item = {"id": str(row), "_headers": "\t".join(headers)}
+        for field, header in COLUMN_FIELDS:
+            item[field] = read(row, header)
+        rows.append(item)
     return tuple(rows)
 
 
@@ -129,14 +128,18 @@ def recipe_rows() -> tuple[dict[str, str], ...]:
     return _rows_cached(mtime)
 
 
-def countries() -> list[str]:
+def countries(prefix: str | None = None) -> list[str]:
+    needle = (prefix or "").strip().casefold()
     seen: set[str] = set()
     ordered: list[str] = []
     for row in recipe_rows():
         name = row.get("country") or ""
-        if name and name not in seen:
-            seen.add(name)
-            ordered.append(name)
+        if not name or name in seen:
+            continue
+        if needle and not name.casefold().startswith(needle):
+            continue
+        seen.add(name)
+        ordered.append(name)
     return ordered
 
 
@@ -265,23 +268,75 @@ def _text_has_any(blob: str, tokens: list[str]) -> bool:
     return any(token and token in blob for token in tokens)
 
 
-def ban_has_pattern(ban: str, pattern_tags: list[str]) -> bool:
-    if not ban or not pattern_tags:
-        return False
-    for part in ban.split(";"):
+def ban_condition_tokens(ban: str) -> set[str]:
+    """Column 禁忌 is ingredient:證型,證型;ingredient:證型."""
+    tokens: set[str] = set()
+    for part in (ban or "").split(";"):
         chunk = part.strip()
         if not chunk:
             continue
-        if ":" in chunk:
-            ingredient, rest = chunk.split(":", 1)
-            if ingredient.strip() in SEASONING_SKIP:
-                continue
-            haystack = rest
-        else:
-            haystack = chunk
-        if any(tag and tag in haystack for tag in pattern_tags):
-            return True
-    return False
+        haystack = chunk.split(":", 1)[1] if ":" in chunk else chunk
+        tokens.update(split_tokens(haystack))
+    return tokens
+
+
+def ban_has_pattern(ban: str, pattern_tags: list[str]) -> bool:
+    if not ban or not pattern_tags:
+        return False
+    tokens = ban_condition_tokens(ban)
+    return any(tag and tag in tokens for tag in pattern_tags)
+
+
+def parse_score(raw) -> int | None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        raw = text
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return int(round(number))
+
+
+def _first_present(mapping: dict | None, keys: tuple[str, ...]):
+    if not mapping:
+        return None
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def active_contraindications(
+    scores: dict | None,
+    patterns: dict | None,
+    female: bool = False,
+) -> list[str]:
+    """Organ+證型 tags for scores 1–5 only. Score 6, 7–10, and missing scores do not filter."""
+    organs = list(CONTRAINDICATION_ORGANS)
+    if female:
+        organs.append(UTERUS_ORGAN)
+    tags: list[str] = []
+    seen: set[str] = set()
+    for key, name, score_key, pattern_key in organs:
+        score = parse_score(_first_present(scores, (score_key, key, name)))
+        if score is None or score < 1 or score > 5:
+            continue
+        raw_pattern = _first_present(patterns, (pattern_key, key, name))
+        compact = compact_pattern("" if raw_pattern is None else str(raw_pattern))
+        if compact not in FILTER_PATTERNS:
+            continue
+        tag = f"{name}{compact}"
+        if tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags
 
 
 def benefit_score(benefit: str, organ_tags: list[str]) -> int:
@@ -313,13 +368,16 @@ def filter_recipes(
     pattern_labels: list[str] | None = None,
     allergies: list[str] | None = None,
     conditions: list[str] | None = None,
-    limit: int = 80,
+    scores: dict | None = None,
+    female: bool = False,
+    limit: int | None = None,
 ) -> dict:
+    del pattern_labels  # tags without a 1–5 score must not filter
     wanted = (country or "").strip()
     if not wanted:
         raise ValueError("請選擇國家")
     lang = normalize_lang(lang)
-    organ_tags = organ_pattern_tags(patterns, pattern_labels)
+    organ_tags = active_contraindications(scores, patterns, female)
     condition_tokens = condition_ban_tokens(conditions)
     allergy_tokens = allergy_exclude_tokens(allergies)
     matched: list[tuple[int, dict[str, str]]] = []
@@ -343,7 +401,9 @@ def filter_recipes(
     matched.sort(key=lambda item: (-item[0], localized_name(item[1], lang)))
     safe.sort(key=lambda item: localized_name(item[1], lang))
     picked = matched + safe
-    recipes = [public_recipe(row, lang, score) for score, row in picked[: max(1, limit)]]
+    if limit is not None:
+        picked = picked[: max(1, limit)]
+    recipes = [public_recipe(row, lang, score) for score, row in picked]
     return {
         "country": wanted,
         "lang": lang,

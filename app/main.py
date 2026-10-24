@@ -417,13 +417,14 @@ def health_flag_options():
     }
 
 
-def latest_record_patterns(user_id: str) -> dict[str, str]:
+def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]]:
+    columns = [*ORGAN_KEYS, *PATTERN_KEYS]
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT {", ".join(PATTERN_KEYS)}
+                SELECT {", ".join(columns)}
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -434,18 +435,49 @@ def latest_record_patterns(user_id: str) -> dict[str, str]:
             row = cur.fetchone() or {}
     finally:
         conn.close()
-    return {key: (row.get(key) or "") for key in PATTERN_KEYS}
+    scores: dict[str, int] = {}
+    for key in ORGAN_KEYS:
+        raw = row.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            scores[key] = int(raw)
+        except (TypeError, ValueError):
+            continue
+    patterns = {key: (row.get(key) or "") for key in PATTERN_KEYS}
+    return scores, patterns
+
+
+def _json_object(raw: str | None, label: str) -> dict | None:
+    if raw is None or not str(raw).strip():
+        return None
+    text = str(raw).strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"{label} JSON 不正確") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail=f"{label} 必須是物件")
+    return data
+
+
+def _is_female(explicit: str | None, profile: dict | None) -> bool:
+    if explicit is not None and str(explicit).strip() != "":
+        return str(explicit).strip().lower() in {"1", "true", "yes", "female", "f", "女"}
+    return (profile or {}).get("gender") == "female"
 
 
 @app.get("/api/recipes/countries")
-def api_recipe_countries():
+def api_recipe_countries(prefix: str | None = None):
     try:
-        names = recipe_countries_list()
+        names = recipe_countries_list(prefix)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="找不到 Recipe.xls") from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"countries": names, "disclaimer": TEACHING_DISCLAIMER}
+    return {"countries": names, "prefix": (prefix or "").strip(), "disclaimer": TEACHING_DISCLAIMER}
 
 
 @app.get("/api/recipes")
@@ -454,21 +486,34 @@ def api_recipes(
     country: str,
     lang: str = "zh",
     patterns: str | None = None,
+    scores: str | None = None,
     allergies: str | None = None,
     conditions: str | None = None,
+    female: str | None = None,
 ):
     user_id = current_user_id(request)
     profile = fetch_user(user_id) if user_id else None
     allergy_list = split_csv(allergies) if allergies is not None else user_allergies(profile)
     condition_list = split_csv(conditions) if conditions is not None else user_conditions(profile)
-    pattern_map = latest_record_patterns(user_id) if user_id else {}
-    extra_labels = split_csv(patterns)
+    client_scores = _json_object(scores, "scores")
+    client_patterns = _json_object(patterns, "patterns")
+    if client_scores is not None or client_patterns is not None:
+        score_map = client_scores or {}
+        pattern_map = {
+            str(key): "" if value is None else str(value)
+            for key, value in (client_patterns or {}).items()
+        }
+    elif user_id:
+        score_map, pattern_map = latest_record_judgment(user_id)
+    else:
+        score_map, pattern_map = {}, {}
     try:
         payload = filter_recipes(
             country=country,
             lang=lang,
             patterns=pattern_map,
-            pattern_labels=extra_labels,
+            scores=score_map,
+            female=_is_female(female, profile),
             allergies=allergy_list,
             conditions=condition_list,
         )
@@ -814,4 +859,7 @@ def records(request: Request):
                 row["organ_health"] = None
         else:
             row["organ_health"] = None
+        health = row.get("organ_health")
+        if isinstance(health, dict) and isinstance(health.get("pattern_scores"), dict):
+            row["pattern_scores"] = health["pattern_scores"]
     return {"user_id": user_id, "records": rows, "trend": build_trend(rows)}

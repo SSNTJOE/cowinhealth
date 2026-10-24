@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 ORGAN_META = [
@@ -59,8 +60,6 @@ SYMPTOM_RULES = [
     (("心慌", "氣短", "沒力", "疲倦"), "heart", "虛證", 1.2),
     (("易怒", "脅痛", "口苦", "頭痛"), "liver", "熱證", 1.3),
     (("胸脅脹", "經痛", "情緒鬱"), "liver", "實證", 1.2),
-    (("腹脹", "消化不好", "便溏", "胃口差"), "spleen", "虛證", 1.3),
-    (("口甜", "身體重", "濕疹"), "spleen", "實證", 1.1),
     (("咳嗽", "氣喘", "鼻塞", "容易感冒"), "lung", "虛證", 1.2),
     (("黃痰", "咽痛", "發燒"), "lung", "熱證", 1.3),
     (("腰酸", "夜尿", "耳鳴", "怕冷"), "kidney", "寒證", 1.3),
@@ -99,10 +98,133 @@ def apply_text(evidence: dict[str, dict[str, float]], text: str) -> list[str]:
     return notes
 
 
+# Stored tokens use 寒, matching symptoms.xls / Foods.xls (實寒、虛寒). Do not keep a 冷 token.
+SPLEEN_STOMACH_PATTERNS = (
+    "脾實熱",
+    "脾實寒",
+    "脾虛熱",
+    "脾虛寒",
+    "胃實熱",
+    "胃實寒",
+    "胃虛熱",
+    "胃虛寒",
+)
+_PATTERN_AXES = {
+    "實熱": (("實證", 1.0), ("熱證", 1.0)),
+    "實寒": (("實證", 1.0), ("寒證", 1.0)),
+    "虛熱": (("虛證", 1.0), ("熱證", 1.0)),
+    "虛寒": (("虛證", 1.0), ("寒證", 1.0)),
+}
+
+
+def empty_spleen_stomach_scores() -> dict[str, int]:
+    return {label: 0 for label in SPLEEN_STOMACH_PATTERNS}
+
+
+def normalize_pattern_token(token: str) -> str:
+    text = (token or "").strip().replace("實冷", "實寒").replace("虛冷", "虛寒")
+    return text
+
+
+def _organ_for_pattern(label: str) -> str:
+    if label.startswith("脾"):
+        return "spleen"
+    if label.startswith("胃"):
+        return "stomach"
+    return ""
+
+
+@lru_cache(maxsize=1)
+def _symptom_catalog() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    import xlrd
+
+    from .config import ROOT
+
+    sheet = xlrd.open_workbook(str(ROOT / "symptoms.xls")).sheet_by_index(0)
+    rows: list[tuple[str, tuple[str, ...]]] = []
+    for index in range(1, sheet.nrows):
+        name = str(sheet.cell_value(index, 0)).strip()
+        raw = str(sheet.cell_value(index, 4)).strip()
+        if not name:
+            continue
+        tokens = tuple(
+            normalize_pattern_token(part)
+            for part in raw.replace("，", ",").split(",")
+            if part.strip()
+        )
+        rows.append((name, tokens))
+    rows.sort(key=lambda item: len(item[0]), reverse=True)
+    return tuple(rows)
+
+
+def _count_written_tokens(text: str) -> dict[str, int]:
+    """Count tokens the user actually wrote. 脾胃X is not 脾X and not 胃X."""
+    scores = empty_spleen_stomach_scores()
+    blob = text or ""
+    for label in SPLEEN_STOMACH_PATTERNS:
+        start = 0
+        while True:
+            index = blob.find(label, start)
+            if index < 0:
+                break
+            previous = blob[index - 1] if index else ""
+            if label.startswith("胃") and previous == "脾":
+                start = index + 1
+                continue
+            scores[label] += 1
+            start = index + len(label)
+    return scores
+
+
+def score_spleen_stomach_symptoms(text: str) -> tuple[dict[str, int], list[str]]:
+    """Tally the eight 脾/胃 patterns. A 脾 token never increments 胃, or the reverse."""
+    scores = _count_written_tokens(text)
+    notes: list[str] = []
+    blob = text or ""
+    occupied = [False] * len(blob)
+    for name, tokens in _symptom_catalog():
+        start = 0
+        while True:
+            index = blob.find(name, start)
+            if index < 0:
+                break
+            end = index + len(name)
+            if any(occupied[index:end]):
+                start = index + len(name)
+                continue
+            for cursor in range(index, end):
+                occupied[cursor] = True
+            hit = [token for token in tokens if token in scores]
+            for token in hit:
+                scores[token] += 1
+            if hit:
+                notes.append(f"症狀「{name}」分開計入{'、'.join(hit)}")
+            start = end
+    return scores, notes
+
+
+def apply_pattern_scores_to_evidence(evidence: dict[str, dict[str, float]], scores: dict[str, int]) -> None:
+    for label, count in scores.items():
+        organ = _organ_for_pattern(label)
+        kind = label[1:]
+        if organ not in evidence or kind not in _PATTERN_AXES or count <= 0:
+            continue
+        for axis, weight in _PATTERN_AXES[kind]:
+            add(evidence, organ, axis, weight * count)
+
+
+def pattern_kinds_gained(weights: dict[str, float], baseline: dict[str, float] | None = None) -> list[str]:
+    """Patterns this organ gained on its own. Does not look at the other organ."""
+    before = baseline or {}
+    gained: list[str] = []
+    for kind, axes in _PATTERN_AXES.items():
+        if all(float(weights.get(axis, 0)) - float(before.get(axis, 0)) >= 0.9 for axis, _weight in axes):
+            gained.append(kind)
+    return gained
+
+
 def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[str]) -> None:
     mapping = [
-        ("胃火", "spleen", "熱證", 2.0),
-        ("胃火", "spleen", "實證", 1.6),
         ("胃火", "stomach", "熱證", 2.0),
         ("胃火", "stomach", "實證", 1.6),
         ("額頭實熱", "heart", "熱證", 2.0),
@@ -116,7 +238,6 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("脾腎陽虛", "kidney", "虛證", 1.8),
         ("脾腎陽虛", "kidney", "寒證", 1.4),
         ("脾胃濕證", "spleen", "實證", 1.8),
-        ("脾胃濕證", "stomach", "實證", 1.8),
         ("鼻翼", "spleen", "實證", 1.2),
         ("心火盛", "heart", "熱證", 2.2),
         ("心火盛", "heart", "實證", 1.6),
@@ -125,17 +246,14 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("淡白無血色", "heart", "寒證", 1.6),
         ("心肺區偏紅", "heart", "熱證", 1.8),
         ("點刺", "heart", "熱證", 0.8),
-        ("脾胃虛寒", "spleen", "寒證", 2.0),
-        ("脾胃虛寒", "spleen", "虛證", 1.8),
         ("脾胃虛寒", "stomach", "寒證", 2.0),
         ("脾胃虛寒", "stomach", "虛證", 1.8),
-        ("白厚苔", "spleen", "寒證", 1.4),
-        ("胃腸實熱", "spleen", "熱證", 2.0),
+        ("白厚苔", "stomach", "寒證", 1.4),
         ("胃腸實熱", "stomach", "熱證", 2.0),
         ("胃腸實熱", "stomach", "實證", 1.6),
         ("胃腸實熱", "large_intestine", "熱證", 1.6),
         ("胃腸實熱", "gallbladder", "熱證", 1.2),
-        ("焦黃苔", "spleen", "熱證", 1.6),
+        ("焦黃苔", "stomach", "熱證", 1.6),
         ("焦黃苔", "large_intestine", "實證", 1.4),
         ("血瘀傾向", "liver", "實證", 1.8),
         ("心火", "heart", "熱證", 2.0),
@@ -145,8 +263,8 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("肝瘀", "liver", "實證", 2.0),
         ("青紫", "liver", "實證", 1.8),
         ("萎黃", "spleen", "虛證", 1.8),
-        ("苔白", "spleen", "虛證", 1.5),
-        ("苔黃", "spleen", "熱證", 1.6),
+        ("苔白", "stomach", "虛證", 1.5),
+        ("苔黃", "stomach", "熱證", 1.6),
         ("膽熱", "gallbladder", "熱證", 1.6),
         ("腎", "kidney", "虛證", 1.4),
         ("面色偏暗", "kidney", "虛證", 1.6),
@@ -160,7 +278,6 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("臉色偏白", "lung", "虛證", 1.5),
         ("氣血虛", "spleen", "虛證", 1.8),
         ("實熱證", "heart", "熱證", 1.6),
-        ("胃不好", "spleen", "虛證", 1.6),
         ("胃不好", "stomach", "虛證", 1.6),
         ("濕熱", "spleen", "熱證", 1.5),
         ("血虛", "spleen", "虛證", 1.6),
@@ -177,20 +294,17 @@ def apply_color_findings(evidence: dict[str, dict[str, float]], findings: list[s
         ("腎／舌根）舌質偏紅", "kidney", "熱證", 1.6),
         ("腎／舌根）舌質偏白", "kidney", "寒證", 1.6),
         ("脾胃）舌質偏紅", "spleen", "熱證", 1.5),
-        ("脾胃）舌質偏紅", "stomach", "熱證", 1.5),
         ("脾胃）舌質偏白", "spleen", "寒證", 1.5),
-        ("脾胃）舌質偏白", "stomach", "寒證", 1.5),
         ("心肺／舌尖）舌質偏紅", "heart", "熱證", 1.8),
         ("心肺／舌尖）舌質偏白", "lung", "寒證", 1.4),
         ("肝膽）舌質偏紅", "liver", "熱證", 1.5),
         ("肝膽）舌質偏白", "liver", "寒證", 1.4),
-        ("白苔很少", "spleen", "虛證", 1.8),
-        ("胃虛", "spleen", "虛證", 1.6),
+        ("白苔很少", "stomach", "虛證", 1.8),
         ("胃虛", "stomach", "虛證", 1.6),
         ("黑灰苔", "kidney", "寒證", 1.8),
         ("實寒證", "kidney", "寒證", 1.4),
         ("虛寒證", "kidney", "寒證", 1.4),
-        ("黃苔", "spleen", "熱證", 1.5),
+        ("黃苔", "stomach", "熱證", 1.5),
         ("子宮", "uterus", "實證", 1.0),
     ]
     joined = " ".join(findings)

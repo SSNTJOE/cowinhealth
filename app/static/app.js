@@ -44,6 +44,7 @@ const organs = [
   { key: "bladder", name: "膀胱", score: "bladder_score", pattern: "bladder_pattern", spots: [{ x: 50, y: 64.5 }] },
   { key: "uterus", name: "子宮", score: "uterus_score", pattern: "uterus_pattern", femaleOnly: true, spots: [{ x: 50, y: 62.5 }] },
 ];
+const SPLEEN_STOMACH_PATTERNS = ["脾實熱", "脾實寒", "脾虛熱", "脾虛寒", "胃實熱", "胃實寒", "胃虛熱", "胃虛寒"];
 let currentBody = "boy";
 let lastResult = null;
 let trendChart = null;
@@ -694,6 +695,26 @@ function shownScore(score) {
   return Number.isFinite(n) ? String(n) : "10";
 }
 
+function patternScoreMap(result) {
+  if (!result) return null;
+  if (result.pattern_scores) return result.pattern_scores;
+  const health = result.organ_health;
+  if (health && health.pattern_scores) return health.pattern_scores;
+  return null;
+}
+
+function renderPatternScores(result, host) {
+  const map = patternScoreMap(result);
+  if (!map || !host) return;
+  SPLEEN_STOMACH_PATTERNS.forEach((label) => {
+    const div = document.createElement("div");
+    div.className = "score";
+    const total = Number(map[label] || 0);
+    div.innerHTML = `<span>${label}</span><b>${Number.isFinite(total) ? total : 0}</b><small>分開計分</small>`;
+    host.appendChild(div);
+  });
+}
+
 function patternLabel(score, pattern) {
   const n = Number(score);
   if (!Number.isFinite(n) || n >= 7) return "健康";
@@ -734,6 +755,7 @@ function renderResult(result) {
     div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
     scores.appendChild(div);
   });
+  renderPatternScores(result, scores);
   drawOrgans(result);
   if (result.face_preview) lastFacePreviewUrl = result.face_preview;
   if (result.tongue_preview) lastTonguePreviewUrl = result.tongue_preview;
@@ -741,16 +763,44 @@ function renderResult(result) {
   renderTongueGrid(result.tongue_grid, lastTonguePreviewUrl);
   const countryPick = document.getElementById("recipe-country");
   if (countryPick && countryPick.value) {
-    loadRecipesForCountry().catch(() => {});
+    loadRecipesForCountry({ keepSelection: selectedRecipeId != null }).catch(() => {});
   }
 }
 
 let countryNames = [];
 let recipeRows = [];
-const COMBO_LIMIT = 80;
+let selectedRecipeId = null;
 
 function recipeLabel(row) {
   return row.name + (row.benefit_match ? " ★" : "");
+}
+
+function countryPrefixMatch(label, query) {
+  const name = String(label || "");
+  const q = String(query || "").trim();
+  if (!q) return true;
+  return name.toLowerCase().startsWith(q.toLowerCase());
+}
+
+function recipeTextMatch(label, query) {
+  const name = String(label || "").toLowerCase();
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  return name.includes(q);
+}
+
+function judgmentField(result, bucket, key) {
+  if (!result) return undefined;
+  const nested = result[bucket];
+  if (nested && typeof nested === "object" && Object.prototype.hasOwnProperty.call(nested, key)) {
+    const value = nested[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  if (Object.prototype.hasOwnProperty.call(result, key)) {
+    const value = result[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
 }
 
 function closeCombo(input, list) {
@@ -759,10 +809,14 @@ function closeCombo(input, list) {
   if (input) input.setAttribute("aria-expanded", "false");
 }
 
-function renderCombo(input, list, labels, onPick) {
+function renderCombo(input, list, labels, onPick, mode) {
   if (!input || !list) return;
-  const query = input.value.trim().toLowerCase();
-  const matched = labels.filter((label) => String(label).toLowerCase().includes(query));
+  const query = mode === "all" ? "" : input.value.trim();
+  const matched = labels.filter((label) => {
+    if (mode === "prefix") return countryPrefixMatch(label, query);
+    if (mode === "all") return true;
+    return recipeTextMatch(label, query);
+  });
   list.innerHTML = "";
   if (!matched.length) {
     const empty = document.createElement("li");
@@ -770,7 +824,7 @@ function renderCombo(input, list, labels, onPick) {
     empty.textContent = uiText("searchEmpty");
     list.appendChild(empty);
   } else {
-    matched.slice(0, COMBO_LIMIT).forEach((label) => {
+    matched.forEach((label) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
@@ -784,15 +838,15 @@ function renderCombo(input, list, labels, onPick) {
       item.appendChild(button);
       list.appendChild(item);
     });
-    if (matched.length > COMBO_LIMIT) {
-      const more = document.createElement("li");
-      more.className = "combo-empty";
-      more.textContent = uiText("searchMore").replace("{n}", String(matched.length - COMBO_LIMIT));
-      list.appendChild(more);
-    }
   }
   list.hidden = false;
   input.setAttribute("aria-expanded", "true");
+}
+
+function rememberRecipeChoice(label) {
+  const row = recipeRows.find((item) => recipeLabel(item) === label);
+  selectedRecipeId = row ? row.id : null;
+  return row || null;
 }
 
 function showSelectedRecipe() {
@@ -800,17 +854,20 @@ function showSelectedRecipe() {
   const detail = document.getElementById("recipe-detail");
   if (!pick || !detail) return;
   const label = pick.value.trim();
-  const row = recipeRows.find((item) => recipeLabel(item) === label);
+  const row = recipeRows.find((item) => String(item.id) === String(selectedRecipeId) && recipeLabel(item) === label)
+    || recipeRows.find((item) => recipeLabel(item) === label);
   if (!row) {
+    selectedRecipeId = null;
     if (!label) detail.textContent = "";
     return;
   }
+  selectedRecipeId = row.id;
   const lines = [
     ["fieldRecipe", row.recipe],
     ["fieldMethod", row.method],
     ["fieldBenefit", row.benefit],
-    ["fieldBan", row.ban],
     ["fieldNutrient", row.nutrient],
+    ["fieldBan", row.ban],
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
   detail.textContent = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
@@ -827,26 +884,68 @@ async function loadRecipeCountries() {
   }
 }
 
-async function loadRecipesForCountry() {
+function recipeQueryParams(country) {
+  const params = new URLSearchParams({
+    country,
+    lang: getUiLang(),
+    female: currentBody === "girl" ? "1" : "0",
+  });
+  if (!lastResult) return params;
+  const scores = {};
+  const patterns = {};
+  organs.forEach((org) => {
+    const score = judgmentField(lastResult, "scores", org.score);
+    const pattern = judgmentField(lastResult, "patterns", org.pattern);
+    if (score !== undefined) scores[org.score] = score;
+    if (pattern) patterns[org.pattern] = pattern;
+  });
+  params.set("scores", JSON.stringify(scores));
+  params.set("patterns", JSON.stringify(patterns));
+  return params;
+}
+
+async function loadRecipesForCountry(options) {
+  const keepSelection = Boolean(options && options.keepSelection);
+  const keepId = keepSelection ? selectedRecipeId : null;
   const countryInput = document.getElementById("recipe-country");
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   const list = document.getElementById("recipe-name-list");
   if (!countryInput || !pick || !detail) return;
   const country = countryInput.value.trim();
-  recipeRows = [];
-  pick.value = "";
   closeCombo(pick, list);
-  detail.textContent = "";
-  if (!countryNames.includes(country)) return;
-  const data = await api("/api/recipes?" + new URLSearchParams({
-    country,
-    lang: getUiLang(),
-  }));
-  recipeRows = data.recipes || [];
-  if (!recipeRows.length) {
-    detail.textContent = uiText("emptyRecipes");
+  if (!keepSelection) {
+    selectedRecipeId = null;
+    recipeRows = [];
+    pick.value = "";
+    detail.textContent = "";
   }
+  if (!countryNames.includes(country)) {
+    recipeRows = [];
+    selectedRecipeId = null;
+    pick.value = "";
+    return;
+  }
+  const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
+  recipeRows = data.recipes || [];
+  if (keepId != null) {
+    const row = recipeRows.find((item) => String(item.id) === String(keepId));
+    if (row) {
+      selectedRecipeId = row.id;
+      pick.value = recipeLabel(row);
+      showSelectedRecipe();
+      return;
+    }
+  }
+  selectedRecipeId = null;
+  pick.value = "";
+  detail.textContent = recipeRows.length ? "" : uiText("emptyRecipes");
+}
+
+async function reloadRecipesForLanguage() {
+  const countryInput = document.getElementById("recipe-country");
+  if (!countryInput || !countryInput.value.trim()) return;
+  await loadRecipesForCountry({ keepSelection: true });
 }
 
 function bindRecipePickers() {
@@ -859,14 +958,20 @@ function bindRecipePickers() {
   country.placeholder = uiText("pickCountry");
   pick.placeholder = uiText("pickRecipe");
   const showCountries = () => renderCombo(country, countryList, countryNames, (label) => {
+    rememberRecipeChoice("");
     loadRecipesForCountry().catch((err) => {
       const detail = document.getElementById("recipe-detail");
       if (detail) detail.textContent = formatApiError(err);
     });
-  });
-  const showRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), () => {
+  }, "prefix");
+  const showAllRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
+    rememberRecipeChoice(label);
     showSelectedRecipe();
-  });
+  }, "all");
+  const filterRecipes = () => renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
+    rememberRecipeChoice(label);
+    showSelectedRecipe();
+  }, "contains");
   country.addEventListener("focus", showCountries);
   country.addEventListener("click", showCountries);
   country.addEventListener("keydown", (event) => {
@@ -892,6 +997,7 @@ function bindRecipePickers() {
       });
     } else {
       recipeRows = [];
+      selectedRecipeId = null;
       pick.value = "";
       closeCombo(pick, pickList);
       const detail = document.getElementById("recipe-detail");
@@ -899,8 +1005,8 @@ function bindRecipePickers() {
     }
   });
   country.addEventListener("blur", () => closeCombo(country, countryList));
-  pick.addEventListener("focus", showRecipes);
-  pick.addEventListener("click", showRecipes);
+  pick.addEventListener("focus", showAllRecipes);
+  pick.addEventListener("click", showAllRecipes);
   pick.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeCombo(pick, pickList);
     if (event.key !== "Enter") return;
@@ -909,10 +1015,11 @@ function bindRecipePickers() {
     if (!button) return;
     pick.value = button.textContent;
     closeCombo(pick, pickList);
+    rememberRecipeChoice(pick.value);
     showSelectedRecipe();
   });
   pick.addEventListener("input", () => {
-    showRecipes();
+    filterRecipes();
     showSelectedRecipe();
   });
   pick.addEventListener("blur", () => closeCombo(pick, pickList));
@@ -932,6 +1039,8 @@ async function loadRecords() {
     scores: latest,
     patterns: latest,
     overlays: latest.overlays || {},
+    pattern_scores: latest.pattern_scores,
+    organ_health: latest.organ_health,
     findings: [latest.symptoms, latest.discomfort].filter(Boolean),
     diet_advice: latest.diet_advice,
     diet_url: latest.diet_url,
@@ -946,7 +1055,7 @@ async function loadRecords() {
     disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
   });
   renderComplexionHistory(data.records);
-  const head = ["日期", "狀況", ...organs.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
+  const head = ["日期", "狀況", ...organs.map((o) => o.name), "脾／胃證型", "食療"].map((h) => `<th>${h}</th>`).join("");
   const rows = data.records
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
@@ -954,7 +1063,13 @@ async function loadRecords() {
         const pattern = patternLabel(r[o.score], r[o.pattern]);
         return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
       }).join("");
-      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
+      const patternMap = patternScoreMap(r);
+      const patternCell = patternMap
+        ? SPLEEN_STOMACH_PATTERNS.filter((label) => Number(patternMap[label]) > 0)
+            .map((label) => `${label} ${patternMap[label]}`)
+            .join("、") || "—"
+        : "—";
+      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${patternCell}</td><td>${r.diet_advice || ""}</td></tr>`;
     })
     .join("");
   box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -1146,6 +1261,23 @@ const updateHomeBmi = bindBmiInputs(
   document.getElementById("weight"),
   document.getElementById("bmi-live"),
 );
+
+function bindUiLang() {
+  const select = document.getElementById("ui-lang");
+  if (!select || select.dataset.bound) return;
+  select.dataset.bound = "1";
+  select.addEventListener("change", () => {
+    setUiLang(select.value);
+    applyUiLangChrome();
+    reloadRecipesForLanguage().catch((err) => {
+      const detail = document.getElementById("recipe-detail");
+      if (detail) detail.textContent = formatApiError(err);
+    });
+  });
+}
+
+applyUiLangChrome();
+bindUiLang();
 
 checkMysql()
   .then(() => loadHealthFlagOptions())

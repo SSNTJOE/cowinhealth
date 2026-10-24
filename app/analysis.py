@@ -16,9 +16,12 @@ from .syndrome import (
     compose_organ_health,
     empty_evidence,
     finalize,
+    apply_pattern_scores_to_evidence,
     organ_patterns_from_color_blocks,
     organ_scores_from_color_blocks,
     overlay_from_pattern_label,
+    pattern_kinds_gained,
+    score_spleen_stomach_symptoms,
     serialize_organ_health,
 )
 
@@ -819,14 +822,14 @@ TONGUE_CLASS_META = {
         "api_pattern": "實證熱證",
         "overlay": "strong-hot.png",
         "patterns": (("實證", 1.6), ("熱證", 1.8)),
-        "targets": ("spleen", "stomach", "large_intestine", "heart"),
+        "targets": ("stomach", "large_intestine", "heart"),
     },
     "虛熱": {
         "bias": "虛熱",
         "api_pattern": "虛證熱證",
         "overlay": "weak-hot.png",
         "patterns": (("虛證", 1.6), ("熱證", 1.8)),
-        "targets": ("heart", "kidney", "spleen", "stomach"),
+        "targets": ("heart", "kidney", "stomach"),
     },
     "實寒": {
         "bias": "實寒",
@@ -840,14 +843,14 @@ TONGUE_CLASS_META = {
         "api_pattern": "虛證寒證",
         "overlay": "weak-cold.png",
         "patterns": (("虛證", 1.6), ("寒證", 1.8)),
-        "targets": ("spleen", "stomach", "kidney"),
+        "targets": ("spleen", "kidney"),
     },
     "濕症": {
         "bias": "濕症",
         "api_pattern": "濕氣較重",
         "overlay": DAMP_OVERLAY,
         "patterns": (("實證", 1.5),),
-        "targets": ("spleen", "stomach"),
+        "targets": ("stomach",),
     },
 }
 # Shared face and lip color table.
@@ -860,7 +863,7 @@ SYNDROME_RANGES = (
         "b": (20, 50),
         "example": "#B82323",
         "overlay": "strong-hot.png",
-        "targets": ["large_intestine", "spleen"],
+        "targets": ["large_intestine", "stomach"],
         "patterns": (("實證", 1.6), ("熱證", 1.8)),
     },
     {
@@ -1206,7 +1209,7 @@ def classify_face_color(stats: dict[str, float], base: dict[str, float], kind: s
         targets = None
         if kind == "lip":
             meaning = "腸胃實熱（Cr 極高、Cb 極低）"
-            targets = ["large_intestine", "spleen"]
+            targets = ["large_intestine", "stomach"]
         return _ycrcb_reading("實熱", meaning, "strong-hot.png", (("實證", 1.6), ("熱證", 1.8)), d_cr - d_cb, cr, cb, d_cr, d_cb, targets)
     if cold:
         meaning = "實寒（Cb 上升、Cr 被抑制）"
@@ -1726,7 +1729,7 @@ def analyze_face_grid(
             reading = read_cell(stats, lab_base, "lip", crops[cell_id])
             if reading["bias"] == "實熱":
                 reading["meaning"] = "腸胃實熱（Cr 極高、Cb 極低）"
-                reading["targets"] = ["large_intestine", "spleen"]
+                reading["targets"] = ["large_intestine", "stomach"]
             elif reading["bias"] == "實寒":
                 reading["meaning"] = "心和肺實寒（Cb 上升、Cr 被抑制）"
                 reading["targets"] = ["heart", "lung"]
@@ -1751,7 +1754,7 @@ def analyze_face_grid(
                 lower_read["targets"] = ["stomach"]
             elif lower_read["bias"] == "濕氣":
                 lower_read["meaning"] = "鼻翼濕氣 → 脾胃濕證"
-                lower_read["targets"] = ["spleen", "stomach"]
+                lower_read["targets"] = ["spleen"]
             reading = lower_read if (lower_read.get("score") or 0) >= (upper_read.get("score") or 0) else upper_read
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
             split = [
@@ -1775,9 +1778,18 @@ def analyze_face_grid(
                 },
             ]
             remember(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []), upper_read)
-            remember(lower_read.get("targets") or (["spleen", "stomach"] if lower_read.get("overlay") else []), lower_read)
+            lower_targets = list(lower_read.get("targets") or [])
+            if not lower_targets and lower_read.get("overlay"):
+                lower_targets = ["stomach"] if lower_read.get("bias") == "實熱" else ["spleen"]
+            if "spleen" in lower_targets and "stomach" in lower_targets:
+                drop = "spleen" if lower_read.get("bias") == "實熱" else "stomach"
+                lower_targets = [organ for organ in lower_targets if organ != drop]
+            lower_read["targets"] = lower_targets
+            if reading is lower_read:
+                targets = list(lower_targets) if lower_read.get("overlay") else []
+            remember(lower_targets, lower_read)
             face_blocks.append(make_face_block(f"face-{cell_id}-upper", upper_stats, organs_from_zh("鼻上／肺") or ["lung"]))
-            face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, organs_from_zh("鼻頭／脾胃") or ["spleen"]))
+            face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, lower_targets or ["spleen"]))
         elif kind == "eye" and spec.get("side") in ("left", "right"):
             stats = stats_by_id[cell_id]
             subregions, reading, eye_notes = analyze_eye_subregions(crops[cell_id], lab_base, spec["side"], cell_id)
@@ -1793,6 +1805,8 @@ def analyze_face_grid(
                     for zh, key in organ_names.items():
                         if zh in token and key not in organs:
                             organs.append(key)
+                if "spleen" in organs and "stomach" in organs:
+                    organs = [organ for organ in organs if organ != "stomach"]
                 fake = {
                     "overlay": overlay,
                     "patterns": (("熱證", 1.4),) if part["bias"] == "實熱" else (("虛證", 1.4), ("寒證", 1.2)) if part["bias"] == "虛寒" else (("實證", 1.4),),
@@ -1900,7 +1914,7 @@ def analyze_face_grid(
     nose_lower = bias_of(8, "lower")
     if nose_lower == "實熱":
         flags.append({"id": "stomach_fire", "cells": [8], "half": "lower", "pattern": "實熱", "text": "鼻頭實熱 → 胃火"})
-        remember(["spleen"], {"overlay": "strong-hot.png", "patterns": (("實證", 1.6), ("熱證", 2.0)), "score": 9.0})
+        remember(["stomach"], {"overlay": "strong-hot.png", "patterns": (("實證", 1.6), ("熱證", 2.0)), "score": 9.0})
         findings.append(f"鼻頭（第8格下段）實熱 → 胃火（{TEACHING_NOTE}）")
     if bias_of(2) == "實熱":
         flags.append({"id": "heart_fire_forehead", "cells": [2], "pattern": "實熱", "text": "額頭（第2格）實熱 → 心火"})
@@ -2036,8 +2050,8 @@ def analyze_face_grid(
 # User listed 上中下左右 (5). The 6th layer is whole-tongue coating overlay,
 # not a sixth spatial tile (中 is not split into 中上/中下).
 TONGUE_ZONE_LAYOUT = [
-    {"id": "top", "label": "上", "organs": "腎", "anatomy": "舌根", "left": 0.22, "top": 0.02, "right": 0.78, "bottom": 0.30},
-    {"id": "center", "label": "中", "organs": "脾胃", "anatomy": "舌中", "left": 0.28, "top": 0.28, "right": 0.72, "bottom": 0.72},
+    {"id": "top", "label": "上", "organs": "腎", "anatomy": "舌根", "left": 0.22, "top": 0.22, "right": 0.78, "bottom": 0.50},
+    {"id": "center", "label": "中", "organs": "脾胃", "anatomy": "舌中", "left": 0.28, "top": 0.50, "right": 0.72, "bottom": 0.72},
     {"id": "bottom", "label": "下", "organs": "心肺", "anatomy": "舌尖", "left": 0.22, "top": 0.70, "right": 0.78, "bottom": 0.98},
     {"id": "left", "label": "左", "organs": "肝膽", "anatomy": "舌左邊", "left": 0.02, "top": 0.22, "right": 0.28, "bottom": 0.78},
     {"id": "right", "label": "右", "organs": "肝膽", "anatomy": "舌右邊", "left": 0.72, "top": 0.22, "right": 0.98, "bottom": 0.78},
@@ -2047,7 +2061,7 @@ TONGUE_SIXTH_NOTE = "使用者列上中下左右五塊；第六層為全舌舌�
 TONGUE_TIP_HEAT_FLAG = "心肺區偏紅，提示心火偏旺"
 TONGUE_ZONE_TARGETS = {
     "top": ("kidney",),
-    "center": ("spleen", "stomach"),
+    "center": ("spleen",),
     "bottom": ("heart", "lung"),
     "left": ("liver", "gallbladder"),
     "right": ("liver", "gallbladder"),
@@ -2273,7 +2287,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "meaning": "胃陰枯竭、全身大虛",
             "overlay": "weak-hot.png",
             "patterns": (("虛證", 2.0), ("熱證", 1.4)),
-            "targets": ("spleen", "stomach"),
+            "targets": ("stomach",),
             "score": 9.0,
         }
     yellow_dry = (
@@ -2288,7 +2302,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "meaning": "實熱亢盛、熱極傷津",
             "overlay": "strong-hot.png",
             "patterns": (("熱證", 2.2), ("實證", 1.8)),
-            "targets": ("spleen", "stomach", "large_intestine"),
+            "targets": ("stomach", "large_intestine"),
             "score": 9.0,
         }
     yellow_greasy = (
@@ -2305,7 +2319,7 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
             "overlay": "strong-hot.png",
             "patterns": (("熱證", 2.0), ("實證", 1.6)),
             "damp": True,
-            "targets": ("spleen", "stomach", "large_intestine"),
+            "targets": ("stomach", "large_intestine"),
             "score": 9.0,
         }
     white_slip = (
@@ -2318,10 +2332,10 @@ def classify_tongue_coat_appearance(metrics: dict[str, float]) -> dict[str, Any]
     if white_slip:
         return {
             "bias": "白厚滑苔",
-            "meaning": "脾胃虛寒、寒濕內停",
+            "meaning": "胃虛寒、寒濕內停",
             "overlay": "weak-cold.png",
             "patterns": (("虛證", 1.8), ("寒證", 2.0)),
-            "targets": ("spleen", "stomach"),
+            "targets": ("stomach",),
             "score": 9.0,
         }
     return None
@@ -2567,18 +2581,18 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
                     f"中（脾胃／舌中）舌苔 b* 相對他區 {db_peer:+.1f}、L* {dL_peer:+.1f} → {meaning}（{TEACHING_NOTE}）"
                 )
                 zone_findings.append(interpretation)
-                remember(("spleen", "stomach", "large_intestine"), "strong-hot.png", (("熱證", 2.0), ("實證", 1.6)), 8.0, "coat")
+                remember(("stomach", "large_intestine"), "strong-hot.png", (("熱證", 2.0), ("實證", 1.6)), 8.0, "coat")
                 remember(("gallbladder",), "strong-hot.png", (("熱證", 1.3),), 4.0, "coat")
                 if not scorch:
-                    remember(("spleen", "stomach"), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 9.0, "coat")
+                    remember(("stomach",), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 9.0, "coat")
             elif cold_coat:
-                bias, meaning = "白厚苔", "脾胃虛寒（寒濕）"
+                bias, meaning = "白厚苔", "胃虛寒（寒濕）"
                 interpretation = (
                     f"中（脾胃／舌中）舌苔 b*={center_coat['b_star']:.1f} 近 0、L* 相對 {dL_peer:+.1f}、S={s_center:.2f} → "
-                    f"脾胃虛寒（寒濕）、白厚苔（{TEACHING_NOTE}）"
+                    f"胃虛寒（寒濕）、白厚苔（{TEACHING_NOTE}）"
                 )
                 zone_findings.append(interpretation)
-                remember(("spleen", "stomach"), "weak-cold.png", (("虛證", 1.8), ("寒證", 2.0)), 8.0, "coat")
+                remember(("stomach",), "weak-cold.png", (("虛證", 1.8), ("寒證", 2.0)), 8.0, "coat")
             else:
                 coat_bias, coat_meaning = tongue_coat_from_lab(center_coat, peer)
                 if coat_bias != "苔色中性":
@@ -2693,10 +2707,16 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
 
         findings.extend(zone_findings)
         zone_organs = list(TONGUE_ZONE_TARGETS.get(spec["id"]) or organs_from_zh(spec["organs"]))
+        if spec["id"] == "center":
+            body_organs = ["spleen"]
+            coat_organs = ["stomach"]
+        else:
+            body_organs = zone_organs
+            coat_organs = zone_organs
         body_blocks.append(
             {
                 "label": spec["id"],
-                "organs": zone_organs,
+                "organs": body_organs,
                 "delta_e": round(lab_cie76(body_stats, TONGUE_BODY_NORMAL), 2),
             }
         )
@@ -2708,7 +2728,7 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         coat_blocks.append(
             {
                 "label": spec["id"],
-                "organs": zone_organs,
+                "organs": coat_organs,
                 "delta_e": round(coat_delta, 2),
             }
         )
@@ -2759,16 +2779,16 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
         )
         remember(appearance["targets"], appearance["overlay"], appearance["patterns"], appearance["score"], "coat")
         if appearance.get("damp"):
-            remember(("spleen",), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 7.0, "coat")
+            remember(("stomach",), DAMP_OVERLAY, (("熱證", 1.4), ("實證", 1.2)), 7.0, "coat")
     else:
         coat_bias, coat_meaning = tongue_coat_from_lab(coat_box_stats, peer)
         coat_text = f"舌苔（全舌疊加，分離後苔像素）{coat_bias} → {coat_meaning}（{TEACHING_NOTE}）"
         if coat_bias == "黑灰苔":
             remember(("kidney",), "strong-cold.png", (("寒證", 1.8), ("實證", 1.4)), 6.0, "coat")
         elif coat_bias in ("黃苔", "焦黃苔"):
-            remember(("spleen",), "strong-hot.png", (("熱證", 1.5),), 5.0, "coat")
+            remember(("stomach",), "strong-hot.png", (("熱證", 1.5),), 5.0, "coat")
         elif coat_bias == "白苔很少":
-            remember(("spleen",), "weak-cold.png", (("虛證", 1.8),), 5.0, "coat")
+            remember(("stomach",), "weak-cold.png", (("虛證", 1.8),), 5.0, "coat")
     findings.append(coat_text)
 
     body_all = seg["body_stats"] if seg["body_stats"].get("pixel_count", 0) else average_stats([packed[z]["body"] for z in packed])
@@ -2805,7 +2825,7 @@ def analyze_tongue_grid(image: Image.Image) -> tuple[dict[str, Any], list[str], 
     coat_blocks.append(
         {
             "label": "coating",
-            "organs": ["spleen", "gallbladder", "large_intestine"],
+            "organs": ["stomach", "gallbladder", "large_intestine"],
             "delta_e": round(lab_cie76(coat_box_stats, TONGUE_COAT_NORMAL), 2),
         }
     )
@@ -3038,6 +3058,7 @@ def analyze_session(
     discomfort: str = "",
     pulse: dict[str, Any] | None = None,
     personal_lab: dict[str, Any] | None = None,
+    confirm_with_pulse: bool = False,
 ) -> dict[str, Any]:
     color_reports = [
         inspect_image(raw, shot_type, personal_lab=personal_lab if shot_type == "face" else None)
@@ -3079,12 +3100,26 @@ def analyze_session(
 
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}")
+    pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")
+    apply_pattern_scores_to_evidence(evidence, pattern_scores)
+    text_notes.extend(pattern_notes)
+    pattern_baseline = {
+        organ: dict(evidence[organ])
+        for organ in ("spleen", "stomach")
+    }
     apply_color_findings(evidence, findings)
     for mark in (face_grid or {}).get("marks") or []:
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     for mark in (tongue_grid or {}).get("marks") or []:
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     pulse_notes = apply_pulse(evidence, pulse)
+    for organ, name in (("spleen", "脾"), ("stomach", "胃")):
+        for kind in pattern_kinds_gained(evidence[organ], pattern_baseline[organ]):
+            pattern_scores[f"{name}{kind}"] += 1
+    text_notes.append(
+        "脾與胃證型分開計分："
+        + "、".join(f"{label} {pattern_scores[label]}" for label in pattern_scores)
+    )
     _combined_scores, patterns, overlays = finalize(evidence)
 
     face_color = (face_grid or {}).get("color_health") or {}
@@ -3101,6 +3136,7 @@ def analyze_session(
     scores, breakdown = compose_organ_health(source_maps)
     used_sources = [key for key, value in source_maps.items() if value is not None]
     organ_health = serialize_organ_health(scores, breakdown, used_sources)
+    organ_health["pattern_scores"] = pattern_scores
 
     def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
         for organ, label in (pattern_map or {}).items():
@@ -3160,6 +3196,7 @@ def analyze_session(
         "region_colors": region_colors,
         "findings": all_findings,
         "scores": scores,
+        "pattern_scores": pattern_scores,
         "organ_health": organ_health,
         "patterns": patterns,
         "overlays": overlays,

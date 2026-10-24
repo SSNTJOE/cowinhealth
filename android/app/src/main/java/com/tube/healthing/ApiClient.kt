@@ -104,10 +104,18 @@ class ApiClient(
         }
     }
 
-    fun recipes(country: String, lang: String, patterns: String): JSONObject {
+    fun recipes(
+        country: String,
+        lang: String,
+        scores: String,
+        patterns: String,
+        female: Boolean
+    ): JSONObject {
         val url = "$baseUrl/api/recipes".toHttpUrl().newBuilder()
             .addQueryParameter("country", country)
             .addQueryParameter("lang", lang)
+            .addQueryParameter("female", if (female) "1" else "0")
+        if (scores.isNotBlank()) url.addQueryParameter("scores", scores)
         if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
         val req = Request.Builder().url(url.build()).auth().get().build()
         client.newCall(req).execute().use { resp ->

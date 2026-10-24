@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         "heart_pattern" to "心",
         "liver_pattern" to "肝",
         "spleen_pattern" to "脾",
+        "stomach_pattern" to "胃",
         "lung_pattern" to "肺",
         "kidney_pattern" to "腎",
         "gallbladder_pattern" to "膽",
@@ -59,7 +60,11 @@ class MainActivity : AppCompatActivity() {
     private var countryNames: List<String> = emptyList()
     private var loadedCountry = ""
     private var recipeLoadToken = 0
-    private var lastPatternCsv = ""
+    private var lastScoresJson = ""
+    private var lastPatternsJson = ""
+    private var judgmentReady = false
+    private var selectedRecipeId = -1
+    @Volatile private var recipeShowAllPasses = 0
     private var countriesLoaded = false
     private var cameraProvider: ProcessCameraProvider? = null
     private var flagAllergyOptions: List<String> = emptyList()
@@ -531,8 +536,8 @@ class MainActivity : AppCompatActivity() {
             "本日のレシピ（教材デモ）",
             "오늘의 레시피（교육 시연）"
         )
-        binding.recipeCountry.hint = t("輸入國家搜尋", "Type to search countries", "国名を入力", "국가 입력 검색")
-        binding.recipePick.hint = t("輸入食譜搜尋", "Type to search recipes", "レシピ名を入力", "레시피 입력 검색")
+        binding.recipeCountry.hint = t("輸入國家開頭", "Type a country prefix", "国名の先頭を入力", "국가 앞글자 입력")
+        binding.recipePick.hint = t("點開列出食譜，或輸入縮小", "Open to list recipes, or type to narrow", "開くと一覧、入力で絞り込み", "열면 목록, 입력하면 좁힘")
     }
 
     private fun setupLanguageSpinner() {
@@ -550,53 +555,84 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("ui_lang", code).apply()
                 applyLangChrome()
                 val country = selectedCountry()
-                if (country.isNotBlank()) requestRecipes(country)
+                if (country.isNotBlank()) requestRecipes(country, keepSelection = true)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
 
     private fun setupRecipeSpinners() {
-        bindSearch(binding.recipeCountry, emptyList())
-        bindSearch(binding.recipePick, emptyList())
+        bindSearch(binding.recipeCountry, emptyList(), prefix = true)
+        bindSearch(binding.recipePick, emptyList(), revealAll = true)
         binding.recipeCountry.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val name = s?.toString()?.trim().orEmpty()
+                if (name.isEmpty()) {
+                    binding.recipeCountry.adapter?.filter?.filter("")
+                }
                 if (name == loadedCountry && name.isNotEmpty()) return
                 if (name in countryNames) {
                     requestRecipes(name)
                 } else {
                     loadedCountry = ""
                     recipeLoadToken += 1
+                    selectedRecipeId = -1
                     recipeRows = emptyList()
                     binding.recipePick.setText("", false)
-                    bindSearch(binding.recipePick, emptyList())
+                    bindSearch(binding.recipePick, emptyList(), revealAll = true)
                     binding.recipeDetail.text = ""
                 }
             }
         })
         binding.recipePick.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                synchronized(this@MainActivity) { recipeShowAllPasses = 0 }
+            }
             override fun afterTextChanged(s: Editable?) {
-                showRecipeDetail(s?.toString()?.trim().orEmpty())
+                val label = s?.toString()?.trim().orEmpty()
+                if (label.isEmpty()) {
+                    binding.recipePick.adapter?.filter?.filter("")
+                }
+                showRecipeDetail(label)
             }
         })
         binding.recipeCountry.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus) binding.recipeCountry.showDropDown()
+            if (hasFocus) showCountryMenu()
         }
-        binding.recipeCountry.setOnClickListener { binding.recipeCountry.showDropDown() }
+        binding.recipeCountry.setOnClickListener { showCountryMenu() }
         binding.recipePick.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus && recipeRows.isNotEmpty()) binding.recipePick.showDropDown()
+            if (hasFocus) revealRecipeList()
         }
-        binding.recipePick.setOnClickListener {
-            if (recipeRows.isNotEmpty()) binding.recipePick.showDropDown()
+        binding.recipePick.setOnClickListener { revealRecipeList() }
+    }
+
+    private fun showCountryMenu() {
+        val adapter = binding.recipeCountry.adapter ?: return
+        val query = binding.recipeCountry.text?.toString()?.trim().orEmpty()
+        if (query.isEmpty()) {
+            adapter.filter.filter("") { binding.recipeCountry.showDropDown() }
+        } else {
+            binding.recipeCountry.showDropDown()
         }
     }
 
-    private fun bindSearch(field: AutoCompleteTextView, items: List<String>) {
+    private fun revealRecipeList() {
+        if (recipeRows.isEmpty()) return
+        synchronized(this) { recipeShowAllPasses = 2 }
+        binding.recipePick.adapter?.filter?.filter("") {
+            binding.recipePick.showDropDown()
+        }
+    }
+
+    private fun bindSearch(
+        field: AutoCompleteTextView,
+        items: List<String>,
+        prefix: Boolean = false,
+        revealAll: Boolean = false
+    ) {
         val source = items.toList()
         val adapter = object : ArrayAdapter<String>(
             this,
@@ -605,11 +641,23 @@ class MainActivity : AppCompatActivity() {
         ) {
             private val searchFilter = object : Filter() {
                 override fun performFiltering(constraint: CharSequence?): FilterResults {
-                    val query = constraint?.toString()?.trim().orEmpty()
-                    val matched = if (query.isEmpty()) {
-                        source
+                    val forceAll = if (revealAll) {
+                        synchronized(this@MainActivity) {
+                            if (recipeShowAllPasses > 0) {
+                                recipeShowAllPasses -= 1
+                                true
+                            } else {
+                                false
+                            }
+                        }
                     } else {
-                        source.filter { it.contains(query, ignoreCase = true) }
+                        false
+                    }
+                    val query = if (forceAll) "" else constraint?.toString()?.trim().orEmpty()
+                    val matched = when {
+                        query.isEmpty() -> source
+                        prefix -> source.filter { it.startsWith(query, ignoreCase = true) }
+                        else -> source.filter { it.contains(query, ignoreCase = true) }
                     }
                     return FilterResults().apply {
                         values = ArrayList(matched)
@@ -636,34 +684,35 @@ class MainActivity : AppCompatActivity() {
         return if (name in countryNames) name else ""
     }
 
-    private fun compactPattern(label: String): String {
-        if (label.isBlank() || label == "健康" || label == "未定" || label == "待觀察") return ""
-        if ("濕" in label) return "濕"
-        if ("虛" in label && "熱" in label) return "虛熱"
-        if ("實" in label && "熱" in label) return "實熱"
-        if ("虛" in label && "寒" in label) return "虛寒"
-        if ("實" in label && "寒" in label) return "實寒"
-        return ""
-    }
-
-    private fun patternCsv(json: JSONObject): String {
-        val tags = LinkedHashSet<String>()
-        val nested = json.optJSONObject("patterns")
-        organPatterns.forEach { (key, organ) ->
-            val raw = when {
-                nested != null && nested.has(key) -> nested.optString(key)
-                json.has(key) -> json.optString(key)
+    private fun rememberJudgment(json: JSONObject) {
+        val scores = JSONObject()
+        val patterns = JSONObject()
+        val nestedScores = json.optJSONObject("scores")
+        val nestedPatterns = json.optJSONObject("patterns")
+        organPatterns.forEach { (patternKey, _) ->
+            val scoreKey = patternKey.removeSuffix("_pattern") + "_score"
+            val scoreValue = when {
+                nestedScores != null && nestedScores.has(scoreKey) -> nestedScores.opt(scoreKey)
+                json.has(scoreKey) -> json.opt(scoreKey)
+                else -> null
+            }
+            if (scoreValue != null && scoreValue != JSONObject.NULL && scoreValue.toString().isNotBlank()) {
+                scores.put(scoreKey, scoreValue)
+            }
+            val patternValue = when {
+                nestedPatterns != null && nestedPatterns.has(patternKey) -> nestedPatterns.optString(patternKey)
+                json.has(patternKey) -> json.optString(patternKey)
                 else -> ""
             }
-            val compact = compactPattern(raw)
-            if (compact == "濕") tags.add("濕")
-            else if (compact.isNotBlank()) tags.add(organ + compact)
+            if (patternValue.isNotBlank()) patterns.put(patternKey, patternValue)
         }
-        return tags.joinToString(",")
+        lastScoresJson = scores.toString()
+        lastPatternsJson = patterns.toString()
+        judgmentReady = scores.length() > 0 || patterns.length() > 0
     }
 
     private fun bindAdvice(json: JSONObject) {
-        lastPatternCsv = patternCsv(json)
+        rememberJudgment(json)
         val diet = json.optString("diet_url")
         val acu = json.optString("acupoint_url")
         binding.dietLink.text = if (diet.isNotBlank()) {
@@ -699,7 +748,7 @@ class MainActivity : AppCompatActivity() {
             }
             countriesLoaded = true
             countryNames = names
-            runOnUiThread { bindSearch(binding.recipeCountry, countryNames) }
+            runOnUiThread { bindSearch(binding.recipeCountry, countryNames, prefix = true) }
         } catch (e: Exception) {
             runOnUiThread {
                 Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
@@ -707,18 +756,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestRecipes(countryName: String) {
+    private fun requestRecipes(countryName: String, keepSelection: Boolean = false) {
         if (countryName.isBlank()) return
+        val keepId = if (keepSelection) selectedRecipeId else -1
+        if (!keepSelection) selectedRecipeId = -1
         val token = ++recipeLoadToken
         loadedCountry = countryName
-        Thread { loadRecipes(countryName, token) }.start()
+        Thread { loadRecipes(countryName, token, keepId) }.start()
     }
 
-    private fun loadRecipes(countryName: String, token: Int) {
+    private fun loadRecipes(countryName: String, token: Int, keepId: Int) {
         if (countryName.isBlank()) return
         try {
             rememberServer()
-            val data = api.recipes(countryName, currentLang(), lastPatternCsv)
+            val scores = if (judgmentReady) lastScoresJson else ""
+            val patterns = if (judgmentReady) lastPatternsJson else ""
+            val data = api.recipes(countryName, currentLang(), scores, patterns, female)
             if (token != recipeLoadToken) return
             val arr = data.optJSONArray("recipes") ?: JSONArray()
             val rows = ArrayList<JSONObject>(arr.length())
@@ -726,22 +779,29 @@ class MainActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 val row = arr.optJSONObject(i) ?: continue
                 rows.add(row)
-                val star = if (row.optBoolean("benefit_match")) " ★" else ""
-                labels.add(row.optString("name") + star)
+                labels.add(recipeLabel(row))
             }
             recipeRows = rows
             runOnUiThread {
                 if (token != recipeLoadToken) return@runOnUiThread
-                bindSearch(binding.recipePick, labels)
-                binding.recipePick.setText("", false)
-                binding.recipeDetail.text = if (rows.isEmpty()) {
-                    t(
-                        "沒有符合今日證型、禁忌與過敏條件的食譜。教學示範，非診斷。",
-                        "No recipes pass today’s pattern, contraindication, and allergy filters. Teaching demo, not a diagnosis.",
-                        "本日の証型・禁忌・アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                        "오늘의 증형·금기·알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                    )
-                } else ""
+                bindSearch(binding.recipePick, labels, revealAll = true)
+                val kept = if (keepId >= 0) rows.firstOrNull { it.optInt("id", -1) == keepId } else null
+                if (kept != null) {
+                    val label = recipeLabel(kept)
+                    binding.recipePick.setText(label, false)
+                    showRecipeDetail(label)
+                } else {
+                    selectedRecipeId = -1
+                    binding.recipePick.setText("", false)
+                    binding.recipeDetail.text = if (rows.isEmpty()) {
+                        t(
+                            "沒有符合今日分數、禁忌與過敏條件的食譜。教學示範，非診斷。",
+                            "No recipes pass today’s score, contraindication, and allergy filters. Teaching demo, not a diagnosis.",
+                            "本日の点数・禁忌・アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                            "오늘의 점수·금기·알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                        )
+                    } else ""
+                }
             }
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
@@ -757,9 +817,11 @@ class MainActivity : AppCompatActivity() {
         if (recipeRows.isEmpty()) return
         val row = recipeRows.firstOrNull { recipeLabel(it) == label }
         if (row == null) {
+            selectedRecipeId = -1
             binding.recipeDetail.text = ""
             return
         }
+        selectedRecipeId = row.optInt("id", -1)
         val recipe = t("食譜", "Recipe", "レシピ", "레시피")
         val method = t("煮法", "Method", "作り方", "조리법")
         val benefit = t("益處", "Benefits", "益処", "유익")
@@ -792,15 +854,24 @@ class MainActivity : AppCompatActivity() {
         return copy.toString()
     }
 
+    private fun patternScoreLines(json: JSONObject): String {
+        val map = json.optJSONObject("pattern_scores") ?: return ""
+        val labels = listOf("脾實熱", "脾實寒", "脾虛熱", "脾虛寒", "胃實熱", "胃實寒", "胃虛熱", "胃虛寒")
+        return "\n脾／胃分開計分：\n" + labels.joinToString("\n") { label ->
+            "$label ${map.optInt(label, 0)}"
+        }
+    }
+
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
-        lastPatternCsv = patternCsv(json)
+        rememberJudgment(json)
         return "匿名紀錄已寫入 MySQL（教學參考，非診斷）\n" +
             "食療：" + json.optString("diet_advice") + "\n" +
             t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "：" + json.optString("diet_url") + "\n" +
             t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "：" + json.optString("acupoint_url") + "\n" +
             "分數：" + scores + "\n" +
-            "證型：" + healthyPatterns(scores, patterns)
+            "證型：" + healthyPatterns(scores, patterns) +
+            patternScoreLines(json)
     }
 }
