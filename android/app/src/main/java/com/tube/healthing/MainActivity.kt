@@ -854,14 +854,6 @@ class MainActivity : AppCompatActivity() {
         return copy.toString()
     }
 
-    private fun patternScoreLines(json: JSONObject): String {
-        val map = json.optJSONObject("pattern_scores") ?: return ""
-        val labels = listOf("脾實熱", "脾實寒", "脾虛熱", "脾虛寒", "胃實熱", "胃實寒", "胃虛熱", "胃虛寒")
-        return "\n脾／胃分開計分：\n" + labels.joinToString("\n") { label ->
-            "$label ${map.optInt(label, 0)}"
-        }
-    }
-
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
@@ -871,7 +863,6 @@ class MainActivity : AppCompatActivity() {
             t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "：" + json.optString("diet_url") + "\n" +
             t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "：" + json.optString("acupoint_url") + "\n" +
             "分數：" + scores + "\n" +
-            "證型：" + healthyPatterns(scores, patterns) +
-            patternScoreLines(json)
+            "證型：" + healthyPatterns(scores, patterns)
     }
 }

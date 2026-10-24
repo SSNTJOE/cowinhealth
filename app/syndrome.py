@@ -160,7 +160,7 @@ def _symptom_catalog() -> tuple[tuple[str, tuple[str, ...]], ...]:
 def _count_written_tokens(text: str) -> dict[str, int]:
     """Count tokens the user actually wrote. 脾胃X is not 脾X and not 胃X."""
     scores = empty_spleen_stomach_scores()
-    blob = text or ""
+    blob = normalize_pattern_token(text or "")
     for label in SPLEEN_STOMACH_PATTERNS:
         start = 0
         while True:
@@ -197,8 +197,6 @@ def score_spleen_stomach_symptoms(text: str) -> tuple[dict[str, int], list[str]]
             hit = [token for token in tokens if token in scores]
             for token in hit:
                 scores[token] += 1
-            if hit:
-                notes.append(f"症狀「{name}」分開計入{'、'.join(hit)}")
             start = end
     return scores, notes
 

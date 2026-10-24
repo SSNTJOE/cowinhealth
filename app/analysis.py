@@ -1739,7 +1739,11 @@ def analyze_face_grid(
                 reading["targets"] = ["spleen"]
             lip_color = f"唇{reading['meaning']}"
             targets = reading.get("targets") or (spec["targets"] if reading.get("overlay") else [])
-            face_blocks.append(make_face_block(f"face-{cell_id}", stats, spec["targets"] or targets))
+            lip_organs = list(targets or spec["targets"] or ["spleen"])
+            if "spleen" in lip_organs and "stomach" in lip_organs:
+                drop = "spleen" if reading.get("bias") == "實熱" else "stomach"
+                lip_organs = [organ for organ in lip_organs if organ != drop]
+            face_blocks.append(make_face_block(f"face-{cell_id}", stats, lip_organs))
         elif kind == "nose":
             upper_crop = crop_cell(image, spec["row"], spec["col"], "upper")
             lower_crop = crop_cell(image, spec["row"], spec["col"], "lower")
@@ -1787,6 +1791,8 @@ def analyze_face_grid(
             lower_read["targets"] = lower_targets
             if reading is lower_read:
                 targets = list(lower_targets) if lower_read.get("overlay") else []
+            else:
+                targets = list(upper_read.get("targets") or (["lung"] if upper_read.get("overlay") else []))
             remember(lower_targets, lower_read)
             face_blocks.append(make_face_block(f"face-{cell_id}-upper", upper_stats, organs_from_zh("鼻上／肺") or ["lung"]))
             face_blocks.append(make_face_block(f"face-{cell_id}-lower", lower_stats, lower_targets or ["spleen"]))
@@ -2049,12 +2055,14 @@ def analyze_face_grid(
 # Photo orientation: tongue tip toward BOTTOM (lips), root toward TOP.
 # User listed 上中下左右 (5). The 6th layer is whole-tongue coating overlay,
 # not a sixth spatial tile (中 is not split into 中上/中下).
+# Equal height 0.28. 左右 share 中. 上 spans the outer edges of 左右.
+# The stack is shifted up by half a cell (0.14) from 上's previous top 0.22.
 TONGUE_ZONE_LAYOUT = [
-    {"id": "top", "label": "上", "organs": "腎", "anatomy": "舌根", "left": 0.22, "top": 0.22, "right": 0.78, "bottom": 0.50},
-    {"id": "center", "label": "中", "organs": "脾胃", "anatomy": "舌中", "left": 0.28, "top": 0.50, "right": 0.72, "bottom": 0.72},
-    {"id": "bottom", "label": "下", "organs": "心肺", "anatomy": "舌尖", "left": 0.22, "top": 0.70, "right": 0.78, "bottom": 0.98},
-    {"id": "left", "label": "左", "organs": "肝膽", "anatomy": "舌左邊", "left": 0.02, "top": 0.22, "right": 0.28, "bottom": 0.78},
-    {"id": "right", "label": "右", "organs": "肝膽", "anatomy": "舌右邊", "left": 0.72, "top": 0.22, "right": 0.98, "bottom": 0.78},
+    {"id": "top", "label": "上", "organs": "腎", "anatomy": "舌根", "left": 0.02, "top": 0.08, "right": 0.98, "bottom": 0.36},
+    {"id": "center", "label": "中", "organs": "脾胃", "anatomy": "舌中", "left": 0.28, "top": 0.36, "right": 0.72, "bottom": 0.64},
+    {"id": "bottom", "label": "下", "organs": "心肺", "anatomy": "舌尖", "left": 0.22, "top": 0.64, "right": 0.78, "bottom": 0.92},
+    {"id": "left", "label": "左", "organs": "肝膽", "anatomy": "舌左邊", "left": 0.02, "top": 0.36, "right": 0.28, "bottom": 0.64},
+    {"id": "right", "label": "右", "organs": "肝膽", "anatomy": "舌右邊", "left": 0.72, "top": 0.36, "right": 0.98, "bottom": 0.64},
 ]
 TONGUE_COAT_BOX = {"left": 0.24, "top": 0.16, "right": 0.76, "bottom": 0.74}
 TONGUE_SIXTH_NOTE = "使用者列上中下左右五塊；第六層為全舌舌苔疊加（非再切一塊空間）。中區不拆中上／中下。"
@@ -3116,10 +3124,6 @@ def analyze_session(
     for organ, name in (("spleen", "脾"), ("stomach", "胃")):
         for kind in pattern_kinds_gained(evidence[organ], pattern_baseline[organ]):
             pattern_scores[f"{name}{kind}"] += 1
-    text_notes.append(
-        "脾與胃證型分開計分："
-        + "、".join(f"{label} {pattern_scores[label]}" for label in pattern_scores)
-    )
     _combined_scores, patterns, overlays = finalize(evidence)
 
     face_color = (face_grid or {}).get("color_health") or {}

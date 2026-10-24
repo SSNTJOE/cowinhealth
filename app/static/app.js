@@ -695,24 +695,14 @@ function shownScore(score) {
   return Number.isFinite(n) ? String(n) : "10";
 }
 
-function patternScoreMap(result) {
-  if (!result) return null;
-  if (result.pattern_scores) return result.pattern_scores;
-  const health = result.organ_health;
-  if (health && health.pattern_scores) return health.pattern_scores;
-  return null;
-}
-
-function renderPatternScores(result, host) {
-  const map = patternScoreMap(result);
-  if (!map || !host) return;
-  SPLEEN_STOMACH_PATTERNS.forEach((label) => {
-    const div = document.createElement("div");
-    div.className = "score";
-    const total = Number(map[label] || 0);
-    div.innerHTML = `<span>${label}</span><b>${Number.isFinite(total) ? total : 0}</b><small>分開計分</small>`;
-    host.appendChild(div);
-  });
+function hidesSpleenStomachPatternList(text) {
+  const value = String(text || "").trim();
+  if (!value || SPLEEN_STOMACH_PATTERNS.includes(value)) return Boolean(value);
+  if (value.startsWith("脾與胃證型分開計分")) return true;
+  const counted = value.match(/^症狀「[\s\S]*」分開計入(.+)$/);
+  if (!counted) return false;
+  const parts = counted[1].split("、").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => SPLEEN_STOMACH_PATTERNS.includes(part));
 }
 
 function patternLabel(score, pattern) {
@@ -732,6 +722,7 @@ function renderResult(result) {
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
   (result.findings || []).forEach((text) => {
+    if (hidesSpleenStomachPatternList(text)) return;
     const li = document.createElement("li");
     li.textContent = text;
     findings.appendChild(li);
@@ -755,7 +746,6 @@ function renderResult(result) {
     div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
     scores.appendChild(div);
   });
-  renderPatternScores(result, scores);
   drawOrgans(result);
   if (result.face_preview) lastFacePreviewUrl = result.face_preview;
   if (result.tongue_preview) lastTonguePreviewUrl = result.tongue_preview;
@@ -1055,7 +1045,7 @@ async function loadRecords() {
     disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
   });
   renderComplexionHistory(data.records);
-  const head = ["日期", "狀況", ...organs.map((o) => o.name), "脾／胃證型", "食療"].map((h) => `<th>${h}</th>`).join("");
+  const head = ["日期", "狀況", ...organs.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
   const rows = data.records
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
@@ -1063,13 +1053,7 @@ async function loadRecords() {
         const pattern = patternLabel(r[o.score], r[o.pattern]);
         return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
       }).join("");
-      const patternMap = patternScoreMap(r);
-      const patternCell = patternMap
-        ? SPLEEN_STOMACH_PATTERNS.filter((label) => Number(patternMap[label]) > 0)
-            .map((label) => `${label} ${patternMap[label]}`)
-            .join("、") || "—"
-        : "—";
-      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${patternCell}</td><td>${r.diet_advice || ""}</td></tr>`;
+      return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${r.diet_advice || ""}</td></tr>`;
     })
     .join("");
   box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
