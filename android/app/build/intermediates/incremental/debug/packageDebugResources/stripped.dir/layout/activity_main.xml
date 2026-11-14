@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp">
@@ -8,7 +9,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
         <TextView android:text="Health-ing App" android:textSize="22sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/server" android:hint="伺服器，模擬器可用 http://10.0.2.2:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="語言 / Language" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <Spinner
+            android:id="@+id/langSelect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/server" android:hint="伺服器。模擬器 http://10.0.2.2:8000；手機請填 http://電腦區網IP:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/email" android:hint="E-mail" android:inputType="textEmailAddress" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/password" android:hint="密碼" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
@@ -48,17 +54,67 @@
         <Button android:id="@+id/saveProfile" android:text="儲存基本資料到 MySQL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/symptoms" android:hint="今日身體狀況" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <EditText android:id="@+id/discomfort" android:hint="不舒服的地方" android:minLines="2" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <androidx.camera.view.PreviewView
-            android:id="@+id/preview"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="280dp"/>
+            android:layout_height="280dp"
+            android:minHeight="280dp"
+            android:clipChildren="true">
+            <androidx.camera.view.PreviewView
+                android:id="@+id/preview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:implementationMode="compatible"
+                app:scaleType="fillCenter"/>
+            <com.tube.healthing.FaceGuideView
+                android:id="@+id/faceGuide"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false"
+                android:importantForAccessibility="no"/>
+            <com.tube.healthing.TongueGuideView
+                android:id="@+id/tongueGuide"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false"
+                android:importantForAccessibility="no"
+                android:visibility="gone"/>
+        </FrameLayout>
+        <TextView
+            android:text="環境色溫"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"/>
+        <RadioGroup
+            android:id="@+id/cctGroup"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <RadioButton
+                android:id="@+id/cct2700"
+                android:text="暖光 2700K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+            <RadioButton
+                android:id="@+id/cct4200"
+                android:text="白光 4200K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"/>
+            <RadioButton
+                android:id="@+id/cct6500"
+                android:text="冷光 6500K"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+        </RadioGroup>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
             <Button android:id="@+id/shotFace" android:text="拍臉／唇" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
             <Button android:id="@+id/shotTongue" android:text="拍舌頭" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
         </LinearLayout>
         <Button android:id="@+id/openPulse" android:text="寸關尺脈診（各 15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/save" android:text="送出今日紀錄" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <TextView android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <TextView android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄；7–10 健康）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
         <com.github.mikephil.charting.charts.CombinedChart
             android:id="@+id/trendChart"
             android:layout_width="match_parent"
@@ -76,5 +132,66 @@
                 android:contentDescription="五臟六腑圖"/>
         </FrameLayout>
         <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:autoLink="web" android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/dietLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/acupointLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autoLink="web"
+            android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/recipeHeading"
+            android:text="今日食譜（教學示範）"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"/>
+        <TextView
+            android:id="@+id/recipeNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="13sp"
+            android:text="國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。"/>
+        <ToggleButton
+            android:id="@+id/recipeBodyAdvice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="false"
+            android:minHeight="48dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:textOff="依身體狀況建議"
+            android:textOn="依身體狀況建議"/>
+        <AutoCompleteTextView
+            android:id="@+id/recipeCountry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="輸入國家開頭"
+            android:completionThreshold="1"
+            android:dropDownHeight="240dp"
+            android:inputType="text"
+            android:importantForAutofill="no" />
+        <AutoCompleteTextView
+            android:id="@+id/recipePick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="點開列出食譜，或輸入縮小"
+            android:completionThreshold="1"
+            android:dropDownHeight="240dp"
+            android:inputType="text"
+            android:importantForAutofill="no" />
+        <TextView
+            android:id="@+id/recipeDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"/>
     </LinearLayout>
 </ScrollView>

@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-23:12
-INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-23:12
-INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-23:12
-INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-23:12
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-27:12
+INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-27:12
+INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-27:12
+INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:2:1-27:12
 MERGED from [androidx.databinding:viewbinding:9.3.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\6f973abc2024d4ac5cba68f38d5c9e4f\transformed\viewbinding-9.3.0\AndroidManifest.xml:2:1-7:12
 MERGED from [com.google.android.material:material:1.12.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\cbf3797fb5f160a1867c726f78028f94\transformed\material-1.12.0\AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.constraintlayout:constraintlayout:2.2.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\99cc82d337df35412b80b0de4e4c818f\transformed\constraintlayout-2.2.0\AndroidManifest.xml:2:1-9:12
@@ -70,21 +70,43 @@ uses-permission#android.permission.CAMERA
 ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:4:5-65
 	android:name
 		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:4:22-62
+uses-permission#android.permission.FLASHLIGHT
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:5-69
+	android:name
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:22-66
 uses-feature#android.hardware.camera
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:5-84
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:5-85
 	android:required
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:58-81
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:58-82
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:5:19-57
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:19-57
+uses-feature#android.hardware.camera.any
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:7:5-89
+	android:required
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:7:62-86
+	android:name
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:7:19-61
+uses-feature#android.hardware.camera.front
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:5-91
+	android:required
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:64-88
+	android:name
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:19-63
+uses-feature#android.hardware.camera.autofocus
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:5-95
+	android:required
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:68-92
+	android:name
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:19-67
 uses-feature#android.hardware.camera.flash
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:5-91
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:5-91
 	android:required
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:64-88
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:64-88
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:6:19-63
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:19-63
 application
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:5-22:19
-INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:8:5-22:19
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:12:5-26:19
+INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:12:5-26:19
 MERGED from [com.google.android.material:material:1.12.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\cbf3797fb5f160a1867c726f78028f94\transformed\material-1.12.0\AndroidManifest.xml:22:5-20
 MERGED from [com.google.android.material:material:1.12.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\cbf3797fb5f160a1867c726f78028f94\transformed\material-1.12.0\AndroidManifest.xml:22:5-20
 MERGED from [androidx.constraintlayout:constraintlayout:2.2.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\99cc82d337df35412b80b0de4e4c818f\transformed\constraintlayout-2.2.0\AndroidManifest.xml:7:5-20
@@ -110,35 +132,37 @@ MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] C:\Users\Jo
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.15.0] C:\Users\Joe\.gradle\caches\9.6.0\transforms\a04cf64c4509d2e67ca365bb0cee64b6\transformed\core-1.15.0\AndroidManifest.xml:28:18-86
 	android:label
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:10:9-35
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:14:9-35
 	android:allowBackup
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:9:9-35
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:13:9-35
 	android:theme
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:12:9-68
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:16:9-68
 	android:usesCleartextTraffic
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:11:9-44
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:15:9-44
 activity#com.tube.healthing.MainActivity
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:13:9-20:20
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:9-24:20
 	android:exported
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:15:13-36
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:19:13-36
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:14:13-41
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:18:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:16:13-19:29
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:20:13-23:29
 action#android.intent.action.MAIN
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:17-69
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:17-69
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:17:25-66
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:25-66
 category#android.intent.category.LAUNCHER
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:18:17-77
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:22:17-77
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:18:27-74
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:22:27-74
 activity#com.tube.healthing.PulseActivity
-ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:9-76
+ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:25:9-113
+	android:screenOrientation
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:25:74-110
 	android:exported
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:49-73
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:25:49-73
 	android:name
-		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:21:19-48
+		ADDED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml:25:19-48
 uses-sdk
 INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from C:\Tube\Health-ing\android\app\src\main\AndroidManifest.xml

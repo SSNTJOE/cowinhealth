@@ -4,6 +4,7 @@ package com.tube.healthing.databinding;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -12,14 +13,18 @@ import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.ToggleButton;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.view.PreviewView;
 import androidx.viewbinding.ViewBinding;
 import androidx.viewbinding.ViewBindings;
 import com.github.mikephil.charting.charts.CombinedChart;
+import com.tube.healthing.FaceGuideView;
 import com.tube.healthing.R;
+import com.tube.healthing.TongueGuideView;
 import java.lang.NullPointerException;
 import java.lang.Override;
 import java.lang.String;
@@ -27,6 +32,9 @@ import java.lang.String;
 public final class ActivityMainBinding implements ViewBinding {
   @NonNull
   private final ScrollView rootView;
+
+  @NonNull
+  public final TextView acupointLink;
 
   @NonNull
   public final LinearLayout allergiesGroup;
@@ -47,13 +55,31 @@ public final class ActivityMainBinding implements ViewBinding {
   public final FrameLayout bodyMap;
 
   @NonNull
+  public final RadioButton cct2700;
+
+  @NonNull
+  public final RadioButton cct4200;
+
+  @NonNull
+  public final RadioButton cct6500;
+
+  @NonNull
+  public final RadioGroup cctGroup;
+
+  @NonNull
   public final LinearLayout conditionsGroup;
+
+  @NonNull
+  public final TextView dietLink;
 
   @NonNull
   public final EditText discomfort;
 
   @NonNull
   public final EditText email;
+
+  @NonNull
+  public final FaceGuideView faceGuide;
 
   @NonNull
   public final RadioButton genderFemale;
@@ -71,6 +97,9 @@ public final class ActivityMainBinding implements ViewBinding {
   public final EditText height;
 
   @NonNull
+  public final Spinner langSelect;
+
+  @NonNull
   public final Button login;
 
   @NonNull
@@ -84,6 +113,24 @@ public final class ActivityMainBinding implements ViewBinding {
 
   @NonNull
   public final PreviewView preview;
+
+  @NonNull
+  public final ToggleButton recipeBodyAdvice;
+
+  @NonNull
+  public final AutoCompleteTextView recipeCountry;
+
+  @NonNull
+  public final TextView recipeDetail;
+
+  @NonNull
+  public final TextView recipeHeading;
+
+  @NonNull
+  public final TextView recipeNote;
+
+  @NonNull
+  public final AutoCompleteTextView recipePick;
 
   @NonNull
   public final Button register;
@@ -110,42 +157,66 @@ public final class ActivityMainBinding implements ViewBinding {
   public final EditText symptoms;
 
   @NonNull
+  public final TongueGuideView tongueGuide;
+
+  @NonNull
   public final CombinedChart trendChart;
 
   @NonNull
   public final EditText weight;
 
-  private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull LinearLayout allergiesGroup,
-      @NonNull TextView anon, @NonNull EditText birthYear, @NonNull TextView bmiLive,
-      @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap,
-      @NonNull LinearLayout conditionsGroup, @NonNull EditText discomfort, @NonNull EditText email,
-      @NonNull RadioButton genderFemale, @NonNull RadioGroup genderGroup,
-      @NonNull RadioButton genderMale, @NonNull RadioButton genderOther, @NonNull EditText height,
+  private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull TextView acupointLink,
+      @NonNull LinearLayout allergiesGroup, @NonNull TextView anon, @NonNull EditText birthYear,
+      @NonNull TextView bmiLive, @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap,
+      @NonNull RadioButton cct2700, @NonNull RadioButton cct4200, @NonNull RadioButton cct6500,
+      @NonNull RadioGroup cctGroup, @NonNull LinearLayout conditionsGroup,
+      @NonNull TextView dietLink, @NonNull EditText discomfort, @NonNull EditText email,
+      @NonNull FaceGuideView faceGuide, @NonNull RadioButton genderFemale,
+      @NonNull RadioGroup genderGroup, @NonNull RadioButton genderMale,
+      @NonNull RadioButton genderOther, @NonNull EditText height, @NonNull Spinner langSelect,
       @NonNull Button login, @NonNull EditText nickname, @NonNull Button openPulse,
-      @NonNull EditText password, @NonNull PreviewView preview, @NonNull Button register,
-      @NonNull TextView result, @NonNull Button save, @NonNull Button saveProfile,
-      @NonNull EditText server, @NonNull Button shotFace, @NonNull Button shotTongue,
-      @NonNull EditText symptoms, @NonNull CombinedChart trendChart, @NonNull EditText weight) {
+      @NonNull EditText password, @NonNull PreviewView preview,
+      @NonNull ToggleButton recipeBodyAdvice, @NonNull AutoCompleteTextView recipeCountry,
+      @NonNull TextView recipeDetail, @NonNull TextView recipeHeading, @NonNull TextView recipeNote,
+      @NonNull AutoCompleteTextView recipePick, @NonNull Button register, @NonNull TextView result,
+      @NonNull Button save, @NonNull Button saveProfile, @NonNull EditText server,
+      @NonNull Button shotFace, @NonNull Button shotTongue, @NonNull EditText symptoms,
+      @NonNull TongueGuideView tongueGuide, @NonNull CombinedChart trendChart,
+      @NonNull EditText weight) {
     this.rootView = rootView;
+    this.acupointLink = acupointLink;
     this.allergiesGroup = allergiesGroup;
     this.anon = anon;
     this.birthYear = birthYear;
     this.bmiLive = bmiLive;
     this.bodyImage = bodyImage;
     this.bodyMap = bodyMap;
+    this.cct2700 = cct2700;
+    this.cct4200 = cct4200;
+    this.cct6500 = cct6500;
+    this.cctGroup = cctGroup;
     this.conditionsGroup = conditionsGroup;
+    this.dietLink = dietLink;
     this.discomfort = discomfort;
     this.email = email;
+    this.faceGuide = faceGuide;
     this.genderFemale = genderFemale;
     this.genderGroup = genderGroup;
     this.genderMale = genderMale;
     this.genderOther = genderOther;
     this.height = height;
+    this.langSelect = langSelect;
     this.login = login;
     this.nickname = nickname;
     this.openPulse = openPulse;
     this.password = password;
     this.preview = preview;
+    this.recipeBodyAdvice = recipeBodyAdvice;
+    this.recipeCountry = recipeCountry;
+    this.recipeDetail = recipeDetail;
+    this.recipeHeading = recipeHeading;
+    this.recipeNote = recipeNote;
+    this.recipePick = recipePick;
     this.register = register;
     this.result = result;
     this.save = save;
@@ -154,6 +225,7 @@ public final class ActivityMainBinding implements ViewBinding {
     this.shotFace = shotFace;
     this.shotTongue = shotTongue;
     this.symptoms = symptoms;
+    this.tongueGuide = tongueGuide;
     this.trendChart = trendChart;
     this.weight = weight;
   }
@@ -185,6 +257,12 @@ public final class ActivityMainBinding implements ViewBinding {
     // This is done to optimize the compiled bytecode for size and performance.
     int id;
     missingId: {
+      id = R.id.acupointLink;
+      TextView acupointLink = ViewBindings.findChildViewById(rootView, id);
+      if (acupointLink == null) {
+        break missingId;
+      }
+
       id = R.id.allergiesGroup;
       LinearLayout allergiesGroup = ViewBindings.findChildViewById(rootView, id);
       if (allergiesGroup == null) {
@@ -221,9 +299,39 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.cct2700;
+      RadioButton cct2700 = ViewBindings.findChildViewById(rootView, id);
+      if (cct2700 == null) {
+        break missingId;
+      }
+
+      id = R.id.cct4200;
+      RadioButton cct4200 = ViewBindings.findChildViewById(rootView, id);
+      if (cct4200 == null) {
+        break missingId;
+      }
+
+      id = R.id.cct6500;
+      RadioButton cct6500 = ViewBindings.findChildViewById(rootView, id);
+      if (cct6500 == null) {
+        break missingId;
+      }
+
+      id = R.id.cctGroup;
+      RadioGroup cctGroup = ViewBindings.findChildViewById(rootView, id);
+      if (cctGroup == null) {
+        break missingId;
+      }
+
       id = R.id.conditionsGroup;
       LinearLayout conditionsGroup = ViewBindings.findChildViewById(rootView, id);
       if (conditionsGroup == null) {
+        break missingId;
+      }
+
+      id = R.id.dietLink;
+      TextView dietLink = ViewBindings.findChildViewById(rootView, id);
+      if (dietLink == null) {
         break missingId;
       }
 
@@ -236,6 +344,12 @@ public final class ActivityMainBinding implements ViewBinding {
       id = R.id.email;
       EditText email = ViewBindings.findChildViewById(rootView, id);
       if (email == null) {
+        break missingId;
+      }
+
+      id = R.id.faceGuide;
+      FaceGuideView faceGuide = ViewBindings.findChildViewById(rootView, id);
+      if (faceGuide == null) {
         break missingId;
       }
 
@@ -269,6 +383,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.langSelect;
+      Spinner langSelect = ViewBindings.findChildViewById(rootView, id);
+      if (langSelect == null) {
+        break missingId;
+      }
+
       id = R.id.login;
       Button login = ViewBindings.findChildViewById(rootView, id);
       if (login == null) {
@@ -296,6 +416,42 @@ public final class ActivityMainBinding implements ViewBinding {
       id = R.id.preview;
       PreviewView preview = ViewBindings.findChildViewById(rootView, id);
       if (preview == null) {
+        break missingId;
+      }
+
+      id = R.id.recipeBodyAdvice;
+      ToggleButton recipeBodyAdvice = ViewBindings.findChildViewById(rootView, id);
+      if (recipeBodyAdvice == null) {
+        break missingId;
+      }
+
+      id = R.id.recipeCountry;
+      AutoCompleteTextView recipeCountry = ViewBindings.findChildViewById(rootView, id);
+      if (recipeCountry == null) {
+        break missingId;
+      }
+
+      id = R.id.recipeDetail;
+      TextView recipeDetail = ViewBindings.findChildViewById(rootView, id);
+      if (recipeDetail == null) {
+        break missingId;
+      }
+
+      id = R.id.recipeHeading;
+      TextView recipeHeading = ViewBindings.findChildViewById(rootView, id);
+      if (recipeHeading == null) {
+        break missingId;
+      }
+
+      id = R.id.recipeNote;
+      TextView recipeNote = ViewBindings.findChildViewById(rootView, id);
+      if (recipeNote == null) {
+        break missingId;
+      }
+
+      id = R.id.recipePick;
+      AutoCompleteTextView recipePick = ViewBindings.findChildViewById(rootView, id);
+      if (recipePick == null) {
         break missingId;
       }
 
@@ -347,6 +503,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.tongueGuide;
+      TongueGuideView tongueGuide = ViewBindings.findChildViewById(rootView, id);
+      if (tongueGuide == null) {
+        break missingId;
+      }
+
       id = R.id.trendChart;
       CombinedChart trendChart = ViewBindings.findChildViewById(rootView, id);
       if (trendChart == null) {
@@ -359,11 +521,13 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
-      return new ActivityMainBinding((ScrollView) rootView, allergiesGroup, anon, birthYear,
-          bmiLive, bodyImage, bodyMap, conditionsGroup, discomfort, email, genderFemale,
-          genderGroup, genderMale, genderOther, height, login, nickname, openPulse, password,
-          preview, register, result, save, saveProfile, server, shotFace, shotTongue, symptoms,
-          trendChart, weight);
+      return new ActivityMainBinding((ScrollView) rootView, acupointLink, allergiesGroup, anon,
+          birthYear, bmiLive, bodyImage, bodyMap, cct2700, cct4200, cct6500, cctGroup,
+          conditionsGroup, dietLink, discomfort, email, faceGuide, genderFemale, genderGroup,
+          genderMale, genderOther, height, langSelect, login, nickname, openPulse, password,
+          preview, recipeBodyAdvice, recipeCountry, recipeDetail, recipeHeading, recipeNote,
+          recipePick, register, result, save, saveProfile, server, shotFace, shotTongue, symptoms,
+          tongueGuide, trendChart, weight);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));
