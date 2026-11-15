@@ -28,12 +28,14 @@ from .health_flags import (
     CONDITION_OPTIONS,
     allergy_option_set,
     allergy_options,
+    canonicalize_allergy_label,
     dumps_labels,
     history_summary,
     parse_label_list,
     user_allergies,
     user_conditions,
 )
+from .recipe_ensure import ensure_recipe
 from .recipes import TEACHING_DISCLAIMER, filter_recipes, split_csv, usable_countries
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
@@ -583,6 +585,27 @@ def api_recipes(
     return payload
 
 
+@app.post("/api/recipes/ensure")
+def api_recipes_ensure(
+    country: str = Form(...),
+    name: str = Form(...),
+    lang: str = Form("zh"),
+):
+    """Find or create a recipe row for country + name; research fills columns when possible."""
+    try:
+        return ensure_recipe(country=country, name=name, lang=lang)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到 Recipe.xls 或 Foods.xls") from exc
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"寫入食譜資料失敗：{exc}") from exc
+
+
 @app.post("/api/register")
 def register(
     email: str = Form(...),
@@ -716,7 +739,11 @@ def update_profile(
         next_conditions = user_conditions(current)
     if allergies_json is not None:
         next_allergies = parse_label_list(
-            allergies_json, allergy_option_set(), allergy_options(), "allergies_json"
+            allergies_json,
+            allergy_option_set(),
+            allergy_options(),
+            "allergies_json",
+            canonicalize=canonicalize_allergy_label,
         )
     else:
         next_allergies = user_allergies(current)

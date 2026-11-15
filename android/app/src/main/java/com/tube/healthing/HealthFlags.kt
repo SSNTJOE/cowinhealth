@@ -15,7 +15,17 @@ object HealthFlags {
         "高血壓",
         "服用抗凝血劑",
     )
-    val ALLERGIES = listOf("蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶")
+    val ALLERGIES = listOf("蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶")
+
+    private val CRUSTACEAN_TOKENS = setOf("蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹")
+
+    fun canonicalizeAllergyLabel(label: String?): String? {
+        val text = label?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        if (text in CRUSTACEAN_TOKENS) return "蝦蟹"
+        if ("魚" in text) return "魚"
+        return text
+    }
 
     fun jsonLabels(arr: JSONArray?): List<String> {
         if (arr == null) return emptyList()
@@ -74,7 +84,7 @@ object HealthFlags {
         val picked = mutableSetOf<String>()
         if (selected != null) {
             for (i in 0 until selected.length()) {
-                picked.add(selected.optString(i))
+                canonicalizeAllergyLabel(selected.optString(i))?.let { picked.add(it) }
             }
         }
         for (i in 0 until parent.childCount) {

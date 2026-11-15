@@ -56,7 +56,34 @@ function formBody(obj) {
 }
 
 let CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
-let ALLERGY_OPTIONS = ["蝦蟹", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+let ALLERGY_OPTIONS = ["蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+
+const CRUSTACEAN_ALLERGY_TOKENS = new Set([
+  "蝦蟹",
+  "蝦",
+  "蝦米",
+  "蝦仁",
+  "龍蝦",
+  "螃蟹",
+  "蟹",
+]);
+
+function canonicalizeAllergyLabel(label) {
+  const text = String(label || "").trim();
+  if (!text) return "";
+  if (CRUSTACEAN_ALLERGY_TOKENS.has(text)) return "蝦蟹";
+  if (text.includes("魚")) return "魚";
+  return text;
+}
+
+function normalizeAllergySelection(selected) {
+  const picked = new Set();
+  for (const item of Array.isArray(selected) ? selected : []) {
+    const canon = canonicalizeAllergyLabel(item);
+    if (canon) picked.add(canon);
+  }
+  return [...picked];
+}
 
 async function loadHealthFlagOptions() {
   try {
@@ -106,7 +133,7 @@ function fillHealthFlags(root, user) {
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
     allergyOpts,
-    user && user.allergies,
+    normalizeAllergySelection(user && user.allergies),
   );
 }
 
@@ -223,6 +250,10 @@ const UI_I18N = {
     searchMore: "還有 {n} 筆，請再輸入以縮小範圍",
     emptyRecipes: "沒有符合過敏條件的食譜。",
     emptyRecipesBody: "沒有符合今日檢測與過敏條件的食譜。",
+    recipeSearching: "搜尋中",
+    recipeEnsuring: "搜尋建立資料中",
+    recipeEnsureFailed: "無法建立食譜資料",
+    recipeEnsurePartial: "已建立（部分欄位待補）。教學示範，非中醫診斷。",
     fieldRecipe: "食譜",
     fieldMethod: "煮法",
     fieldBenefit: "益處",
@@ -247,6 +278,10 @@ const UI_I18N = {
     searchMore: "{n} more. Keep typing to narrow the list.",
     emptyRecipes: "No recipes pass the allergy filter.",
     emptyRecipesBody: "No recipes pass today’s reading and allergy filters.",
+    recipeSearching: "Searching",
+    recipeEnsuring: "Searching and creating recipe data",
+    recipeEnsureFailed: "Could not create recipe data",
+    recipeEnsurePartial: "Created with partial fields. Teaching demo, not medical advice.",
     fieldRecipe: "Recipe",
     fieldMethod: "Method",
     fieldBenefit: "Benefits",
@@ -271,6 +306,10 @@ const UI_I18N = {
     searchMore: "ほか {n} 件。続けて入力すると絞り込めます。",
     emptyRecipes: "アレルギー条件に合うレシピがありません。",
     emptyRecipesBody: "今日の検出とアレルギー条件に合うレシピがありません。",
+    recipeSearching: "検索中",
+    recipeEnsuring: "検索・データ作成中",
+    recipeEnsureFailed: "レシピデータを作成できませんでした",
+    recipeEnsurePartial: "一部未記入で作成しました。教材デモであり診断ではありません。",
     fieldRecipe: "レシピ",
     fieldMethod: "作り方",
     fieldBenefit: "益処",
@@ -295,6 +334,10 @@ const UI_I18N = {
     searchMore: "{n}개 더 있습니다. 계속 입력하면 좁혀집니다.",
     emptyRecipes: "알레르기 조건에 맞는 레시피가 없습니다.",
     emptyRecipesBody: "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다.",
+    recipeSearching: "검색 중",
+    recipeEnsuring: "검색·자료 작성 중",
+    recipeEnsureFailed: "레시피 자료를 만들지 못했습니다",
+    recipeEnsurePartial: "일부 항목만 작성했습니다. 교육용이며 진단이 아닙니다.",
     fieldRecipe: "레시피",
     fieldMethod: "조리법",
     fieldBenefit: "유익",

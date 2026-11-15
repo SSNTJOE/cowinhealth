@@ -128,6 +128,11 @@ def recipe_rows() -> tuple[dict[str, str], ...]:
     return _rows_cached(mtime)
 
 
+def invalidate_recipe_cache() -> None:
+    """Drop the xlrd row cache after Recipe.xls is rewritten on disk."""
+    _rows_cached.cache_clear()
+
+
 def countries(prefix: str | None = None) -> list[str]:
     needle = (prefix or "").strip().casefold()
     seen: set[str] = set()

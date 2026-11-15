@@ -16,6 +16,7 @@ CONDITION_OPTIONS = (
 
 BASE_ALLERGY_OPTIONS = (
     "蝦蟹",
+    "魚",
     "芒果",
     "花生",
     "堅果",
@@ -23,7 +24,24 @@ BASE_ALLERGY_OPTIONS = (
     "牛奶",
 )
 
+# Raw Recipe.xls / legacy profile tokens that map onto the 蝦蟹 checkbox.
+CRUSTACEAN_ALLERGY_TOKENS = frozenset(
+    {"蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹"}
+)
+
 CONDITION_SET = set(CONDITION_OPTIONS)
+
+
+def canonicalize_allergy_label(label: str | None) -> str | None:
+    """Map legacy / raw allergen tokens onto consolidated checkbox labels."""
+    text = (label or "").strip()
+    if not text:
+        return None
+    if text in CRUSTACEAN_ALLERGY_TOKENS:
+        return "蝦蟹"
+    if "魚" in text:
+        return "魚"
+    return text
 
 
 def allergy_options() -> tuple[str, ...]:
@@ -32,9 +50,10 @@ def allergy_options() -> tuple[str, ...]:
     ordered: list[str] = []
     seen: set[str] = set()
     for label in (*BASE_ALLERGY_OPTIONS, *allergen_labels()):
-        if label and label not in seen:
-            seen.add(label)
-            ordered.append(label)
+        canon = canonicalize_allergy_label(label)
+        if canon and canon not in seen:
+            seen.add(canon)
+            ordered.append(canon)
     return tuple(ordered)
 
 
@@ -67,6 +86,21 @@ ACUPOINT_BIAS = {
 
 ALLERGY_EXCLUDE = {
     "蝦蟹": ("蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹"),
+    # "魚" substring match covers species tokens; named fish kept for exact cell tokens.
+    "魚": (
+        "魚",
+        "沙丁魚",
+        "石斑魚",
+        "虱目魚",
+        "鮪魚",
+        "鮭魚",
+        "鯉魚",
+        "鯛魚",
+        "鱈魚",
+        "鱸魚",
+        "章魚",
+        "魷魚",
+    ),
     "芒果": ("芒果",),
     "花生": ("花生", "花生油"),
     "堅果": ("堅果", "核桃", "杏仁", "杏仁果", "腰果", "夏威夷豆", "松子", "栗子", "白果"),
@@ -79,7 +113,8 @@ def allergy_exclude_tokens(allergies: list[str] | None) -> list[str]:
     tokens: list[str] = []
     seen: set[str] = set()
     for allergy in allergies or []:
-        words = ALLERGY_EXCLUDE.get(allergy, (allergy,))
+        canon = canonicalize_allergy_label(allergy) or (allergy or "").strip()
+        words = ALLERGY_EXCLUDE.get(canon, (canon,))
         for word in words:
             if word and word not in seen:
                 seen.add(word)
@@ -92,7 +127,26 @@ def labels_from_text(text: str | None, allowed: tuple[str, ...]) -> list[str]:
     return [label for label in allowed if label in blob]
 
 
-def parse_label_list(raw, allowed: set[str], allowed_order: tuple[str, ...], field: str) -> list[str]:
+def labels_from_allergy_text(text: str | None, allowed: tuple[str, ...]) -> list[str]:
+    blob = text or ""
+    if not blob:
+        return []
+    picked: list[str] = []
+    for label in allowed:
+        tokens = ALLERGY_EXCLUDE.get(label, (label,))
+        if label in blob or any(token and token in blob for token in tokens):
+            picked.append(label)
+    return picked
+
+
+def parse_label_list(
+    raw,
+    allowed: set[str],
+    allowed_order: tuple[str, ...],
+    field: str,
+    *,
+    canonicalize=None,
+) -> list[str]:
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -111,6 +165,8 @@ def parse_label_list(raw, allowed: set[str], allowed_order: tuple[str, ...], fie
         if not isinstance(item, str):
             raise HTTPException(status_code=400, detail=f"{field} 項目不正確")
         label = item.strip()
+        if canonicalize is not None:
+            label = canonicalize(label) or ""
         if label not in allowed:
             raise HTTPException(status_code=400, detail=f"{field} 含未知選項")
         if label not in seen:
@@ -119,7 +175,7 @@ def parse_label_list(raw, allowed: set[str], allowed_order: tuple[str, ...], fie
     return [label for label in allowed_order if label in seen]
 
 
-def decode_stored_labels(raw, allowed: tuple[str, ...]) -> list[str]:
+def decode_stored_labels(raw, allowed: tuple[str, ...], *, canonicalize=None) -> list[str]:
     if raw is None or raw == "":
         return []
     if isinstance(raw, list):
@@ -128,10 +184,20 @@ def decode_stored_labels(raw, allowed: tuple[str, ...]) -> list[str]:
         try:
             values = json.loads(raw)
         except (TypeError, json.JSONDecodeError):
+            if canonicalize is not None:
+                return labels_from_allergy_text(str(raw), allowed)
             return labels_from_text(str(raw), allowed)
     if not isinstance(values, list):
+        if canonicalize is not None:
+            return labels_from_allergy_text(str(raw), allowed)
         return labels_from_text(str(raw), allowed)
-    found = {str(item) for item in values}
+    found: set[str] = set()
+    for item in values:
+        text = str(item).strip()
+        if canonicalize is not None:
+            text = canonicalize(text) or ""
+        if text:
+            found.add(text)
     return [label for label in allowed if label in found]
 
 
@@ -146,10 +212,12 @@ def user_conditions(user: dict | None) -> list[str]:
 def user_allergies(user: dict | None) -> list[str]:
     user = user or {}
     options = allergy_options()
-    labels = decode_stored_labels(user.get("allergies_json"), options)
+    labels = decode_stored_labels(
+        user.get("allergies_json"), options, canonicalize=canonicalize_allergy_label
+    )
     if labels:
         return labels
-    return labels_from_text(user.get("medical_history"), options)
+    return labels_from_allergy_text(user.get("medical_history"), options)
 
 
 def history_summary(conditions: list[str], allergies: list[str]) -> str | None:

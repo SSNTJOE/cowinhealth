@@ -904,13 +904,32 @@ function rememberRecipeChoice(label) {
   return row || null;
 }
 
-function showSelectedRecipe() {
+function recipeNamePlain(label) {
+  return String(label || "").replace(/\s*★\s*$/, "").trim();
+}
+
+function findRecipeByTypedName(typed) {
+  const label = String(typed || "").trim();
+  const plain = recipeNamePlain(label).toLowerCase();
+  if (!plain) return null;
+  return (
+    recipeRows.find((item) => recipeLabel(item) === label)
+    || recipeRows.find((item) => recipeNamePlain(recipeLabel(item)).toLowerCase() === plain)
+    || recipeRows.find((item) => String(item.name || "").trim().toLowerCase() === plain)
+    || null
+  );
+}
+
+let recipeEnsureSeq = 0;
+
+function showSelectedRecipe(extraNote) {
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   if (!pick || !detail) return;
   const label = pick.value.trim();
   const row = recipeRows.find((item) => String(item.id) === String(selectedRecipeId) && recipeLabel(item) === label)
-    || recipeRows.find((item) => recipeLabel(item) === label);
+    || recipeRows.find((item) => recipeLabel(item) === label)
+    || findRecipeByTypedName(label);
   if (!row) {
     selectedRecipeId = null;
     if (!label) detail.textContent = "";
@@ -925,7 +944,66 @@ function showSelectedRecipe() {
     ["fieldBan", row.ban],
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
-  detail.textContent = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  let text = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  if (extraNote) text = (text ? text + "\n\n" : "") + extraNote;
+  detail.textContent = text;
+}
+
+async function ensureRecipeFromInput(options) {
+  const fromBlur = Boolean(options && options.fromBlur);
+  const countryInput = document.getElementById("recipe-country");
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  const list = document.getElementById("recipe-name-list");
+  if (!countryInput || !pick || !detail) return null;
+  const country = countryInput.value.trim();
+  const typed = pick.value.trim();
+  const plain = recipeNamePlain(typed);
+  if (!countryNames.includes(country) || !plain) return null;
+  const existing = findRecipeByTypedName(typed);
+  if (existing) {
+    selectedRecipeId = existing.id;
+    pick.value = recipeLabel(existing);
+    showSelectedRecipe();
+    return existing;
+  }
+  if (fromBlur && list && !list.hidden) return null;
+  const seq = ++recipeEnsureSeq;
+  closeCombo(pick, list);
+  detail.textContent = uiText("recipeEnsuring");
+  try {
+    const data = await api("/api/recipes/ensure", {
+      method: "POST",
+      body: formBody({ country, name: plain, lang: getUiLang() }),
+    });
+    if (seq !== recipeEnsureSeq) return null;
+    const created = data && data.recipe;
+    await loadRecipesForCountry({ keepSelection: false });
+    if (seq !== recipeEnsureSeq) return null;
+    let row =
+      (created && recipeRows.find((item) => String(item.id) === String(created.id)))
+      || findRecipeByTypedName(plain)
+      || null;
+    if (!row && created && created.id != null) {
+      row = created;
+      if (!recipeRows.some((item) => String(item.id) === String(row.id))) {
+        recipeRows = recipeRows.concat([row]);
+      }
+    }
+    if (row && row.id != null) {
+      selectedRecipeId = row.id;
+      pick.value = row.name ? recipeLabel(row) : plain;
+      const note = data.partial ? (data.note || uiText("recipeEnsurePartial")) : "";
+      showSelectedRecipe(note);
+      return row;
+    }
+    detail.textContent = uiText("recipeEnsureFailed");
+    return null;
+  } catch (err) {
+    if (seq !== recipeEnsureSeq) return null;
+    detail.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+    return null;
+  }
 }
 
 function recipeFilterParams() {
@@ -1120,18 +1198,39 @@ function bindRecipePickers() {
     if (event.key === "Escape") closeCombo(pick, pickList);
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const button = pickList.querySelector("button");
-    if (!button) return;
-    pick.value = button.textContent;
+    const typed = pick.value.trim();
+    const buttons = [...pickList.querySelectorAll("button")];
+    const exactBtn = buttons.find((btn) => btn.textContent === typed);
+    const button = exactBtn || (buttons.length === 1 ? buttons[0] : null);
+    if (button && findRecipeByTypedName(button.textContent)) {
+      pick.value = button.textContent;
+      closeCombo(pick, pickList);
+      rememberRecipeChoice(pick.value);
+      showSelectedRecipe();
+      return;
+    }
     closeCombo(pick, pickList);
-    rememberRecipeChoice(pick.value);
-    showSelectedRecipe();
+    ensureRecipeFromInput().catch((err) => {
+      const box = document.getElementById("recipe-detail");
+      if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+    });
   });
   pick.addEventListener("input", () => {
     filterRecipes();
     showSelectedRecipe();
   });
-  pick.addEventListener("blur", () => closeCombo(pick, pickList));
+  pick.addEventListener("blur", () => {
+    closeCombo(pick, pickList);
+    const typed = pick.value.trim();
+    if (!typed || findRecipeByTypedName(typed)) return;
+    window.setTimeout(() => {
+      if (document.activeElement === pick) return;
+      ensureRecipeFromInput({ fromBlur: true }).catch((err) => {
+        const box = document.getElementById("recipe-detail");
+        if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+      });
+    }, 120);
+  });
 }
 
 async function loadRecords() {
