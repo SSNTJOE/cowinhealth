@@ -68,11 +68,26 @@ const CRUSTACEAN_ALLERGY_TOKENS = new Set([
   "蟹",
 ]);
 
+const FISH_ALLERGY_TOKENS = new Set([
+  "魚",
+  "沙丁魚",
+  "石斑魚",
+  "虱目魚",
+  "鮪魚",
+  "鮭魚",
+  "鯉魚",
+  "鯛魚",
+  "鱈魚",
+  "鱸魚",
+  "章魚",
+  "魷魚",
+]);
+
 function canonicalizeAllergyLabel(label) {
   const text = String(label || "").trim();
   if (!text) return "";
   if (CRUSTACEAN_ALLERGY_TOKENS.has(text)) return "蝦蟹";
-  if (text.includes("魚")) return "魚";
+  if (FISH_ALLERGY_TOKENS.has(text) || text.includes("魚")) return "魚";
   return text;
 }
 

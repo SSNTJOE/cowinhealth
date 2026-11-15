@@ -19,11 +19,26 @@ object HealthFlags {
 
     private val CRUSTACEAN_TOKENS = setOf("蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹")
 
+    private val FISH_TOKENS = setOf(
+        "魚",
+        "沙丁魚",
+        "石斑魚",
+        "虱目魚",
+        "鮪魚",
+        "鮭魚",
+        "鯉魚",
+        "鯛魚",
+        "鱈魚",
+        "鱸魚",
+        "章魚",
+        "魷魚",
+    )
+
     fun canonicalizeAllergyLabel(label: String?): String? {
         val text = label?.trim().orEmpty()
         if (text.isEmpty()) return null
         if (text in CRUSTACEAN_TOKENS) return "蝦蟹"
-        if ("魚" in text) return "魚"
+        if (text in FISH_TOKENS || "魚" in text) return "魚"
         return text
     }
 

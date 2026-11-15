@@ -29,6 +29,25 @@ CRUSTACEAN_ALLERGY_TOKENS = frozenset(
     {"蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹"}
 )
 
+# Named fish (and related) tokens that map onto the 魚 checkbox.
+# Substring "魚" in canonicalize also covers other Recipe.xls species.
+FISH_ALLERGY_TOKENS = frozenset(
+    {
+        "魚",
+        "沙丁魚",
+        "石斑魚",
+        "虱目魚",
+        "鮪魚",
+        "鮭魚",
+        "鯉魚",
+        "鯛魚",
+        "鱈魚",
+        "鱸魚",
+        "章魚",
+        "魷魚",
+    }
+)
+
 CONDITION_SET = set(CONDITION_OPTIONS)
 
 
@@ -39,7 +58,7 @@ def canonicalize_allergy_label(label: str | None) -> str | None:
         return None
     if text in CRUSTACEAN_ALLERGY_TOKENS:
         return "蝦蟹"
-    if "魚" in text:
+    if text in FISH_ALLERGY_TOKENS or "魚" in text:
         return "魚"
     return text
 
