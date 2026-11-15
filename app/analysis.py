@@ -3439,6 +3439,9 @@ def analyze_tongue_grid(
 # Kim et al. (2002) Planckian locus: CCT -> xy -> XYZ (Y=1).
 # Bradford (sharpened von Kries) then maps that white onto D65.
 DEFAULT_COLOR_TEMPERATURE_K = 4200
+MIN_COLOR_TEMPERATURE_K = 2000
+MAX_COLOR_TEMPERATURE_K = 8000
+# Legacy discrete presets (Android UI); continuous Kelvin is preferred from the web client.
 COLOR_TEMPERATURE_CHOICES = (2700, 4200, 6500)
 _D65_XYZ = (0.95047, 1.0, 1.08883)
 _BRADFORD = (
@@ -3510,16 +3513,14 @@ _SRGB_TO_LINEAR = tuple(
 
 
 def normalize_color_temperature_k(value: int | float | str | None) -> int:
-    """Map a request to 暖光 2700K, 白光 4200K, or 冷光 6500K. Missing values stay at 4200K."""
+    """Clamp ambient CCT to 2000–8000K. Missing/invalid values stay at 4200K."""
     if value is None or value == "":
         return DEFAULT_COLOR_TEMPERATURE_K
     try:
         kelvin = int(round(float(str(value).strip())))
     except (TypeError, ValueError):
         return DEFAULT_COLOR_TEMPERATURE_K
-    if kelvin in COLOR_TEMPERATURE_CHOICES:
-        return kelvin
-    return min(COLOR_TEMPERATURE_CHOICES, key=lambda choice: abs(choice - kelvin))
+    return max(MIN_COLOR_TEMPERATURE_K, min(MAX_COLOR_TEMPERATURE_K, kelvin))
 
 
 def planckian_xy(cct: float) -> tuple[float, float]:
@@ -3561,13 +3562,15 @@ def _bradford_xyz_matrix(
     return _mat_mul(_BRADFORD_INV, scaled)
 
 
-def _rgb_adapt_matrix(cct: int) -> tuple[tuple[float, float, float], ...]:
+def _rgb_adapt_matrix(cct: int | float) -> tuple[tuple[float, float, float], ...]:
     x, y = planckian_xy(cct)
     adapt = _bradford_xyz_matrix(_xy_y_to_xyz(x, y), _D65_XYZ)
     return _mat_mul(_XYZ_TO_RGB, _mat_mul(adapt, _RGB_TO_XYZ))
 
 
-_RGB_ADAPT_MATRIX = {choice: _rgb_adapt_matrix(choice) for choice in COLOR_TEMPERATURE_CHOICES}
+_RGB_ADAPT_MATRIX: dict[int, tuple[tuple[float, float, float], ...]] = {
+    choice: _rgb_adapt_matrix(choice) for choice in COLOR_TEMPERATURE_CHOICES
+}
 
 
 def _linear_to_srgb_channel(channel: float) -> int:
@@ -3604,7 +3607,10 @@ def _adapt_rgb_pixel(
 def adapt_rgb_image(image: Image.Image, color_temperature_k: int | float | str | None) -> Image.Image:
     """Remove one shared illuminant cast. Local differences, including a yellower coat, stay."""
     cct = normalize_color_temperature_k(color_temperature_k)
-    matrix = _RGB_ADAPT_MATRIX[cct]
+    matrix = _RGB_ADAPT_MATRIX.get(cct)
+    if matrix is None:
+        matrix = _rgb_adapt_matrix(cct)
+        _RGB_ADAPT_MATRIX[cct] = matrix
     source = image.convert("RGB")
     adapted = [_adapt_rgb_pixel(r, g, b, matrix) for r, g, b in source.getdata()]
     out = Image.new("RGB", source.size)
