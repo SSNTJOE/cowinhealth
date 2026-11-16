@@ -21,17 +21,33 @@ object HealthFlags {
 
     private val FISH_TOKENS = setOf(
         "魚",
-        "沙丁魚",
-        "石斑魚",
-        "虱目魚",
+        "鯉魚",
+        "鯽魚",
+        "鱸魚",
+        "草魚",
+        "鰱魚",
+        "青魚",
+        "帶魚",
+        "黃魚",
+        "鯖魚",
         "鮪魚",
         "鮭魚",
-        "鯉魚",
-        "鯛魚",
         "鱈魚",
-        "鱸魚",
-        "章魚",
+        "鯛魚",
+        "秋刀魚",
+        "沙丁魚",
+        "鰻魚",
+        "鱔魚",
+        "虱目魚",
+        "石斑魚",
+        "比目魚",
+        "鯊魚",
+        "烏魚",
+        "鰹魚",
+        "吳郭魚",
+        "鮑魚",
         "魷魚",
+        "章魚", // no 魚 glyph; still treated as fish allergy token
     )
 
     fun canonicalizeAllergyLabel(label: String?): String? {
@@ -40,6 +56,16 @@ object HealthFlags {
         if (text in CRUSTACEAN_TOKENS) return "蝦蟹"
         if (text in FISH_TOKENS || "魚" in text) return "魚"
         return text
+    }
+
+    fun consolidateAllergyOptions(options: List<String>): List<String> {
+        val ordered = ArrayList<String>()
+        val seen = HashSet<String>()
+        for (label in options) {
+            val canon = canonicalizeAllergyLabel(label) ?: continue
+            if (seen.add(canon)) ordered.add(canon)
+        }
+        return ordered
     }
 
     fun jsonLabels(arr: JSONArray?): List<String> {

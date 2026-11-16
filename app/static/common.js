@@ -67,37 +67,60 @@ const CRUSTACEAN_ALLERGY_TOKENS = new Set([
   "螃蟹",
   "蟹",
 ]);
-
 const FISH_ALLERGY_TOKENS = new Set([
   "魚",
-  "沙丁魚",
-  "石斑魚",
-  "虱目魚",
+  "鯉魚",
+  "鯽魚",
+  "鱸魚",
+  "草魚",
+  "鰱魚",
+  "青魚",
+  "帶魚",
+  "黃魚",
+  "鯖魚",
   "鮪魚",
   "鮭魚",
-  "鯉魚",
-  "鯛魚",
   "鱈魚",
-  "鱸魚",
-  "章魚",
+  "鯛魚",
+  "秋刀魚",
+  "沙丁魚",
+  "鰻魚",
+  "鱔魚",
+  "虱目魚",
+  "石斑魚",
+  "比目魚",
+  "鯊魚",
+  "烏魚",
+  "鰹魚",
+  "吳郭魚",
+  "鮑魚",
   "魷魚",
+  "章魚",
 ]);
 
 function canonicalizeAllergyLabel(label) {
   const text = String(label || "").trim();
-  if (!text) return "";
+  if (!text) return null;
   if (CRUSTACEAN_ALLERGY_TOKENS.has(text)) return "蝦蟹";
   if (FISH_ALLERGY_TOKENS.has(text) || text.includes("魚")) return "魚";
   return text;
 }
 
-function normalizeAllergySelection(selected) {
-  const picked = new Set();
+function canonicalizeAllergySelection(selected) {
+  const picked = [];
+  const seen = new Set();
   for (const item of Array.isArray(selected) ? selected : []) {
     const canon = canonicalizeAllergyLabel(item);
-    if (canon) picked.add(canon);
+    if (canon && !seen.has(canon)) {
+      seen.add(canon);
+      picked.push(canon);
+    }
   }
-  return [...picked];
+  return picked;
+}
+
+function consolidateAllergyOptions(options) {
+  return canonicalizeAllergySelection(options);
 }
 
 async function loadHealthFlagOptions() {
@@ -107,7 +130,7 @@ async function loadHealthFlagOptions() {
       CONDITION_OPTIONS = data.conditions;
     }
     if (Array.isArray(data.allergies) && data.allergies.length) {
-      ALLERGY_OPTIONS = data.allergies;
+      ALLERGY_OPTIONS = consolidateAllergyOptions(data.allergies);
     }
   } catch (_err) {
     /* keep defaults if Recipe.xls is unavailable */
@@ -141,14 +164,15 @@ function fillHealthFlags(root, user) {
     CONDITION_OPTIONS,
     user && user.conditions,
   );
-  const allergyOpts =
+  const allergyOpts = consolidateAllergyOptions(
     user && Array.isArray(user.allergy_options) && user.allergy_options.length
       ? user.allergy_options
-      : ALLERGY_OPTIONS;
+      : ALLERGY_OPTIONS,
+  );
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
     allergyOpts,
-    normalizeAllergySelection(user && user.allergies),
+    canonicalizeAllergySelection(user && user.allergies),
   );
 }
 
@@ -254,7 +278,7 @@ const UI_I18N = {
     dietLink: "網路食療搜尋連結",
     acupointLink: "穴道按摩搜尋連結",
     recipeHeading: "今日食譜（教學示範）",
-    recipeNote: "國家欄只列出過濾後仍有食譜的國家，輸入開頭文字並選定（拉丁字母不分大小寫）。食譜欄點開即列出該國全部可用食譜，打字可再縮小。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。",
+    recipeNote: "國家欄只列出過濾後仍有食譜的國家，輸入開頭文字並選定（拉丁字母不分大小寫）。食譜欄點開即列出該國全部可用食譜，打字可再縮小；若找不到符合名稱，會顯示「搜尋中」，按 Enter 或「建立此食譜」會搜尋並建立資料。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。",
     recipeBodyAdvice: "依身體狀況建議",
     country: "國家",
     recipe: "食譜",
@@ -267,8 +291,9 @@ const UI_I18N = {
     emptyRecipesBody: "沒有符合今日檢測與過敏條件的食譜。",
     recipeSearching: "搜尋中",
     recipeEnsuring: "搜尋建立資料中",
-    recipeEnsureFailed: "無法建立食譜資料",
-    recipeEnsurePartial: "已建立（部分欄位待補）。教學示範，非中醫診斷。",
+    recipeCreateAction: "建立此食譜",
+    recipeEnsurePartial: "部分欄位未能從網路可靠取得，已留白，請人工核對。教學示範，非醫療建議。",
+    recipeEnsureFailed: "無法建立此食譜，請稍後再試。",
     fieldRecipe: "食譜",
     fieldMethod: "煮法",
     fieldBenefit: "益處",
@@ -294,9 +319,10 @@ const UI_I18N = {
     emptyRecipes: "No recipes pass the allergy filter.",
     emptyRecipesBody: "No recipes pass today’s reading and allergy filters.",
     recipeSearching: "Searching",
-    recipeEnsuring: "Searching and creating recipe data",
-    recipeEnsureFailed: "Could not create recipe data",
-    recipeEnsurePartial: "Created with partial fields. Teaching demo, not medical advice.",
+    recipeEnsuring: "Searching and creating data",
+    recipeCreateAction: "Create this recipe",
+    recipeEnsurePartial: "Some fields could not be filled reliably from the web and were left blank. Teaching demo, not medical advice.",
+    recipeEnsureFailed: "Could not create this recipe. Try again later.",
     fieldRecipe: "Recipe",
     fieldMethod: "Method",
     fieldBenefit: "Benefits",
@@ -322,9 +348,10 @@ const UI_I18N = {
     emptyRecipes: "アレルギー条件に合うレシピがありません。",
     emptyRecipesBody: "今日の検出とアレルギー条件に合うレシピがありません。",
     recipeSearching: "検索中",
-    recipeEnsuring: "検索・データ作成中",
-    recipeEnsureFailed: "レシピデータを作成できませんでした",
-    recipeEnsurePartial: "一部未記入で作成しました。教材デモであり診断ではありません。",
+    recipeEnsuring: "検索してデータを作成中",
+    recipeCreateAction: "このレシピを作成",
+    recipeEnsurePartial: "一部の欄はネットから確実に取れず空欄のままです。教材デモであり医療助言ではありません。",
+    recipeEnsureFailed: "このレシピを作成できませんでした。後でもう一度お試しください。",
     fieldRecipe: "レシピ",
     fieldMethod: "作り方",
     fieldBenefit: "益処",
@@ -350,9 +377,10 @@ const UI_I18N = {
     emptyRecipes: "알레르기 조건에 맞는 레시피가 없습니다.",
     emptyRecipesBody: "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다.",
     recipeSearching: "검색 중",
-    recipeEnsuring: "검색·자료 작성 중",
-    recipeEnsureFailed: "레시피 자료를 만들지 못했습니다",
-    recipeEnsurePartial: "일부 항목만 작성했습니다. 교육용이며 진단이 아닙니다.",
+    recipeEnsuring: "검색하며 데이터 작성 중",
+    recipeCreateAction: "이 레시피 만들기",
+    recipeEnsurePartial: "일부 항목은 웹에서 확실히 채우지 못해 비워 두었습니다. 교육용 시연이며 의료 조언이 아닙니다.",
+    recipeEnsureFailed: "이 레시피를 만들 수 없습니다. 나중에 다시 시도하세요.",
     fieldRecipe: "레시피",
     fieldMethod: "조리법",
     fieldBenefit: "유익",
