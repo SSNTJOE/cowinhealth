@@ -585,12 +585,7 @@ def api_recipes(
     return payload
 
 
-@app.post("/api/recipes/ensure")
-def api_recipes_ensure(
-    country: str = Form(...),
-    name: str = Form(...),
-    lang: str = Form("zh"),
-):
+def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
     """Find or create a recipe row for country + name; research fills columns when possible."""
     try:
         return ensure_recipe(country=country, name=name, lang=lang)
@@ -604,6 +599,25 @@ def api_recipes_ensure(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"寫入食譜資料失敗：{exc}") from exc
+
+
+@app.post("/api/recipes/ensure")
+def api_recipes_ensure(
+    country: str = Form(...),
+    name: str = Form(...),
+    lang: str = Form("zh"),
+):
+    return _api_recipes_create_or_ensure(country, name, lang)
+
+
+@app.post("/api/recipes/create")
+def api_recipes_create(
+    country: str = Form(...),
+    name: str = Form(...),
+    lang: str = Form("zh"),
+):
+    """Alias of /api/recipes/ensure — create when country+name is missing."""
+    return _api_recipes_create_or_ensure(country, name, lang)
 
 
 @app.post("/api/register")

@@ -315,6 +315,25 @@ th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: center;
   color: var(--muted);
   font-size: 14px;
 }
+.combo-create {
+  margin: 0;
+  padding: 4px 8px 8px;
+  border-top: 1px solid var(--line);
+}
+.combo-create-btn {
+  width: 100%;
+  text-align: left;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: #fffaf3;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.combo-create-btn:hover {
+  background: #fff4e5;
+}
 button.recipe-body-toggle {
   display: inline-flex;
   align-items: center;

@@ -1,18 +1,22 @@
-"""Ensure a recipe exists for country + name: match, research, append Recipe/Foods.xls."""
+"""Find or create a Recipe.xls row via best-effort public web research; sync Foods.xls."""
+
 from __future__ import annotations
 
 import json
 import os
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from html import unescape
+from typing import Callable
 
 from .config import ROOT
 from .recipes import (
     COLUMN_FIELDS,
+    NAME_FIELDS,
     RECIPE_PATH,
     TEACHING_DISCLAIMER,
     invalidate_recipe_cache,
@@ -23,541 +27,640 @@ from .recipes import (
 )
 
 FOODS_PATH = ROOT / "Foods.xls"
+SEARCH_TIMEOUT_SEC = 12
+USER_AGENT = "Health-ingRecipeBot/1.0 (teaching demo; contact: local)"
+CREATE_NOTE = "此列由網路公開資料自動彙整，欄位可能不完整；教學示範，非醫療建議。"
+PARTIAL_NOTE = "部分欄位未能從網路可靠取得，已標示留白，請人工核對。"
+
 FOOD_HEADERS = ("食材中文", "食材英文", "食材日文", "食材韓文", "益處", "禁忌", "元素表")
-RECIPE_HEADERS = tuple(header for _field, header in COLUMN_FIELDS)
-PARTIAL_NOTE = "網路資料不足或部分欄位待補。教學示範，非中醫診斷／營養處方。"
-RESEARCH_NOTE = "欄位依公開網頁整理，教學示範，非中醫診斷／營養處方。"
-UA = "Health-ing-teaching-demo/1.0 (recipe ensure; educational)"
-RESEARCH_TIMEOUT_SEC = 8
 
-# Same allergen ingredient tokens used when building Recipe.xls 過敏原.
-ALLERGEN_INGREDIENTS = {
-    "鯉魚", "鯽魚", "鱸魚", "草魚", "鰱魚", "青魚", "帶魚", "黃魚", "鯖魚", "鮪魚",
-    "鮭魚", "鱈魚", "鯛魚", "秋刀魚", "沙丁魚", "鰻魚", "鱔魚", "泥鰍", "虱目魚",
-    "石斑魚", "比目魚", "鯊魚", "白鯧", "烏魚", "鰹魚", "吳郭魚", "魚",
-    "蝦", "蝦米", "龍蝦", "螃蟹",
-    "蛤蜊", "牡蠣", "蜆", "淡菜", "干貝", "鮑魚", "章魚", "魷魚", "烏賊",
-    "海蜇", "田螺", "蟶子", "海參", "海膽",
-    "雞蛋", "蛋白", "蛋黃", "鴨蛋", "皮蛋", "鵪鶉蛋",
-    "牛奶", "羊奶", "奶油", "起司", "優格",
-    "小麥", "大麥", "燕麥",
-    "黃豆", "黑豆", "豆腐", "豆漿", "豆干", "腐竹", "納豆", "醬油", "毛豆", "黃豆芽", "味噌",
-    "花生", "花生油",
-    "杏仁果", "腰果", "夏威夷豆", "核桃", "松子", "栗子", "甜杏仁", "北杏仁", "白果",
-    "黑芝麻", "白芝麻", "麻油", "南瓜子", "葵花子", "亞麻仁",
-    "蕎麥", "芹菜", "西洋芹", "芥末", "芥菜", "山葵", "醋", "黃酒", "葡萄酒",
-}
+ALLERGEN_FOODS = frozenset(
+    {
+        "鯉魚", "鯽魚", "鱸魚", "草魚", "鰱魚", "青魚", "帶魚", "黃魚", "鯖魚", "鮪魚",
+        "鮭魚", "鱈魚", "鯛魚", "秋刀魚", "沙丁魚", "鰻魚", "鱔魚", "泥鰍", "虱目魚",
+        "石斑魚", "比目魚", "鯊魚", "白鯧", "烏魚", "鰹魚", "吳郭魚", "蝦", "蝦米",
+        "龍蝦", "螃蟹", "蛤蜊", "牡蠣", "蜆", "淡菜", "干貝", "鮑魚", "章魚", "魷魚",
+        "烏賊", "海蜇", "田螺", "蟶子", "海參", "海膽", "雞蛋", "蛋白", "蛋黃", "鴨蛋",
+        "皮蛋", "鵪鶉蛋", "牛奶", "羊奶", "奶油", "起司", "優格", "小麥", "大麥", "燕麥",
+        "黃豆", "黑豆", "豆腐", "豆漿", "豆干", "腐竹", "納豆", "醬油", "毛豆", "黃豆芽",
+        "味噌", "花生", "花生油", "杏仁果", "腰果", "夏威夷豆", "核桃", "松子", "栗子",
+        "甜杏仁", "北杏仁", "白果", "黑芝麻", "白芝麻", "麻油", "南瓜子", "葵花子",
+        "亞麻仁", "蕎麥", "芹菜", "西洋芹", "芥末", "芥菜", "山葵", "醋", "黃酒", "葡萄酒",
+    }
+)
 
-_ensure_lock = threading.Lock()
-_inflight: dict[tuple[str, str], threading.Event] = {}
-_workbook_lock = threading.Lock()
+_WRITE_LOCK = threading.Lock()
+_ING_RE = re.compile(r"^(.+?)\s+(\d+(?:\.\d+)?)\s*克$")
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 
-def _norm_name(text: str | None) -> str:
-    return re.sub(r"\s+", "", (text or "").strip()).casefold()
+ResearchFn = Callable[[str, str, str], dict[str, str | list[tuple[str, int]] | bool]]
 
 
-def _ensure_key(country: str, name: str) -> tuple[str, str]:
-    return ((country or "").strip().casefold(), _norm_name(name))
+def ensure_recipe(
+    country: str,
+    name: str,
+    lang: str = "zh",
+    *,
+    research_fn: ResearchFn | None = None,
+) -> dict:
+    """Return existing recipe or append a researched row. Never overwrites same country+name."""
+    wanted_country = (country or "").strip()
+    wanted_name = (name or "").strip()
+    if not wanted_country:
+        raise ValueError("請選擇國家")
+    if not wanted_name:
+        raise ValueError("請輸入食譜名稱")
+    lang = normalize_lang(lang)
+
+    existing = _find_existing(wanted_country, wanted_name, lang)
+    if existing is not None:
+        return {
+            "created": False,
+            "partial": False,
+            "recipe": public_recipe(existing, lang, 0),
+            "foods_added": [],
+            "note": "",
+            "disclaimer": TEACHING_DISCLAIMER,
+        }
+
+    if not _WRITE_LOCK.acquire(blocking=False):
+        raise RuntimeError("另一筆食譜正在建立中，請稍後再試")
+    try:
+        # Re-check under lock in case a parallel request just wrote.
+        invalidate_recipe_cache()
+        existing = _find_existing(wanted_country, wanted_name, lang)
+        if existing is not None:
+            return {
+                "created": False,
+                "partial": False,
+                "recipe": public_recipe(existing, lang, 0),
+                "foods_added": [],
+                "note": "",
+                "disclaimer": TEACHING_DISCLAIMER,
+            }
+
+        research = (research_fn or research_dish)(wanted_country, wanted_name, lang)
+        fields = build_row_fields(wanted_country, wanted_name, lang, research)
+        foods_added = sync_foods_for_ingredients(fields.get("recipe") or "")
+        # Enrich benefit/ban/nutrient from Foods.xls when ingredients matched.
+        fields = enrich_from_foods(fields)
+        row = append_recipe_row(fields)
+        invalidate_recipe_cache()
+        partial = bool(research.get("partial")) or _is_partial(fields)
+        note_parts = [CREATE_NOTE]
+        if partial:
+            note_parts.append(PARTIAL_NOTE)
+        return {
+            "created": True,
+            "partial": partial,
+            "recipe": public_recipe(row, lang, 0),
+            "foods_added": foods_added,
+            "note": " ".join(note_parts),
+            "disclaimer": TEACHING_DISCLAIMER,
+        }
+    finally:
+        _WRITE_LOCK.release()
 
 
-def find_recipe_row(country: str, name: str) -> dict[str, str] | None:
-    wanted = (country or "").strip()
-    needle = _norm_name(name)
-    if not wanted or not needle:
-        return None
+def _find_existing(country: str, name: str, lang: str) -> dict[str, str] | None:
+    needle = name.casefold()
+    name_field = NAME_FIELDS.get(lang, "name_zh")
     for row in recipe_rows():
-        if (row.get("country") or "").strip() != wanted:
+        if (row.get("country") or "") != country:
             continue
-        for field in ("name_zh", "name_en", "name_ja", "name_ko"):
-            if _norm_name(row.get(field)) == needle:
+        candidates = [
+            row.get(name_field) or "",
+            row.get("name_zh") or "",
+            row.get("name_en") or "",
+            row.get("name_ja") or "",
+            row.get("name_ko") or "",
+            localized_name(row, lang),
+        ]
+        for label in candidates:
+            if label and label.strip().casefold() == needle:
                 return row
-        if _norm_name(localized_name(row, "zh")) == needle:
-            return row
     return None
 
 
-def _open_sheet(path):
+def build_row_fields(
+    country: str,
+    name: str,
+    lang: str,
+    research: dict,
+) -> dict[str, str]:
+    names = {
+        "name_zh": str(research.get("name_zh") or (name if lang == "zh" else "")).strip(),
+        "name_en": str(research.get("name_en") or (name if lang == "en" else "")).strip(),
+        "name_ja": str(research.get("name_ja") or (name if lang == "ja" else "")).strip(),
+        "name_ko": str(research.get("name_ko") or (name if lang == "ko" else "")).strip(),
+    }
+    if not names["name_zh"] and lang == "zh":
+        names["name_zh"] = name
+    if not any(names.values()):
+        names[NAME_FIELDS.get(lang, "name_zh")] = name
+
+    ingredients = research.get("ingredients") or []
+    if isinstance(ingredients, str):
+        recipe_text = ingredients.strip()
+        pairs = parse_ingredient_text(recipe_text)
+    else:
+        pairs = [(str(n).strip(), int(g)) for n, g in ingredients if str(n).strip()]
+        recipe_text = format_ingredients(pairs) if pairs else ""
+
+    allergens = str(research.get("allergens") or "").strip()
+    if not allergens and pairs:
+        allergens = "、".join(n for n, _g in pairs if n in ALLERGEN_FOODS)
+
+    return {
+        "country": country,
+        "name_zh": names["name_zh"],
+        "name_en": names["name_en"],
+        "name_ja": names["name_ja"],
+        "name_ko": names["name_ko"],
+        "recipe": recipe_text,
+        "method": str(research.get("method") or "").strip(),
+        "benefit": str(research.get("benefit") or "").strip(),
+        "ban": str(research.get("ban") or "").strip(),
+        "nutrient": str(research.get("nutrient") or "").strip(),
+        "allergens": allergens,
+    }
+
+
+def _is_partial(fields: dict[str, str]) -> bool:
+    return not (fields.get("recipe") and fields.get("method"))
+
+
+def format_ingredients(pairs: list[tuple[str, int]]) -> str:
+    return "、".join(f"{name} {gram}克" for name, gram in pairs)
+
+
+def parse_ingredient_text(text: str) -> list[tuple[str, int]]:
+    pairs: list[tuple[str, int]] = []
+    for part in (text or "").split("、"):
+        piece = part.strip()
+        if not piece:
+            continue
+        match = _ING_RE.match(piece)
+        if not match:
+            continue
+        try:
+            gram = int(round(float(match.group(2))))
+        except ValueError:
+            continue
+        if gram > 0:
+            pairs.append((match.group(1).strip(), gram))
+    return pairs
+
+
+def research_dish(country: str, name: str, lang: str) -> dict:
+    """Best-effort Wikipedia / public-page research. Prefer fetched text over invention."""
+    query = f"{country} {name} 食譜".strip() if lang == "zh" else f"{name} {country} recipe"
+    snippets: list[str] = []
+    titles: dict[str, str] = {}
+    partial = True
+    try:
+        for wiki_lang in _wiki_langs(lang):
+            hits = _wiki_search(name, wiki_lang)
+            if not hits and name != query:
+                hits = _wiki_search(query, wiki_lang)
+            for title in hits[:2]:
+                summary = _wiki_summary(title, wiki_lang)
+                if not summary:
+                    continue
+                extract = str(summary.get("extract") or "").strip()
+                display = str(summary.get("title") or title).strip()
+                if extract:
+                    snippets.append(extract)
+                if display:
+                    titles[wiki_lang] = display
+                if extract:
+                    partial = False
+                    break
+            if snippets:
+                break
+    except TimeoutError:
+        raise
+    except Exception:
+        # Keep going with whatever we gathered; incomplete is OK.
+        pass
+
+    blob = "\n".join(snippets)
+    food_index = load_food_name_index()
+    pairs = extract_ingredients_from_text(blob, food_index)
+    if not pairs:
+        # Fall back to a minimal placeholder so the row is usable and Foods sync can skip.
+        recipe_text = ""
+        method = ""
+        partial = True
+    else:
+        pairs = _normalize_grams(pairs, total=500)
+        recipe_text = format_ingredients(pairs)
+        method = _method_from_extract(blob, pairs) or _simple_method(pairs)
+        partial = False
+
+    benefit = ""
+    ban = ""  # Never invent medical contraindications from web blurbs.
+    nutrient = ""
+    if pairs:
+        # Will be filled from Foods.xls after sync in enrich_from_foods.
+        pass
+
+    names = {
+        "name_zh": titles.get("zh", name if lang == "zh" else ""),
+        "name_en": titles.get("en", name if lang == "en" else ""),
+        "name_ja": titles.get("ja", name if lang == "ja" else ""),
+        "name_ko": titles.get("ko", name if lang == "ko" else ""),
+    }
+    if lang == "zh" and not names["name_zh"]:
+        names["name_zh"] = name
+    elif lang == "en" and not names["name_en"]:
+        names["name_en"] = name
+    elif lang == "ja" and not names["name_ja"]:
+        names["name_ja"] = name
+    elif lang == "ko" and not names["name_ko"]:
+        names["name_ko"] = name
+
+    source_bit = (snippets[0][:180] + "…") if snippets else ""
+    if source_bit and not method:
+        method = f"參考公開資料摘要：{source_bit}"
+        partial = True
+
+    return {
+        **names,
+        "ingredients": recipe_text,
+        "method": method,
+        "benefit": benefit,
+        "ban": ban,
+        "nutrient": nutrient,
+        "allergens": "、".join(n for n, _g in pairs if n in ALLERGEN_FOODS) if pairs else "",
+        "partial": partial,
+        "source": source_bit,
+    }
+
+
+def _wiki_langs(lang: str) -> tuple[str, ...]:
+    primary = normalize_lang(lang)
+    order = [primary]
+    for extra in ("zh", "en", "ja", "ko"):
+        if extra not in order:
+            order.append(extra)
+    return tuple(order)
+
+
+def _http_json(url: str, timeout: float = SEARCH_TIMEOUT_SEC) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {}
+        if exc.code >= 500:
+            raise TimeoutError("網路搜尋逾時或失敗") from exc
+        raise
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        raise TimeoutError("網路搜尋逾時或失敗") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("網路搜尋回應無法解析") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def _wiki_search(query: str, wiki_lang: str) -> list[str]:
+    params = urllib.parse.urlencode(
+        {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": 5,
+            "format": "json",
+            "utf8": 1,
+        }
+    )
+    url = f"https://{wiki_lang}.wikipedia.org/w/api.php?{params}"
+    data = _http_json(url)
+    hits = (((data.get("query") or {}).get("search")) or [])
+    return [str(item.get("title") or "").strip() for item in hits if item.get("title")]
+
+
+def _wiki_summary(title: str, wiki_lang: str) -> dict:
+    encoded = urllib.parse.quote(title.replace(" ", "_"), safe="")
+    url = f"https://{wiki_lang}.wikipedia.org/api/rest_v1/page/summary/{encoded}"
+    data = _http_json(url)
+    return data
+
+
+def load_food_name_index() -> dict[str, dict[str, str]]:
+    """Map 食材中文 / other language names -> food row fields."""
     import xlrd
 
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-    return xlrd.open_workbook(str(path)).sheet_by_index(0)
+    if not FOODS_PATH.exists():
+        raise FileNotFoundError(str(FOODS_PATH))
+    sheet = xlrd.open_workbook(str(FOODS_PATH)).sheet_by_index(0)
+    headers = [str(sheet.cell_value(0, col)).strip() for col in range(min(sheet.ncols, 7))]
+    index = {name: pos for pos, name in enumerate(headers)}
 
+    def cell(row: int, header: str) -> str:
+        col = index.get(header)
+        if col is None:
+            return ""
+        return str(sheet.cell_value(row, col)).strip()
 
-def _sheet_matrix(path) -> tuple[list[str], list[list[str]]]:
-    sheet = _open_sheet(path)
-    headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
-    rows: list[list[str]] = []
+    foods: dict[str, dict[str, str]] = {}
     for row in range(1, sheet.nrows):
-        rows.append([str(sheet.cell_value(row, col)).strip() for col in range(sheet.ncols)])
-    return headers, rows
+        zh = cell(row, "食材中文")
+        if not zh:
+            continue
+        item = {
+            "name_zh": zh,
+            "name_en": cell(row, "食材英文"),
+            "name_ja": cell(row, "食材日文"),
+            "name_ko": cell(row, "食材韓文"),
+            "benefit": cell(row, "益處"),
+            "ban": cell(row, "禁忌"),
+            "nutrient": cell(row, "元素表"),
+        }
+        foods[zh] = item
+        for key in ("name_en", "name_ja", "name_ko"):
+            alias = item[key]
+            if alias and alias not in foods:
+                foods[alias] = item
+    return foods
 
 
-def _header_style():
+def extract_ingredients_from_text(
+    text: str,
+    food_index: dict[str, dict[str, str]],
+) -> list[tuple[str, int]]:
+    """Pick known Foods.xls names that appear in fetched text (longest-first)."""
+    if not text:
+        return []
+    cleaned = _TAG_RE.sub(" ", unescape(text))
+    cleaned = _WS_RE.sub(" ", cleaned)
+    # Prefer Chinese canonical names; longest match wins.
+    names = sorted(
+        {item["name_zh"] for item in food_index.values() if item.get("name_zh")},
+        key=len,
+        reverse=True,
+    )
+    found: list[str] = []
+    remaining = cleaned
+    for name in names:
+        if len(name) < 2:
+            continue
+        if name in remaining:
+            found.append(name)
+            remaining = remaining.replace(name, " ", 1)
+        if len(found) >= 8:
+            break
+    if not found:
+        return []
+    # Equal split toward 500g teaching total.
+    base = 500 // len(found)
+    rem = 500 - base * len(found)
+    pairs: list[tuple[str, int]] = []
+    for i, name in enumerate(found):
+        pairs.append((name, base + (1 if i < rem else 0)))
+    return pairs
+
+
+def _normalize_grams(pairs: list[tuple[str, int]], total: int = 500) -> list[tuple[str, int]]:
+    if not pairs:
+        return []
+    current = sum(g for _n, g in pairs)
+    if current == total:
+        return pairs
+    if current <= 0:
+        base = total // len(pairs)
+        rem = total - base * len(pairs)
+        return [(n, base + (1 if i < rem else 0)) for i, (n, _g) in enumerate(pairs)]
+    scaled = [(n, max(1, int(round(g * total / current)))) for n, g in pairs]
+    drift = total - sum(g for _n, g in scaled)
+    if scaled:
+        name, gram = scaled[-1]
+        scaled[-1] = (name, max(1, gram + drift))
+    return scaled
+
+
+def _method_from_extract(blob: str, pairs: list[tuple[str, int]]) -> str:
+    if not blob:
+        return ""
+    # Keep a short cooking-oriented slice if the extract mentions preparation words.
+    markers = ("作法", "做法", "煮法", "烹調", "烹调", "prepare", "cook", "method")
+    lower = blob.lower()
+    if not any(m.lower() in lower or m in blob for m in markers):
+        return ""
+    short = blob.strip()
+    if len(short) > 400:
+        short = short[:400].rstrip() + "…"
+    names = "、".join(n for n, _g in pairs[:6])
+    return f"依公開資料整理：準備{names}等材料。{short}"
+
+
+def _simple_method(pairs: list[tuple[str, int]]) -> str:
+    names = "、".join(f"{n}{g}克" for n, g in pairs)
+    return f"洗淨備料（{names}），依常法加熱至熟透後調味盛盤。教學示範煮法，請依實際食材調整。"
+
+
+def enrich_from_foods(fields: dict[str, str]) -> dict[str, str]:
+    pairs = parse_ingredient_text(fields.get("recipe") or "")
+    if not pairs:
+        return fields
+    try:
+        foods = load_food_name_index()
+    except FileNotFoundError:
+        return fields
+    benefit_parts: list[str] = []
+    ban_parts: list[str] = []
+    nutrient_parts: list[str] = []
+    for name, _gram in pairs:
+        item = foods.get(name)
+        if not item:
+            continue
+        if item.get("benefit"):
+            benefit_parts.append(f"{name}:{item['benefit']}")
+        if item.get("ban"):
+            ban_parts.append(f"{name}:{item['ban']}")
+        if item.get("nutrient"):
+            nutrient_parts.append(f"{name}:{item['nutrient']}")
+    if benefit_parts and not fields.get("benefit"):
+        fields["benefit"] = ";".join(benefit_parts)
+    if ban_parts and not fields.get("ban"):
+        fields["ban"] = ";".join(ban_parts)
+    if nutrient_parts and not fields.get("nutrient"):
+        fields["nutrient"] = ";".join(nutrient_parts)
+    if not fields.get("allergens"):
+        fields["allergens"] = "、".join(n for n, _g in pairs if n in ALLERGEN_FOODS)
+    return fields
+
+
+def sync_foods_for_ingredients(recipe_text: str) -> list[str]:
+    """Append missing ingredient rows to Foods.xls. Returns newly added 中文 names."""
+    pairs = parse_ingredient_text(recipe_text)
+    if not pairs:
+        return []
+    import xlrd
     import xlwt
 
-    return xlwt.easyxf(
+    if not FOODS_PATH.exists():
+        raise FileNotFoundError(str(FOODS_PATH))
+
+    book = xlrd.open_workbook(str(FOODS_PATH))
+    sheet = book.sheet_by_index(0)
+    headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
+    # Preserve whatever columns exist; we only require the standard 7 when appending.
+    rows: list[list] = []
+    existing_zh: set[str] = set()
+    zh_col = headers.index("食材中文") if "食材中文" in headers else 0
+    for row in range(1, sheet.nrows):
+        values = [_cell(sheet, row, col) for col in range(sheet.ncols)]
+        rows.append(values)
+        zh = str(values[zh_col]).strip() if zh_col < len(values) else ""
+        if zh:
+            existing_zh.add(zh)
+
+    added: list[str] = []
+    width = max(len(headers), len(FOOD_HEADERS))
+    for name, _gram in pairs:
+        if name in existing_zh:
+            continue
+        new_row = [""] * width
+        mapping = {
+            "食材中文": name,
+            "食材英文": "",
+            "食材日文": "",
+            "食材韓文": "",
+            "益處": "",
+            "禁忌": "",
+            "元素表": "網路搜尋待補（教學示範）",
+        }
+        for col, header in enumerate(headers):
+            if header in mapping:
+                new_row[col] = mapping[header]
+        if "食材中文" not in headers and width >= 1:
+            new_row[0] = name
+        rows.append(new_row)
+        existing_zh.add(name)
+        added.append(name)
+
+    if not added:
+        return []
+
+    out = xlwt.Workbook(encoding="utf-8")
+    out_sheet = out.add_sheet(sheet.name or "食材")
+    header_style, cell_style = _xls_styles()
+    for col, header in enumerate(headers):
+        out_sheet.write(0, col, header, header_style)
+        out_sheet.col(col).width = 256 * (28 if col < 4 else 55)
+    for row_index, values in enumerate(rows, start=1):
+        for col, value in enumerate(values):
+            out_sheet.write(row_index, col, value, cell_style)
+    _save_xls(out, FOODS_PATH)
+    return added
+
+
+def append_recipe_row(fields: dict[str, str]) -> dict[str, str]:
+    """Append one Recipe.xls row and return the in-memory row dict recipes() can read."""
+    import xlrd
+    import xlwt
+
+    if not RECIPE_PATH.exists():
+        raise FileNotFoundError(str(RECIPE_PATH))
+
+    book = xlrd.open_workbook(str(RECIPE_PATH))
+    sheet = book.sheet_by_index(0)
+    headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
+    for _field, header in COLUMN_FIELDS:
+        if header not in headers:
+            raise RuntimeError(f"Recipe.xls 缺少欄位：{header}")
+
+    existing_rows = [
+        [_cell(sheet, row, col) for col in range(sheet.ncols)]
+        for row in range(1, sheet.nrows)
+    ]
+    new_values = [""] * sheet.ncols
+    field_to_header = {field: header for field, header in COLUMN_FIELDS}
+    for field, header in field_to_header.items():
+        col = headers.index(header)
+        new_values[col] = fields.get(field) or ""
+    existing_rows.append(new_values)
+
+    out = xlwt.Workbook(encoding="utf-8")
+    out_sheet = out.add_sheet(sheet.name or "食譜")
+    header_style, cell_style = _xls_styles()
+    widths = [28, 22, 36, 28, 24, 78, 55, 55, 80, 28, 28]
+    for col, header in enumerate(headers):
+        out_sheet.write(0, col, header, header_style)
+        out_sheet.col(col).width = 256 * (widths[col] if col < len(widths) else 28)
+    out_sheet.panes_frozen = True
+    out_sheet.horz_split_pos = 1
+    for row_index, values in enumerate(existing_rows, start=1):
+        for col, value in enumerate(values):
+            out_sheet.write(row_index, col, value, cell_style)
+    _save_xls(out, RECIPE_PATH)
+
+    row_id = str(len(existing_rows))  # 1-based data row index matches recipe_rows ids
+    item = {"id": row_id, "_headers": "\t".join(headers)}
+    for field, header in COLUMN_FIELDS:
+        col = headers.index(header)
+        item[field] = str(new_values[col]).strip()
+    return item
+
+
+def _cell(sheet, row: int, col: int):
+    import xlrd
+
+    cell = sheet.cell(row, col)
+    if cell.ctype == xlrd.XL_CELL_NUMBER:
+        value = cell.value
+        if value == int(value):
+            return int(value)
+        return value
+    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+        return ""
+    return cell.value
+
+
+def _xls_styles():
+    import xlwt
+
+    header_style = xlwt.easyxf(
         "font: name 微軟正黑體, bold on, height 240, colour white;"
         "align: horiz center, vert center, wrap on;"
         "pattern: pattern solid, fore_colour gray80;"
         "borders: left thin, right thin, top thin, bottom thin"
     )
-
-
-def _cell_style():
-    import xlwt
-
-    return xlwt.easyxf(
+    cell_style = xlwt.easyxf(
         "font: name 微軟正黑體, height 200;"
         "align: vert top, wrap on;"
         "borders: left thin, right thin, top thin, bottom thin"
     )
+    return header_style, cell_style
 
 
-def _safe_replace(tmp_path, final_path) -> str:
-    new_path = str(final_path) + ".new"
-    os.replace(tmp_path, new_path)
-    try:
-        os.replace(new_path, str(final_path))
-        return str(final_path)
-    except OSError:
-        # Leave .new beside the locked workbook so data is not lost.
-        return new_path
-
-
-def _write_xls(path, sheet_name: str, headers: list[str], rows: list[list[str]], widths: list[int]) -> str:
-    import xlwt
-
-    book = xlwt.Workbook(encoding="utf-8")
-    sheet = book.add_sheet(sheet_name)
-    header_style = _header_style()
-    cell_style = _cell_style()
-    for col, header in enumerate(headers):
-        sheet.write(0, col, header, header_style)
-        width = widths[col] if col < len(widths) else 28
-        sheet.col(col).width = 256 * width
-    sheet.panes_frozen = True
-    sheet.horz_split_pos = 1
-    for row_index, values in enumerate(rows, start=1):
-        for col, value in enumerate(values):
-            sheet.write(row_index, col, value if value is not None else "", cell_style)
-    tmp_path = str(path) + ".writing"
+def _save_xls(book, path) -> None:
+    tmp_path = str(path) + f".tmp-{os.getpid()}-{int(time.time() * 1000)}"
     book.save(tmp_path)
-    return _safe_replace(tmp_path, path)
-
-
-def _http_json(url: str, timeout: float = RESEARCH_TIMEOUT_SEC) -> Any | None:
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        return json.loads(raw)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError, OSError):
-        return None
-
-
-def _wiki_opensearch(lang: str, query: str) -> str | None:
-    params = urllib.parse.urlencode(
-        {
-            "action": "opensearch",
-            "search": query,
-            "limit": 1,
-            "namespace": 0,
-            "format": "json",
-        }
-    )
-    data = _http_json(f"https://{lang}.wikipedia.org/w/api.php?{params}")
-    if not isinstance(data, list) or len(data) < 2:
-        return None
-    titles = data[1]
-    if not isinstance(titles, list) or not titles:
-        return None
-    title = str(titles[0] or "").strip()
-    return title or None
-
-
-def _wiki_summary(lang: str, title: str) -> dict[str, str]:
-    encoded = urllib.parse.quote(title.replace(" ", "_"), safe="")
-    data = _http_json(f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{encoded}")
-    if not isinstance(data, dict):
-        return {}
-    extract = str(data.get("extract") or "").strip()
-    display = str(data.get("title") or title).strip()
-    desc = str(data.get("description") or "").strip()
-    return {"title": display, "extract": extract, "description": desc, "lang": lang}
-
-
-def research_dish(country: str, name: str, lang: str) -> dict[str, Any]:
-    """Best-effort public-web research. Never invent medical / TCM claims."""
-    lang = normalize_lang(lang)
-    queries = [
-        f"{name} {country}",
-        f"{name} 食譜",
-        f"{name} recipe",
-        name,
-    ]
-    summaries: list[dict[str, str]] = []
-    for wiki_lang in ("zh", "en", "ja", "ko"):
-        for query in queries:
-            title = _wiki_opensearch(wiki_lang, query)
-            if not title:
-                continue
-            summary = _wiki_summary(wiki_lang, title)
-            if summary.get("extract") or summary.get("title"):
-                summaries.append(summary)
-                break
-        if len(summaries) >= 2:
-            break
-
-    names = {"zh": "", "en": "", "ja": "", "ko": ""}
-    names[lang] = name.strip()
-    for summary in summaries:
-        wlang = summary.get("lang") or ""
-        title = summary.get("title") or ""
-        if wlang in names and title and not names[wlang]:
-            names[wlang] = title
-    if not names["zh"]:
-        names["zh"] = name.strip() if lang == "zh" else (summaries[0].get("title") if summaries else name.strip())
-    if not names["en"] and summaries:
-        for summary in summaries:
-            if summary.get("lang") == "en" and summary.get("title"):
-                names["en"] = summary["title"]
-                break
-    if not names["en"]:
-        names["en"] = name.strip() if lang == "en" else ""
-
-    extract = ""
-    for summary in summaries:
-        if summary.get("extract"):
-            extract = summary["extract"]
-            break
-
-    ingredients = _guess_ingredients(extract, name)
-    method = _guess_method(extract, ingredients)
-    researched = bool(summaries) or bool(ingredients)
-    return {
-        "names": names,
-        "extract": extract,
-        "ingredients": ingredients,
-        "method": method,
-        "researched": researched,
-        "note": RESEARCH_NOTE if researched else PARTIAL_NOTE,
-    }
-
-
-def _guess_ingredients(extract: str, dish_name: str) -> list[tuple[str, int]]:
-    """Parse light ingredient hints; fall back to empty rather than inventing TCM data."""
-    del dish_name
-    text = extract or ""
-    found: list[str] = []
-    # Common Chinese food tokens already in Foods.xls / recipes.
-    candidates = [
-        "粳米", "糙米", "糯米", "小米", "麵粉", "雞蛋", "雞肉", "豬肉", "牛肉", "羊肉",
-        "洋蔥", "大蒜", "生薑", "蔥", "番茄", "胡蘿蔔", "馬鈴薯", "地瓜", "高麗菜",
-        "菠菜", "豆腐", "黃豆", "花生", "食鹽", "醬油", "麻油", "花生油", "橄欖油",
-        "牛奶", "奶油", "起司", "優格", "魚", "蝦", "螃蟹", "白米", "米飯",
-    ]
-    for token in candidates:
-        if token in text and token not in found:
-            found.append(token)
-    if not found:
-        return []
-    # Teaching demo portioning toward ~500 g when possible.
-    base = max(40, 500 // max(1, len(found)))
-    pairs = [(name, base) for name in found]
-    total = sum(gram for _, gram in pairs)
-    if pairs and total != 500:
-        name, gram = pairs[0]
-        pairs[0] = (name, max(1, gram + (500 - total)))
-    return pairs
-
-
-def _guess_method(extract: str, ingredients: list[tuple[str, int]]) -> str:
-    if ingredients:
-        joined = "、".join(f"{name}{gram}克" for name, gram in ingredients)
-        tip = (extract or "").strip().replace("\n", " ")
-        if tip:
-            tip = tip[:180] + ("…" if len(tip) > 180 else "")
-            return f"教學示範煮法：備齊{joined}。參考公開介紹：{tip}（非中醫診斷）"
-        return f"教學示範煮法：備齊{joined}，依慣常方式烹調至熟。（非中醫診斷）"
-    tip = (extract or "").strip().replace("\n", " ")
-    if tip:
-        return f"教學示範煮法（待補克數）：{tip[:220]}{'…' if len(tip) > 220 else ''}（非中醫診斷）"
-    return ""
-
-
-def _format_recipe_cell(ingredients: list[tuple[str, int]]) -> str:
-    if not ingredients:
-        return ""
-    return "、".join(f"{name} {gram}克" for name, gram in ingredients)
-
-
-def _load_foods_index() -> tuple[list[str], list[list[str]], dict[str, dict[str, str]]]:
-    headers, rows = _sheet_matrix(FOODS_PATH)
-    # Expect first 7 columns as FOOD_HEADERS; keep extra columns if any.
-    foods: dict[str, dict[str, str]] = {}
-    for values in rows:
-        padded = list(values) + [""] * max(0, 7 - len(values))
-        zh = padded[0]
-        if not zh:
-            continue
-        foods[zh] = {
-            "en": padded[1],
-            "ja": padded[2],
-            "ko": padded[3],
-            "benefit": padded[4],
-            "ban": padded[5],
-            "nutrient": padded[6],
-        }
-    return headers, rows, foods
-
-
-def _join_food_field(ingredients: list[tuple[str, int]], foods: dict[str, dict[str, str]], field: str) -> str:
-    parts: list[str] = []
-    for name, _gram in ingredients:
-        text = (foods.get(name) or {}).get(field) or ""
-        if text:
-            parts.append(f"{name}:{text}")
-    return ";".join(parts)
-
-
-def _allergen_cell(ingredients: list[tuple[str, int]]) -> str:
-    labels = [name for name, _gram in ingredients if name in ALLERGEN_INGREDIENTS]
-    return "、".join(labels)
-
-
-def _append_missing_foods(
-    headers: list[str],
-    rows: list[list[str]],
-    foods: dict[str, dict[str, str]],
-    ingredients: list[tuple[str, int]],
-) -> list[str]:
-    added: list[str] = []
-    for name, _gram in ingredients:
-        if name in foods:
-            continue
-        row = [name, "", "", "", "", "", f"待補；{PARTIAL_NOTE}"]
-        # Pad to header width.
-        if len(headers) > len(row):
-            row.extend([""] * (len(headers) - len(row)))
-        rows.append(row[: len(headers)])
-        foods[name] = {
-            "en": "",
-            "ja": "",
-            "ko": "",
-            "benefit": "",
-            "ban": "",
-            "nutrient": row[6],
-        }
-        added.append(name)
-    return added
-
-
-def _build_recipe_values(
-    country: str,
-    names: dict[str, str],
-    ingredients: list[tuple[str, int]],
-    method: str,
-    foods: dict[str, dict[str, str]],
-    note: str,
-) -> list[str]:
-    recipe_cell = _format_recipe_cell(ingredients)
-    benefit = _join_food_field(ingredients, foods, "benefit")
-    ban = _join_food_field(ingredients, foods, "ban")
-    nutrient = _join_food_field(ingredients, foods, "nutrient")
-    if not nutrient:
-        nutrient = note
-    elif note and note not in nutrient:
-        nutrient = nutrient + "；" + note
-    if not method:
-        method = note
-    allergens = _allergen_cell(ingredients)
-    return [
-        country.strip(),
-        names.get("zh") or "",
-        names.get("en") or "",
-        names.get("ja") or "",
-        names.get("ko") or "",
-        recipe_cell,
-        method,
-        benefit,
-        ban,
-        nutrient,
-        allergens,
-    ]
-
-
-def _append_recipe_and_foods(
-    country: str,
-    names: dict[str, str],
-    ingredients: list[tuple[str, int]],
-    method: str,
-    note: str,
-) -> dict[str, Any]:
-    with _workbook_lock:
-        # Re-check after lock in case a waiter raced us.
-        existing = find_recipe_row(country, names.get("zh") or names.get("en") or "")
-        if existing is None:
-            for value in names.values():
-                if value:
-                    existing = find_recipe_row(country, value)
-                    if existing:
-                        break
-        if existing:
-            return {"row": existing, "created": False, "foods_added": [], "partial": False}
-
-        food_headers, food_rows, foods = _load_foods_index()
-        if not food_headers:
-            food_headers = list(FOOD_HEADERS)
-        foods_added = _append_missing_foods(food_headers, food_rows, foods, ingredients)
-        if foods_added:
-            widths = [28, 28, 28, 28, 55, 55, 55] + [28] * max(0, len(food_headers) - 7)
-            _write_xls(FOODS_PATH, "食材", food_headers, food_rows, widths)
-
-        recipe_headers, recipe_rows_data = _sheet_matrix(RECIPE_PATH)
-        if not recipe_headers:
-            recipe_headers = list(RECIPE_HEADERS)
-        header_index = {header: pos for pos, header in enumerate(recipe_headers)}
-        ordered = _build_recipe_values(country, names, ingredients, method, foods, note)
-        values_by_header = {
-            header: ordered[idx] for idx, (_field, header) in enumerate(COLUMN_FIELDS)
-        }
-        if list(recipe_headers) == list(RECIPE_HEADERS):
-            new_row = ordered
-        else:
-            new_row = [""] * len(recipe_headers)
-            for header, value in values_by_header.items():
-                col = header_index.get(header)
-                if col is not None:
-                    new_row[col] = value
-
-        recipe_rows_data.append(new_row)
-        widths = [28, 22, 36, 28, 24, 78, 72, 55, 55, 80, 28]
-        _write_xls(RECIPE_PATH, "食譜", recipe_headers, recipe_rows_data, widths)
-        invalidate_recipe_cache()
-
-        # New row id is 1-based sheet row index (= len after append).
-        new_id = str(len(recipe_rows_data))
-        row = {
-            "id": new_id,
-            "country": values_by_header.get("國家", ""),
-            "name_zh": values_by_header.get("中文食譜", ""),
-            "name_en": values_by_header.get("英文食譜", ""),
-            "name_ja": values_by_header.get("日文食譜", ""),
-            "name_ko": values_by_header.get("韓文食譜", ""),
-            "recipe": values_by_header.get("食譜", ""),
-            "method": values_by_header.get("煮法", ""),
-            "benefit": values_by_header.get("益處", ""),
-            "ban": values_by_header.get("禁忌", ""),
-            "nutrient": values_by_header.get("元素", ""),
-            "allergens": values_by_header.get("過敏原", ""),
-        }
-        partial = not bool(ingredients) or not bool(row["recipe"])
-        return {
-            "row": row,
-            "created": True,
-            "foods_added": foods_added,
-            "partial": partial,
-        }
-
-
-def ensure_recipe(country: str, name: str, lang: str = "zh") -> dict[str, Any]:
-    """Return existing or newly created recipe payload. Concurrent same key waits once."""
-    country = (country or "").strip()
-    name = (name or "").strip()
-    lang = normalize_lang(lang)
-    if not country:
-        raise ValueError("請選擇國家")
-    if not name:
-        raise ValueError("請輸入食譜名稱")
-
-    existing = find_recipe_row(country, name)
-    if existing:
-        return {
-            "status": "existing",
-            "created": False,
-            "partial": False,
-            "foods_added": [],
-            "note": "",
-            "recipe": public_recipe(existing, lang, 0),
-            "disclaimer": TEACHING_DISCLAIMER,
-        }
-
-    key = _ensure_key(country, name)
-    waiter = False
-    event: threading.Event | None = None
-    with _ensure_lock:
-        existing = find_recipe_row(country, name)
-        if existing:
-            return {
-                "status": "existing",
-                "created": False,
-                "partial": False,
-                "foods_added": [],
-                "note": "",
-                "recipe": public_recipe(existing, lang, 0),
-                "disclaimer": TEACHING_DISCLAIMER,
-            }
-        if key in _inflight:
-            event = _inflight[key]
-            waiter = True
-        else:
-            event = threading.Event()
-            _inflight[key] = event
-
-    if waiter and event is not None:
-        event.wait(timeout=120)
-        existing = find_recipe_row(country, name)
-        if existing:
-            return {
-                "status": "existing",
-                "created": False,
-                "partial": False,
-                "foods_added": [],
-                "note": "",
-                "recipe": public_recipe(existing, lang, 0),
-                "disclaimer": TEACHING_DISCLAIMER,
-            }
-        raise TimeoutError("食譜建立逾時，請稍後再試")
-
-    try:
+        os.replace(tmp_path, str(path))
+    except OSError:
+        # Windows file lock: leave .new sibling rather than failing hard mid-request.
+        fallback = str(path) + ".new"
         try:
-            researched = research_dish(country, name, lang)
-        except Exception:
-            researched = {
-                "names": {"zh": name, "en": "", "ja": "", "ko": ""},
-                "extract": "",
-                "ingredients": [],
-                "method": "",
-                "researched": False,
-                "note": PARTIAL_NOTE,
-            }
-        names = dict(researched.get("names") or {})
-        names[lang] = names.get(lang) or name
-        names["zh"] = names.get("zh") or name
-        result = _append_recipe_and_foods(
-            country=country,
-            names=names,
-            ingredients=list(researched.get("ingredients") or []),
-            method=str(researched.get("method") or ""),
-            note=str(researched.get("note") or PARTIAL_NOTE),
-        )
-        row = result["row"]
-        status = "created"
-        if result.get("partial") or not researched.get("researched"):
-            status = "partial"
-        return {
-            "status": status,
-            "created": bool(result.get("created")),
-            "partial": bool(result.get("partial")) or status == "partial",
-            "foods_added": result.get("foods_added") or [],
-            "note": researched.get("note") or PARTIAL_NOTE,
-            "recipe": public_recipe(row, lang, 0),
-            "disclaimer": TEACHING_DISCLAIMER,
-        }
-    finally:
-        with _ensure_lock:
-            if event is not None:
-                event.set()
-            _inflight.pop(key, None)
+            os.replace(tmp_path, fallback)
+        except OSError as exc:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise OSError(f"無法寫入 {path}（亦無法寫入 {fallback}）") from exc
+        raise OSError(f"無法覆寫 {path}，已寫入 {fallback}") from None
+
+
+# Alias used by /api/recipes/create
+create_recipe = ensure_recipe

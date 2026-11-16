@@ -224,8 +224,10 @@ class MainActivity : AppCompatActivity() {
             HealthFlags.inflate(binding.conditionsGroup, conditions)
             HealthFlags.apply(binding.conditionsGroup, keptConditions)
         }
-        val options = HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
-        if (options.isNotEmpty() && (flagAllergyOptions.isEmpty() || options.size >= flagAllergyOptions.size)) {
+        val options = HealthFlags.consolidateAllergyOptions(
+            HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
+        )
+        if (options.isNotEmpty()) {
             flagAllergyOptions = options
             HealthFlags.inflate(binding.allergiesGroup, options)
             HealthFlags.apply(binding.allergiesGroup, keptAllergies)
@@ -246,9 +248,11 @@ class MainActivity : AppCompatActivity() {
             else -> binding.genderGroup.clearCheck()
         }
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
-        val allergyOptions = HealthFlags.jsonLabelsFrom(user, "allergy_options").ifEmpty {
-            HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
-        }.ifEmpty { flagAllergyOptions }
+        val allergyOptions = HealthFlags.consolidateAllergyOptions(
+            HealthFlags.jsonLabelsFrom(user, "allergy_options").ifEmpty {
+                HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
+            }.ifEmpty { flagAllergyOptions }
+        )
         if (allergyOptions.isNotEmpty()) {
             flagAllergyOptions = allergyOptions
             HealthFlags.inflate(binding.allergiesGroup, allergyOptions)

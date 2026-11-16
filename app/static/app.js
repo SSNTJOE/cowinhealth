@@ -864,7 +864,7 @@ function closeCombo(input, list) {
   if (input) input.setAttribute("aria-expanded", "false");
 }
 
-function renderCombo(input, list, labels, onPick, mode, emptyText) {
+function renderCombo(input, list, labels, onPick, mode, emptyText, options) {
   if (!input || !list) return;
   const query = mode === "all" ? "" : input.value.trim();
   const matched = labels.filter((label) => {
@@ -878,6 +878,21 @@ function renderCombo(input, list, labels, onPick, mode, emptyText) {
     empty.className = "combo-empty";
     empty.textContent = emptyText || uiText("searchEmpty");
     list.appendChild(empty);
+    if (options && typeof options.onEmptyCreate === "function" && query) {
+      const createItem = document.createElement("li");
+      createItem.className = "combo-create";
+      const createBtn = document.createElement("button");
+      createBtn.type = "button";
+      createBtn.className = "combo-create-btn";
+      createBtn.textContent = uiText("recipeCreateAction");
+      createBtn.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        closeCombo(input, list);
+        options.onEmptyCreate(query);
+      });
+      createItem.appendChild(createBtn);
+      list.appendChild(createItem);
+    }
   } else {
     matched.forEach((label) => {
       const item = document.createElement("li");
@@ -896,6 +911,7 @@ function renderCombo(input, list, labels, onPick, mode, emptyText) {
   }
   list.hidden = false;
   input.setAttribute("aria-expanded", "true");
+  return matched;
 }
 
 function rememberRecipeChoice(label) {
@@ -949,15 +965,37 @@ function showSelectedRecipe(extraNote) {
   detail.textContent = text;
 }
 
+function recipeHasSubstringMatch(typed) {
+  const q = recipeNamePlain(typed).toLowerCase();
+  if (!q) return true;
+  return recipeRows.some((item) => recipeTextMatch(recipeLabel(item), q));
+}
+
+function showRecipeSearchStatus(typed) {
+  const detail = document.getElementById("recipe-detail");
+  if (!detail) return;
+  const plain = recipeNamePlain(typed);
+  if (!plain) {
+    if (!selectedRecipeId) detail.textContent = "";
+    return;
+  }
+  if (findRecipeByTypedName(typed)) {
+    showSelectedRecipe();
+    return;
+  }
+  if (!recipeHasSubstringMatch(typed)) {
+    detail.textContent = uiText("recipeSearching");
+  }
+}
+
 async function ensureRecipeFromInput(options) {
-  const fromBlur = Boolean(options && options.fromBlur);
   const countryInput = document.getElementById("recipe-country");
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   const list = document.getElementById("recipe-name-list");
   if (!countryInput || !pick || !detail) return null;
   const country = countryInput.value.trim();
-  const typed = pick.value.trim();
+  const typed = (options && options.name) || pick.value.trim();
   const plain = recipeNamePlain(typed);
   if (!countryNames.includes(country) || !plain) return null;
   const existing = findRecipeByTypedName(typed);
@@ -967,18 +1005,24 @@ async function ensureRecipeFromInput(options) {
     showSelectedRecipe();
     return existing;
   }
-  if (fromBlur && list && !list.hidden) return null;
+  if (recipeHasSubstringMatch(typed) && !(options && options.forceCreate)) {
+    // Substring hits exist — wait for an exact pick; do not auto-create.
+    showSelectedRecipe();
+    return null;
+  }
   const seq = ++recipeEnsureSeq;
   closeCombo(pick, list);
+  pick.value = plain;
   detail.textContent = uiText("recipeEnsuring");
   try {
-    const data = await api("/api/recipes/ensure", {
+    const data = await api("/api/recipes/create", {
       method: "POST",
       body: formBody({ country, name: plain, lang: getUiLang() }),
     });
     if (seq !== recipeEnsureSeq) return null;
     const created = data && data.recipe;
-    await loadRecipesForCountry({ keepSelection: false });
+    if (created && created.id != null) selectedRecipeId = created.id;
+    await loadRecipesForCountry({ keepSelection: true });
     if (seq !== recipeEnsureSeq) return null;
     let row =
       (created && recipeRows.find((item) => String(item.id) === String(created.id)))
@@ -993,7 +1037,9 @@ async function ensureRecipeFromInput(options) {
     if (row && row.id != null) {
       selectedRecipeId = row.id;
       pick.value = row.name ? recipeLabel(row) : plain;
-      const note = data.partial ? (data.note || uiText("recipeEnsurePartial")) : "";
+      const note = data.partial
+        ? (data.note || uiText("recipeEnsurePartial"))
+        : (data.note || "");
       showSelectedRecipe(note);
       return row;
     }
@@ -1148,6 +1194,12 @@ function bindRecipePickers() {
       showSelectedRecipe();
     }, "all");
   };
+  const startCreateRecipe = (typedName) => {
+    ensureRecipeFromInput({ name: typedName, forceCreate: true }).catch((err) => {
+      const box = document.getElementById("recipe-detail");
+      if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+    });
+  };
   const filterRecipes = () => {
     const labels = usableRecipeLabels();
     if (!labels) {
@@ -1157,7 +1209,9 @@ function bindRecipePickers() {
     renderCombo(pick, pickList, labels, (label) => {
       rememberRecipeChoice(label);
       showSelectedRecipe();
-    }, "contains");
+    }, "contains", uiText("searchEmpty"), {
+      onEmptyCreate: startCreateRecipe,
+    });
   };
   country.addEventListener("focus", showCountries);
   country.addEventListener("click", showCountries);
@@ -1199,9 +1253,9 @@ function bindRecipePickers() {
     if (event.key !== "Enter") return;
     event.preventDefault();
     const typed = pick.value.trim();
-    const buttons = [...pickList.querySelectorAll("button")];
-    const exactBtn = buttons.find((btn) => btn.textContent === typed);
-    const button = exactBtn || (buttons.length === 1 ? buttons[0] : null);
+    const optionButtons = [...pickList.querySelectorAll("button:not(.combo-create-btn)")];
+    const exactBtn = optionButtons.find((btn) => btn.textContent === typed);
+    const button = exactBtn || (optionButtons.length === 1 ? optionButtons[0] : null);
     if (button && findRecipeByTypedName(button.textContent)) {
       pick.value = button.textContent;
       closeCombo(pick, pickList);
@@ -1210,26 +1264,27 @@ function bindRecipePickers() {
       return;
     }
     closeCombo(pick, pickList);
-    ensureRecipeFromInput().catch((err) => {
-      const box = document.getElementById("recipe-detail");
-      if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
-    });
+    if (!recipeHasSubstringMatch(typed)) {
+      startCreateRecipe(typed);
+      return;
+    }
+    showRecipeSearchStatus(typed);
   });
   pick.addEventListener("input", () => {
     filterRecipes();
-    showSelectedRecipe();
+    showRecipeSearchStatus(pick.value);
   });
   pick.addEventListener("blur", () => {
     closeCombo(pick, pickList);
+    // Create only via Enter or「建立此食譜」; keep「搜尋中」if still unmatched.
     const typed = pick.value.trim();
     if (!typed || findRecipeByTypedName(typed)) return;
-    window.setTimeout(() => {
-      if (document.activeElement === pick) return;
-      ensureRecipeFromInput({ fromBlur: true }).catch((err) => {
-        const box = document.getElementById("recipe-detail");
-        if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
-      });
-    }, 120);
+    if (!recipeHasSubstringMatch(typed)) {
+      const detail = document.getElementById("recipe-detail");
+      if (detail && detail.textContent !== uiText("recipeEnsuring")) {
+        detail.textContent = uiText("recipeSearching");
+      }
+    }
   });
 }
 
