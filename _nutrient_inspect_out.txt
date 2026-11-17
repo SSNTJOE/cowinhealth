@@ -20,27 +20,48 @@ R12: '兒童' | '10-12 歲' | '男性' | 2350 | 33 | 1 | 0.015 | 0.01 | 0.00012 
 R13: '兒童' | '10-12 歲' | '女性' | 2200 | 31 | 1 | 0.015 | 0.01 | 0.00012 | 4e-05 | '0.001–0.018' | 0.08 | 1e-05 | '275–358' | 50 | '49–73' | '1,500–2,000'
 
 ============================================================
-FILE: C:\tube\Health-ing\Recipe.xls
+FILE: C:\tube\Health-ing\Recipe.xls (xlrd direct)
 exists: True size=1285120
 ============================================================
-engine=xlrd failed: Pandas requires version '2.0.1' or newer of 'xlrd' (version '1.2.0' currently installed).
-engine=openpyxl failed: File is not a zip file
-engine=None failed: Pandas requires version '2.0.1' or newer of 'xlrd' (version '1.2.0' currently installed).
+sheets: ['食譜']
+sheet0 name='食譜' nrows=445 ncols=11
+HEADERS (row 0):
+  col 0: '國家'
+  col 1: '中文食譜'
+  col 2: '英文食譜'
+  col 3: '日文食譜'
+  col 4: '韓文食譜'
+  col 5: '食譜'
+  col 6: '煮法'
+  col 7: '益處'
+  col 8: '禁忌'
+  col 9: '元素'
+  col 10: '過敏原'
+
+NUTRIENT-RELATED COLUMN INDICES: (none matched keywords)
+NOTE: Recipe.xls currently has ONLY 11 columns (國家…過敏原). No 熱量/膳食纖維/etc nutrient numeric columns are present in the sheet yet. A helper script _fill_recipe_nutrients.py exists to compute/add them, but they are not in the current .xls.
+
+
+Sample first 2 data rows — nutrient numeric columns:
+--- data row 1 ---
+  col 0 ('國家'): 'Afghanistan'
+  col 1 ('中文食譜'): '喀布爾抓飯'
+  col 2 ('英文食譜'): 'Kabuli pulao'
+  col 3 ('日文食譜'): 'カブリ・プラオ'
+  col 4 ('韓文食譜'): '카불리 풀라우'
+(no keyword nutrient cols; dumping cols from 11 onward)
+--- data row 2 ---
+  col 0 ('國家'): 'Albania'
+  col 1 ('中文食譜'): '優格烤羊肉'
+  col 2 ('英文食譜'): 'Tave kosi'
+  col 3 ('日文食譜'): 'タヴェ・コシ'
+  col 4 ('韓文食譜'): '타브 코시'
+(no keyword nutrient cols; dumping cols from 11 onward)
 
 ============================================================
-MEAL FEATURE CODE CHECK
+MEAL FEATURE CODE CHECK (confirmed)
 ============================================================
-user_meals: files=NONE
-meal_calendar: files=NONE
-nutrient_targets: files=NONE
-Traceback (most recent call last):
-  File "C:\tube\Health-ing\_inspect_nutrients.py", line 139, in <module>
-    (root / "_nutrient_inspect_out.txt").write_text(text, encoding="utf-8")
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Python314\Lib\pathlib\__init__.py", line 809, in write_text
-    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
-         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Python314\Lib\pathlib\__init__.py", line 771, in open
-    return io.open(self, mode, buffering, encoding, errors, newline)
-           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-PermissionError: [Errno 13] Permission denied: 'C:\\tube\\Health-ing\\_nutrient_inspect_out.txt'
+user_meals: NONE
+meal_calendar: NONE
+nutrient_targets: NONE
+Also no *meal* filename matches under workspace; no code refs to those module names.

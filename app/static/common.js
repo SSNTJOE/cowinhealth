@@ -300,6 +300,26 @@ const UI_I18N = {
     fieldBan: "禁忌",
     fieldNutrient: "元素",
     fieldAllergens: "過敏原",
+    mealSlot: "餐次",
+    mealServings: "份量",
+    mealAdd: "加入今日飲食",
+    mealCalendarHeading: "飲食日曆與營養對照",
+    mealCalendarNote: "依基本資料年齡／性別對照衛福部建議量（daily_nutrient.xlsx）。選定上方食譜後可加入當日飲食；長條圖比較攝取與建議量，差額圖顯示不足（負）或超量（正）。教學示範，非營養處方。",
+    mealDate: "日期",
+    mealPickRecipeFirst: "請先選定上方食譜再加入。",
+    mealAdded: "已加入飲食紀錄。",
+    mealDeleted: "已刪除。",
+    mealEmptyDay: "這天尚未記錄飲食。",
+    mealChartEmpty: "尚無當日飲食紀錄可畫圖。",
+    mealIntakeTitle: "攝取 vs 建議量",
+    mealSurplusTitle: "差額（正＝超量，負＝不足）",
+    mealRemove: "刪除",
+    mealKcalPct: "熱量達成 {n}%",
+    mealCountLabel: "{n} 餐",
+    mealTargetMeta: "對照：{band}｜{gender}",
+    mealIntakeSeries: "攝取",
+    mealTargetSeries: "建議量",
+    mealSurplusSeries: "差額",
   },
   en: {
     langLabel: "Language",
@@ -329,6 +349,26 @@ const UI_I18N = {
     fieldBan: "Contraindications",
     fieldNutrient: "Nutrients",
     fieldAllergens: "Allergens",
+    mealSlot: "Meal",
+    mealServings: "Servings",
+    mealAdd: "Add to today’s meals",
+    mealCalendarHeading: "Meal calendar & nutrients",
+    mealCalendarNote: "Compares intake with age/gender targets from daily_nutrient.xlsx. Pick a recipe above, then add it for the selected day. Bar chart vs targets; surplus chart shows deficit (negative) or excess (positive). Teaching demo only.",
+    mealDate: "Date",
+    mealPickRecipeFirst: "Select a recipe above first.",
+    mealAdded: "Meal added.",
+    mealDeleted: "Removed.",
+    mealEmptyDay: "No meals logged for this day.",
+    mealChartEmpty: "No meals yet to chart for this day.",
+    mealIntakeTitle: "Intake vs target",
+    mealSurplusTitle: "Surplus (pos) / deficit (neg)",
+    mealRemove: "Remove",
+    mealKcalPct: "Calories {n}% of target",
+    mealCountLabel: "{n} meals",
+    mealTargetMeta: "Targets: {band} · {gender}",
+    mealIntakeSeries: "Intake",
+    mealTargetSeries: "Target",
+    mealSurplusSeries: "Surplus",
   },
   ja: {
     langLabel: "言語",
@@ -358,6 +398,26 @@ const UI_I18N = {
     fieldBan: "禁忌",
     fieldNutrient: "栄養素",
     fieldAllergens: "アレルゲン",
+    mealSlot: "食事",
+    mealServings: "分量",
+    mealAdd: "今日の食事に追加",
+    mealCalendarHeading: "食事カレンダーと栄養",
+    mealCalendarNote: "年齢・性別の目安（daily_nutrient.xlsx）と比較します。上のレシピを選んで当日に追加。棒グラフは摂取と目安、差額グラフは不足（負）／超過（正）。教材デモです。",
+    mealDate: "日付",
+    mealPickRecipeFirst: "先に上のレシピを選んでください。",
+    mealAdded: "食事を追加しました。",
+    mealDeleted: "削除しました。",
+    mealEmptyDay: "この日の食事記録はありません。",
+    mealChartEmpty: "この日のグラフ用データがありません。",
+    mealIntakeTitle: "摂取 vs 目安",
+    mealSurplusTitle: "差額（正＝超過、負＝不足）",
+    mealRemove: "削除",
+    mealKcalPct: "熱量達成 {n}%",
+    mealCountLabel: "{n} 食",
+    mealTargetMeta: "対照：{band}｜{gender}",
+    mealIntakeSeries: "摂取",
+    mealTargetSeries: "目安",
+    mealSurplusSeries: "差額",
   },
   ko: {
     langLabel: "언어",
@@ -387,6 +447,26 @@ const UI_I18N = {
     fieldBan: "금기",
     fieldNutrient: "영양소",
     fieldAllergens: "알레르기 유발 물질",
+    mealSlot: "끼니",
+    mealServings: "분량",
+    mealAdd: "오늘 식단에 추가",
+    mealCalendarHeading: "식단 달력과 영양 대조",
+    mealCalendarNote: "나이/성별 권장량(daily_nutrient.xlsx)과 비교합니다. 위 레시피를 고른 뒤 당일에 추가하세요. 막대는 섭취 vs 권장, 차액 그래프는 부족(음)/초과(양). 교육용 시연입니다.",
+    mealDate: "날짜",
+    mealPickRecipeFirst: "먼저 위 레시피를 선택하세요.",
+    mealAdded: "식단에 추가했습니다.",
+    mealDeleted: "삭제했습니다.",
+    mealEmptyDay: "이 날의 식단 기록이 없습니다.",
+    mealChartEmpty: "이 날의 차트 데이터가 없습니다.",
+    mealIntakeTitle: "섭취 vs 권장",
+    mealSurplusTitle: "차액(양=초과, 음=부족)",
+    mealRemove: "삭제",
+    mealKcalPct: "열량 달성 {n}%",
+    mealCountLabel: "{n}끼",
+    mealTargetMeta: "대조: {band}｜{gender}",
+    mealIntakeSeries: "섭취",
+    mealTargetSeries: "권장",
+    mealSurplusSeries: "차액",
   },
 };
 
@@ -448,6 +528,20 @@ function applyUiLangChrome() {
   if (countryInput) countryInput.placeholder = uiText("pickCountry");
   const recipeInput = document.getElementById("recipe-name");
   if (recipeInput) recipeInput.placeholder = uiText("pickRecipe");
+  const mealHeading = document.getElementById("meal-calendar-heading");
+  if (mealHeading) mealHeading.textContent = uiText("mealCalendarHeading");
+  const mealNote = document.getElementById("meal-calendar-note");
+  if (mealNote) mealNote.textContent = uiText("mealCalendarNote");
+  const mealSlotLabel = document.getElementById("meal-slot-label");
+  if (mealSlotLabel) mealSlotLabel.textContent = uiText("mealSlot");
+  const mealServingsLabel = document.getElementById("meal-servings-label");
+  if (mealServingsLabel) mealServingsLabel.textContent = uiText("mealServings");
+  const mealAddBtn = document.getElementById("meal-add-btn");
+  if (mealAddBtn) mealAddBtn.textContent = uiText("mealAdd");
+  const mealDateLabel = document.getElementById("meal-date-label");
+  if (mealDateLabel) mealDateLabel.textContent = uiText("mealDate");
+  const mealChartEmpty = document.getElementById("meal-chart-empty");
+  if (mealChartEmpty) mealChartEmpty.textContent = uiText("mealChartEmpty");
 }
 
 function compactPatternLabel(label) {

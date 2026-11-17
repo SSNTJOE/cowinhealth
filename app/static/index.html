@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=recipe-create1" />
+  <link rel="stylesheet" href="/static/styles.css?v=meal-cal1" />
 </head>
 <body>
   <div class="wrap">
@@ -173,6 +173,41 @@
         <ul id="recipe-name-list" class="combo-list" role="listbox" hidden></ul>
       </div>
       <div id="recipe-detail" class="recipe-detail"></div>
+      <div class="actions meal-add-row">
+        <label id="meal-slot-label" for="meal-slot">餐次</label>
+        <select id="meal-slot">
+          <option value="早餐">早餐</option>
+          <option value="午餐" selected>午餐</option>
+          <option value="晚餐">晚餐</option>
+          <option value="點心">點心</option>
+        </select>
+        <label id="meal-servings-label" for="meal-servings">份量</label>
+        <input type="number" id="meal-servings" min="0.25" max="20" step="0.25" value="1" />
+        <button type="button" id="meal-add-btn">加入今日飲食</button>
+      </div>
+      <p id="meal-msg" class="status"></p>
+
+      <h3 id="meal-calendar-heading">飲食日曆與營養對照</h3>
+      <p id="meal-calendar-note" class="note">依基本資料年齡／性別對照衛福部建議量（daily_nutrient.xlsx）。選定上方食譜後可加入當日飲食；長條圖比較攝取與建議量，差額圖顯示不足（負）或超量（正）。教學示範，非營養處方。</p>
+      <div class="meal-cal-toolbar">
+        <button type="button" id="meal-month-prev" class="ghost">‹</button>
+        <span id="meal-month-label"></span>
+        <button type="button" id="meal-month-next" class="ghost">›</button>
+        <label id="meal-date-label" for="meal-date">日期</label>
+        <input type="date" id="meal-date" />
+      </div>
+      <div id="meal-calendar-grid" class="meal-calendar-grid" aria-label="飲食月曆"></div>
+      <p id="meal-day-meta" class="note"></p>
+      <div id="meal-list" class="meal-list"></div>
+      <div class="meal-charts">
+        <div class="trend-wrap meal-chart-wrap">
+          <canvas id="meal-intake-chart"></canvas>
+        </div>
+        <div class="trend-wrap meal-chart-wrap">
+          <canvas id="meal-surplus-chart"></canvas>
+        </div>
+      </div>
+      <p id="meal-chart-empty" class="note hidden">尚無當日飲食紀錄可畫圖。</p>
 
       <h3>臟腑圖（虛／實／熱／寒）</h3>
       <p class="note">依基本資料的性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
@@ -219,7 +254,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=allergy3"></script>
-  <script src="/static/app.js?v=recipe-create1"></script>
+  <script src="/static/common.js?v=meal-cal1"></script>
+  <script src="/static/app.js?v=meal-cal1"></script>
 </body>
 </html>

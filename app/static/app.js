@@ -79,6 +79,27 @@ function syncUterusNotes() {
   });
 }
 let trendChart = null;
+let mealIntakeChart = null;
+let mealSurplusChart = null;
+let mealSelectedDate = "";
+let mealViewYear = 0;
+let mealViewMonth = 0;
+let mealMonthData = null;
+let mealDayData = null;
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function todayIsoDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function shortNutrientLabel(key) {
+  return String(key || "").replace(/[（(][^）)]*[）)]/g, "").trim() || key;
+}
+
 const TREND_POINT_STYLE = {
   circle: "circle",
   triangle: "triangle",
@@ -154,6 +175,15 @@ async function loadMe() {
   }
   await startCamera();
   await loadRecords();
+  try {
+    await initMealCalendar();
+  } catch (err) {
+    const mealMsg = document.getElementById("meal-msg");
+    if (mealMsg) {
+      mealMsg.textContent = formatApiError(err);
+      mealMsg.className = "status err";
+    }
+  }
   if (!sessionStorage.getItem("daily-asked")) {
     sessionStorage.setItem("daily-asked", "1");
     document.getElementById("dialog-symptoms").value = document.getElementById("symptoms").value;
@@ -936,6 +966,17 @@ function findRecipeByTypedName(typed) {
   );
 }
 
+function formatRecipeNutrients(nutrients) {
+  if (!nutrients || typeof nutrients !== "object") return "";
+  const parts = [];
+  for (const [key, raw] of Object.entries(nutrients)) {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value === 0) continue;
+    parts.push(`${key} ${value}`);
+  }
+  return parts.join("、");
+}
+
 let recipeEnsureSeq = 0;
 
 function showSelectedRecipe(extraNote) {
@@ -961,6 +1002,8 @@ function showSelectedRecipe(extraNote) {
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
   let text = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  const nutrientLine = row.nutrient_line || formatRecipeNutrients(row.nutrients);
+  if (nutrientLine) text = (text ? text + "\n\n" : "") + nutrientLine;
   if (extraNote) text = (text ? text + "\n\n" : "") + extraNote;
   detail.textContent = text;
 }
@@ -1333,6 +1376,329 @@ async function loadRecords() {
   box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+async function initMealCalendar() {
+  const dateInput = document.getElementById("meal-date");
+  if (!dateInput) return;
+  if (!mealSelectedDate) mealSelectedDate = todayIsoDate();
+  dateInput.value = mealSelectedDate;
+  const parts = mealSelectedDate.split("-").map(Number);
+  mealViewYear = parts[0];
+  mealViewMonth = parts[1];
+  bindMealCalendarControls();
+  await refreshMealViews();
+}
+
+function bindMealCalendarControls() {
+  const dateInput = document.getElementById("meal-date");
+  const prev = document.getElementById("meal-month-prev");
+  const next = document.getElementById("meal-month-next");
+  const addBtn = document.getElementById("meal-add-btn");
+  if (dateInput && !dateInput.dataset.bound) {
+    dateInput.dataset.bound = "1";
+    dateInput.addEventListener("change", async () => {
+      if (!dateInput.value) return;
+      mealSelectedDate = dateInput.value;
+      const parts = mealSelectedDate.split("-").map(Number);
+      mealViewYear = parts[0];
+      mealViewMonth = parts[1];
+      await refreshMealViews();
+    });
+  }
+  if (prev && !prev.dataset.bound) {
+    prev.dataset.bound = "1";
+    prev.addEventListener("click", async () => {
+      mealViewMonth -= 1;
+      if (mealViewMonth < 1) {
+        mealViewMonth = 12;
+        mealViewYear -= 1;
+      }
+      await loadMealMonth();
+      renderMealCalendarGrid();
+    });
+  }
+  if (next && !next.dataset.bound) {
+    next.dataset.bound = "1";
+    next.addEventListener("click", async () => {
+      mealViewMonth += 1;
+      if (mealViewMonth > 12) {
+        mealViewMonth = 1;
+        mealViewYear += 1;
+      }
+      await loadMealMonth();
+      renderMealCalendarGrid();
+    });
+  }
+  if (addBtn && !addBtn.dataset.bound) {
+    addBtn.dataset.bound = "1";
+    addBtn.addEventListener("click", () => addSelectedRecipeMeal());
+  }
+}
+
+async function refreshMealViews() {
+  await Promise.all([loadMealMonth(), loadMealDay()]);
+  renderMealCalendarGrid();
+  renderMealDay();
+}
+
+async function loadMealMonth() {
+  if (!mealViewYear || !mealViewMonth) return;
+  mealMonthData = await api(`/api/meals/month?year=${mealViewYear}&month=${mealViewMonth}`);
+  const label = document.getElementById("meal-month-label");
+  if (label) label.textContent = `${mealViewYear}-${pad2(mealViewMonth)}`;
+}
+
+async function loadMealDay() {
+  if (!mealSelectedDate) return;
+  mealDayData = await api(`/api/meals/day?date=${encodeURIComponent(mealSelectedDate)}`);
+}
+
+function renderMealCalendarGrid() {
+  const grid = document.getElementById("meal-calendar-grid");
+  if (!grid || !mealMonthData) return;
+  const dows = ["一", "二", "三", "四", "五", "六", "日"];
+  const days = mealMonthData.days || [];
+  const first = new Date(mealViewYear, mealViewMonth - 1, 1);
+  let startPad = (first.getDay() + 6) % 7; // Monday-first
+  const byDate = {};
+  days.forEach((d) => { byDate[d.date] = d; });
+  const today = todayIsoDate();
+  const frag = document.createDocumentFragment();
+  dows.forEach((name) => {
+    const el = document.createElement("div");
+    el.className = "meal-cal-dow";
+    el.textContent = name;
+    frag.appendChild(el);
+  });
+  for (let i = 0; i < startPad; i += 1) {
+    const pad = document.createElement("div");
+    pad.className = "meal-cal-pad";
+    frag.appendChild(pad);
+  }
+  const lastDay = days.length || new Date(mealViewYear, mealViewMonth, 0).getDate();
+  for (let day = 1; day <= lastDay; day += 1) {
+    const iso = `${mealViewYear}-${pad2(mealViewMonth)}-${pad2(day)}`;
+    const info = byDate[iso] || { meal_count: 0, kcal_pct: null, has_meals: false };
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "meal-cal-cell";
+    if (iso === mealSelectedDate) btn.classList.add("is-selected");
+    if (iso === today) btn.classList.add("is-today");
+    if (info.has_meals) btn.classList.add("has-meals");
+    const num = document.createElement("span");
+    num.className = "meal-cal-daynum";
+    num.textContent = String(day);
+    btn.appendChild(num);
+    if (info.has_meals) {
+      const meta = document.createElement("span");
+      meta.className = "meal-cal-meta";
+      const pct = info.kcal_pct == null ? "" : uiText("mealKcalPct").replace("{n}", String(info.kcal_pct));
+      meta.textContent = [uiText("mealCountLabel").replace("{n}", String(info.meal_count)), pct].filter(Boolean).join(" · ");
+      btn.appendChild(meta);
+    }
+    btn.addEventListener("click", async () => {
+      mealSelectedDate = iso;
+      const dateInput = document.getElementById("meal-date");
+      if (dateInput) dateInput.value = iso;
+      await loadMealDay();
+      renderMealCalendarGrid();
+      renderMealDay();
+    });
+    frag.appendChild(btn);
+  }
+  grid.replaceChildren(frag);
+}
+
+function renderMealDay() {
+  const list = document.getElementById("meal-list");
+  const meta = document.getElementById("meal-day-meta");
+  const empty = document.getElementById("meal-chart-empty");
+  if (!list || !mealDayData) return;
+  const meals = mealDayData.meals || [];
+  if (meta) {
+    meta.textContent = uiText("mealTargetMeta")
+      .replace("{band}", mealDayData.age_band || "")
+      .replace("{gender}", mealDayData.gender || "");
+  }
+  if (!meals.length) {
+    list.textContent = uiText("mealEmptyDay");
+  } else {
+    const frag = document.createDocumentFragment();
+    meals.forEach((meal) => {
+      const row = document.createElement("div");
+      row.className = "meal-item";
+      const main = document.createElement("div");
+      main.className = "meal-item-main";
+      const kcal = meal.nutrients && meal.nutrients["每日熱量(大卡)"];
+      main.textContent = `${meal.meal_slot} · ${meal.recipe_name || ""} × ${meal.servings}`
+        + (kcal != null ? ` · ${Math.round(kcal)} kcal` : "");
+      row.appendChild(main);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ghost";
+      remove.textContent = uiText("mealRemove");
+      remove.addEventListener("click", async () => {
+        try {
+          const data = await api(`/api/meals/${meal.meal_id}?date=${encodeURIComponent(mealSelectedDate)}`, {
+            method: "DELETE",
+          });
+          mealDayData = data.day;
+          const mealMsg = document.getElementById("meal-msg");
+          if (mealMsg) {
+            mealMsg.textContent = uiText("mealDeleted");
+            mealMsg.className = "status ok";
+          }
+          await loadMealMonth();
+          renderMealCalendarGrid();
+          renderMealDay();
+        } catch (err) {
+          const mealMsg = document.getElementById("meal-msg");
+          if (mealMsg) {
+            mealMsg.textContent = formatApiError(err);
+            mealMsg.className = "status err";
+          }
+        }
+      });
+      row.appendChild(remove);
+      frag.appendChild(row);
+    });
+    list.replaceChildren(frag);
+  }
+  if (empty) {
+    empty.classList.toggle("hidden", meals.length > 0);
+    empty.textContent = uiText("mealChartEmpty");
+  }
+  renderMealCharts(mealDayData);
+}
+
+function renderMealCharts(day) {
+  const intakeCanvas = document.getElementById("meal-intake-chart");
+  const surplusCanvas = document.getElementById("meal-surplus-chart");
+  if (typeof Chart === "undefined" || !intakeCanvas || !surplusCanvas) return;
+  if (mealIntakeChart) {
+    mealIntakeChart.destroy();
+    mealIntakeChart = null;
+  }
+  if (mealSurplusChart) {
+    mealSurplusChart.destroy();
+    mealSurplusChart = null;
+  }
+  const keys = (day && day.nutrient_keys) || [];
+  if (!keys.length) return;
+  const labels = (day.chart_labels && day.chart_labels.length === keys.length)
+    ? day.chart_labels
+    : keys.map(shortNutrientLabel);
+  const totals = day.totals || {};
+  const targets = day.targets || {};
+  const surplus = day.surplus || {};
+  const intakeValues = keys.map((k) => Number(totals[k] || 0));
+  const targetValues = keys.map((k) => Number(targets[k] || 0));
+  const surplusValues = keys.map((k) => Number(surplus[k] || 0));
+  mealIntakeChart = new Chart(intakeCanvas, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: uiText("mealIntakeSeries"),
+          data: intakeValues,
+          backgroundColor: "rgba(42, 111, 151, 0.65)",
+        },
+        {
+          label: uiText("mealTargetSeries"),
+          data: targetValues,
+          backgroundColor: "rgba(120, 120, 120, 0.35)",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: uiText("mealIntakeTitle") },
+        legend: { display: true },
+      },
+      scales: {
+        x: { ticks: { maxRotation: 60, minRotation: 30, font: { size: 10 } } },
+        y: { beginAtZero: true },
+      },
+    },
+  });
+  mealSurplusChart = new Chart(surplusCanvas, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: uiText("mealSurplusSeries"),
+          data: surplusValues,
+          backgroundColor: surplusValues.map((v) => (v >= 0 ? "rgba(196, 90, 60, 0.7)" : "rgba(46, 139, 87, 0.7)")),
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: uiText("mealSurplusTitle") },
+        legend: { display: false },
+      },
+      scales: {
+        x: { ticks: { maxRotation: 60, minRotation: 30, font: { size: 10 } } },
+        y: { beginAtZero: false },
+      },
+    },
+  });
+}
+
+async function addSelectedRecipeMeal() {
+  const mealMsg = document.getElementById("meal-msg");
+  const pick = document.getElementById("recipe-name");
+  const label = (pick && pick.value.trim()) || "";
+  const row = recipeRows.find((item) => String(item.id) === String(selectedRecipeId) && recipeLabel(item) === label)
+    || recipeRows.find((item) => recipeLabel(item) === label)
+    || findRecipeByTypedName(label);
+  if (!row) {
+    if (mealMsg) {
+      mealMsg.textContent = uiText("mealPickRecipeFirst");
+      mealMsg.className = "status err";
+    }
+    return;
+  }
+  const slot = (document.getElementById("meal-slot") || {}).value || "午餐";
+  const servings = (document.getElementById("meal-servings") || {}).value || "1";
+  const dateInput = document.getElementById("meal-date");
+  const mealDate = (dateInput && dateInput.value) || mealSelectedDate || todayIsoDate();
+  try {
+    const data = await api("/api/meals", {
+      method: "POST",
+      body: formBody({
+        recipe_id: row.id,
+        meal_date: mealDate,
+        meal_slot: slot,
+        servings,
+        lang: getUiLang(),
+      }),
+    });
+    mealSelectedDate = mealDate;
+    mealDayData = data.day;
+    if (mealMsg) {
+      mealMsg.textContent = uiText("mealAdded");
+      mealMsg.className = "status ok";
+    }
+    const parts = mealSelectedDate.split("-").map(Number);
+    mealViewYear = parts[0];
+    mealViewMonth = parts[1];
+    await loadMealMonth();
+    renderMealCalendarGrid();
+    renderMealDay();
+  } catch (err) {
+    if (mealMsg) {
+      mealMsg.textContent = formatApiError(err);
+      mealMsg.className = "status err";
+    }
+  }
+}
+
 function renderTrend(trend) {
   const empty = document.getElementById("trend-empty");
   const canvas = document.getElementById("trend-chart");
@@ -1539,6 +1905,8 @@ function bindUiLang() {
       const detail = document.getElementById("recipe-detail");
       if (detail) detail.textContent = formatApiError(err);
     });
+    if (mealDayData) renderMealDay();
+    if (mealMonthData) renderMealCalendarGrid();
   });
 }
 

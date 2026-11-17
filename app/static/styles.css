@@ -382,6 +382,104 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   height: 360px;
   margin: 8px 0 16px;
 }
+.meal-add-row {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.meal-add-row select,
+.meal-add-row input[type="number"] {
+  width: auto;
+  min-width: 4.5rem;
+}
+.meal-cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.meal-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.meal-cal-dow {
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+  padding: 2px 0;
+}
+.meal-cal-cell {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 54px;
+  padding: 4px 6px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.meal-cal-cell:hover {
+  border-color: #888;
+}
+.meal-cal-cell.is-selected {
+  outline: 2px solid #2a6f97;
+  outline-offset: 1px;
+}
+.meal-cal-cell.is-today {
+  background: #f3f8fc;
+}
+.meal-cal-cell.has-meals {
+  background: #eef8f0;
+}
+.meal-cal-daynum {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+}
+.meal-cal-meta {
+  display: block;
+  font-size: 11px;
+  color: #555;
+  margin-top: 2px;
+}
+.meal-cal-pad {
+  min-height: 54px;
+}
+.meal-list {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+.meal-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fff;
+}
+.meal-item-main {
+  flex: 1 1 200px;
+}
+.meal-charts {
+  display: grid;
+  gap: 8px;
+}
+.meal-chart-wrap {
+  height: 280px;
+}
+@media (min-width: 900px) {
+  .meal-charts {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 dialog {
   border: 1px solid var(--line);
   border-radius: 16px;

@@ -38,6 +38,22 @@ SCHEMA_SQL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS user_meals (
+      meal_id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id VARCHAR(32) NOT NULL,
+      meal_date DATE NOT NULL,
+      meal_slot VARCHAR(16) NOT NULL DEFAULT '午餐',
+      recipe_id INT NULL,
+      recipe_name VARCHAR(255) NULL,
+      country VARCHAR(128) NULL,
+      servings DECIMAL(6,2) NOT NULL DEFAULT 1,
+      nutrients_json TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_meals_day (user_id, meal_date),
+      CONSTRAINT fk_meals_user FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS health_records (
       record_id INT AUTO_INCREMENT PRIMARY KEY,
       user_id VARCHAR(32) NOT NULL,

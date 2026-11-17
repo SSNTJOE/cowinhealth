@@ -76,7 +76,7 @@ add("番茄", 18, 1.2, 10, 0.3, 0.2, 0, 0, 0.8, 14, 0, 3.9, 0.9, 0.2, 95)
 add("胡蘿蔔", 41, 2.8, 33, 0.3, 0.2, 0, 0.1, 0.8, 5.9, 0, 9.6, 0.9, 0.2, 88)
 add("高麗菜", 25, 2.5, 40, 0.5, 0.2, 0, 0.3, 0.4, 37, 0, 5.8, 1.3, 0.1, 92)
 add("大白菜", 13, 1.2, 77, 0.3, 0.1, 0, 0.4, 0.3, 45, 0, 2.2, 1.5, 0.2, 95)
-add("菠菜", 23, 2.2, 99, 2.7, 0.5, 0, 1,0, 1.2, 28, 0, 3.6, 2.9, 0.4, 91)
+add("菠菜", 23, 2.2, 99, 2.7, 0.5, 0, 1.0, 1.2, 28, 0, 3.6, 2.9, 0.4, 91)
 add("青江菜", 13, 1.0, 105, 0.8, 0.2, 0, 0.5, 0.5, 45, 0, 2.2, 1.5, 0.2, 95)
 add("芥藍", 28, 2.6, 128, 0.8, 0.3, 0, 0.8, 0.8, 70, 0, 5.0, 1.5, 0.4, 90)
 add("油菜", 14, 1.2, 108, 1.0, 0.3, 0, 0.6, 0.6, 36, 0, 2.2, 1.2, 0.2, 95)
@@ -103,7 +103,7 @@ add("豆腐", 76, 0.3, 350, 1.6, 0.8, 0, 9, 0.5, 0.2, 0, 1.9, 8, 4.8, 85)
 add("金針菇", 37, 2.7, 0, 1.2, 0.6, 0, 2.2, 5.5, 0, 0.1, 7.8, 2.7, 0.3, 88)
 add("香菇", 34, 2.5, 2, 0.4, 1.0, 0, 5.7, 4.0, 0, 0.4, 6.8, 2.2, 0.5, 90)
 add("洋菇", 22, 1.0, 3, 0.5, 0.5, 0, 9.3, 3.8, 2.1, 0.2, 3.3, 3.1, 0.3, 92)
-add("黑木耳", 65, 7.0, 37, 5.0, 0.6, 0, 2,0, 0.4, 0, 0, 14, 1.5, 0.2, 80)
+add("黑木耳", 65, 7.0, 37, 5.0, 0.6, 0, 2.0, 0.4, 0, 0, 14, 1.5, 0.2, 80)
 add("魚腥草", 20, 1.5, 70, 2.0, 0.4, 0, 0.5, 0.6, 20, 0, 3.0, 2.0, 0.3, 93)
 add("木薯葉", 91, 5.0, 340, 4.0, 1.0, 0, 0.9, 1.5, 80, 0, 14, 7, 1.0, 75)
 
@@ -174,14 +174,14 @@ add("蛋黃", 322, 0, 129, 2.7, 2.3, 90, 56, 3.5, 0, 5.4, 3.6, 16, 27, 52)
 add("皮蛋", 170, 0, 60, 2.0, 1.4, 40, 30, 1.5, 0, 1.0, 2, 14, 12, 70)
 add("牛奶", 61, 0, 113, 0.03, 0.4, 20, 3.7, 0.5, 0, 0.1, 4.8, 3.2, 3.3, 88)
 add("優格", 61, 0, 121, 0.05, 0.6, 15, 3.0, 0.4, 0.5, 0.1, 4.7, 3.5, 3.3, 88)
-add("奶油", 717, 0, 24, 0.02, 0.1, 8, 1,0, 0.1, 0, 1.5, 0.1, 0.9, 81, 16)
+add("奶油", 717, 0, 24, 0.02, 0.1, 8, 1.0, 0.1, 0, 1.5, 0.1, 0.9, 81, 16)
 add("起司", 402, 0, 721, 0.7, 3.1, 30, 14, 0.6, 0, 0.6, 1.3, 25, 33, 37)
 
 # Seasonings, sugars, oils, tea.
 add("食鹽", 0, 0, 24, 0.3, 0.1, 4500, 0.1, 0, 0, 0, 0, 0, 0, 0)
 add("白糖", 387, 0, 1, 0.05, 0.01, 0, 0.6, 0, 0, 0, 100, 0, 0, 0.2)
 add("冰糖", 387, 0, 1, 0.05, 0.01, 0, 0.6, 0, 0, 0, 100, 0, 0, 0.2)
-add("黑糖", 380, 0, 83, 4.7, 0.2, 0, 2,0, 0.2, 0, 0, 98, 0.1, 0, 1.5)
+add("黑糖", 380, 0, 83, 4.7, 0.2, 0, 2.0, 0.2, 0, 0, 98, 0.1, 0, 1.5)
 add("蜂蜜", 304, 0.2, 6, 0.4, 0.2, 0, 0.8, 0.2, 0.5, 0, 82, 0.3, 0, 17)
 add("醋", 18, 0, 7, 0.2, 0.04, 0, 0.1, 0, 0, 0, 0.9, 0.1, 0, 95)
 add("醬油", 53, 0.8, 20, 1.4, 0.4, 2, 0.5, 2.5, 0, 0, 4.9, 8.1, 0.1, 71)
@@ -212,7 +212,7 @@ add("迷迭香", 331, 43, 317, 6.7, 0.9, 0, 4.6, 1.5, 22, 0, 64, 4.9, 15, 9)
 add("羅勒", 23, 1.6, 177, 3.2, 0.8, 0, 0.3, 0.8, 18, 0, 2.7, 3.2, 0.6, 92)
 add("薄荷", 44, 8.0, 199, 5.1, 1.0, 0, 0, 1.0, 13, 0, 8, 3.3, 0.7, 86)
 add("香茅", 99, 2.0, 60, 8, 2, 0, 1, 0.5, 2.6, 0, 25, 1.8, 0.5, 71)
-add("人參", 350, 10, 80, 5, 1.5, 0, 3, 2, 5, 0, 70, 12, 1,5, 8)
+add("人參", 350, 10, 80, 5, 1.5, 0, 3, 2, 5, 0, 70, 12, 1.5, 8)
 
 HEADERS = (
     "熱量(大卡)",
@@ -259,24 +259,40 @@ def totals(text: str) -> list[float]:
 def main() -> None:
     book = xlrd.open_workbook(RECIPE)
     sheet = book.sheet_by_index(0)
+    headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
+    # Idempotent: keep existing non-nutrient columns; rewrite nutrient block at the end.
+    base_ncols = sheet.ncols
+    for header in HEADERS:
+        if header in headers:
+            base_ncols = min(base_ncols, headers.index(header))
+            break
     out = xlwt.Workbook(encoding="utf-8")
     dest = out.add_sheet(sheet.name or "Recipe")
-    for col in range(sheet.ncols + len(HEADERS)):
+    for col in range(base_ncols + len(HEADERS)):
         dest.col(col).width = 256 * 18
-    for col in range(sheet.ncols):
+    for col in range(base_ncols):
         dest.write(0, col, sheet.cell_value(0, col))
     for offset, header in enumerate(HEADERS):
-        dest.write(0, sheet.ncols + offset, header)
+        dest.write(0, base_ncols + offset, header)
+    ok = 0
+    skipped = 0
     for row in range(1, sheet.nrows):
-        for col in range(sheet.ncols):
-            value = sheet.cell_value(row, col)
-            dest.write(row, col, value)
-        for offset, value in enumerate(totals(sheet.cell_value(row, 5))):
-            dest.write(row, sheet.ncols + offset, value)
+        for col in range(base_ncols):
+            dest.write(row, col, sheet.cell_value(row, col))
+        try:
+            values = totals(sheet.cell_value(row, 5))
+            ok += 1
+        except Exception as exc:
+            values = [0.0] * len(HEADERS)
+            skipped += 1
+            name = sheet.cell_value(row, 1) if sheet.ncols > 1 else row
+            print(f"skip row {row} {name}: {exc}")
+        for offset, value in enumerate(values):
+            dest.write(row, base_ncols + offset, value)
     temporary = RECIPE + ".new"
     out.save(temporary)
     os.replace(temporary, RECIPE)
-    print(f"rows {sheet.nrows - 1} ingredients {len(N)}")
+    print(f"rows {sheet.nrows - 1} ok {ok} skipped {skipped} ingredients {len(N)}")
 
 
 if __name__ == "__main__":

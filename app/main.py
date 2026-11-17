@@ -35,10 +35,12 @@ from .health_flags import (
     user_allergies,
     user_conditions,
 )
+from .nutrient_targets import lookup_targets
 from .recipe_ensure import ensure_recipe
 from .recipes import TEACHING_DISCLAIMER, filter_recipes, split_csv, usable_countries
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
+from . import user_meals
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -618,6 +620,96 @@ def api_recipes_create(
 ):
     """Alias of /api/recipes/ensure — create when country+name is missing."""
     return _api_recipes_create_or_ensure(country, name, lang)
+
+
+@app.get("/api/nutrient-targets")
+def api_nutrient_targets(request: Request, age: int | None = None, gender: str | None = None):
+    user_id = current_user_id(request)
+    user = fetch_user(user_id) if user_id else None
+    use_age = age
+    use_gender = gender
+    if user:
+        if use_age is None:
+            use_age = user.get("age")
+            if use_age is None and user.get("birth_year"):
+                use_age = age_from_birth_year(int(user["birth_year"]))
+        if not use_gender:
+            use_gender = user.get("gender")
+    try:
+        return lookup_targets(use_age, use_gender)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到 daily_nutrient.xlsx") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/meals/day")
+def api_meals_day(request: Request, date: str | None = None):
+    user_id = require_user(request)
+    user = fetch_user(user_id) or {}
+    try:
+        return user_meals.day_summary(user_id, user, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/meals/month")
+def api_meals_month(request: Request, year: int | None = None, month: int | None = None):
+    user_id = require_user(request)
+    user = fetch_user(user_id) or {}
+    now = datetime.now()
+    use_year = int(year or now.year)
+    use_month = int(month or now.month)
+    try:
+        return user_meals.month_overview(user_id, user, use_year, use_month)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/meals")
+def api_meals_add(
+    request: Request,
+    recipe_id: int = Form(...),
+    meal_date: str | None = Form(default=None),
+    meal_slot: str | None = Form(default=None),
+    servings: float = Form(default=1),
+    lang: str = Form(default="zh"),
+):
+    user_id = require_user(request)
+    try:
+        meal = user_meals.add_meal(
+            user_id,
+            recipe_id=recipe_id,
+            meal_date=meal_date,
+            meal_slot=meal_slot,
+            servings=servings,
+            lang=lang,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    user = fetch_user(user_id) or {}
+    summary = user_meals.day_summary(user_id, user, meal["meal_date"])
+    return {"ok": True, "meal": meal, "day": summary}
+
+
+@app.delete("/api/meals/{meal_id}")
+def api_meals_delete(request: Request, meal_id: int, date: str | None = None):
+    user_id = require_user(request)
+    if not user_meals.delete_meal(user_id, meal_id):
+        raise HTTPException(status_code=404, detail="找不到這筆飲食紀錄")
+    user = fetch_user(user_id) or {}
+    summary = user_meals.day_summary(user_id, user, date)
+    return {"ok": True, "day": summary}
 
 
 @app.post("/api/register")
