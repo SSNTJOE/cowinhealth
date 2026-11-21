@@ -554,7 +554,7 @@ def active_contraindications(
     patterns: dict | None,
     female: bool = False,
 ) -> list[str]:
-    """Organ+證型 tags for scores 1–5 only. Score 6, 7–10, and missing scores do not filter."""
+    """Organ+證型 tags for scores 1–7 only. Healthy 8–10 and missing scores do not filter."""
     organs = list(CONTRAINDICATION_ORGANS)
     if female:
         organs.append(UTERUS_ORGAN)
@@ -562,7 +562,7 @@ def active_contraindications(
     seen: set[str] = set()
     for key, name, score_key, pattern_key in organs:
         score = parse_score(_first_present(scores, (score_key, key, name)))
-        if score is None or score < 1 or score > 5:
+        if score is None or score < 1 or score > 7:
             continue
         raw_pattern = _first_present(patterns, (pattern_key, key, name))
         compact = compact_pattern("" if raw_pattern is None else str(raw_pattern))

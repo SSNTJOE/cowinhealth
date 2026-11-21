@@ -44,6 +44,6 @@ def build_trend(rows: list[dict], include_uterus: bool = True) -> dict:
     return {
         "y_min": 1,
         "y_max": 10,
-        "y_label": "健康度（臉+舌質+舌苔[+脈]平均；近正常 ΔE*→10，ΔE_ref≈20→1；7–10 健康）",
+        "y_label": "健康度（本場有拍：臉+舌質+舌苔[+大便][+尿尿][+脈]平均；近正常 ΔE*→10，ΔE_ref≈20→1；8–10 健康）",
         "organs": organs,
     }

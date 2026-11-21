@@ -7,6 +7,7 @@ from typing import Any
 
 from PIL import Image, ImageFilter
 
+from .health_flags import CONDITION_OPTIONS
 from .syndrome import (
     ORGAN_META,
     add,
@@ -34,8 +35,22 @@ def clamp(value: float, low: int = 1, high: int = 10) -> int:
 COLOR_DELTA_TINY = 1.0
 DELTA_E_REF = 20.0
 TONGUE_COAT_DELTA_E_REF = 24.0
-# Inside this ΔE of the teaching normal: scores 7–10. Beyond it: 1–6.
+# Inside this ΔE of the teaching normal: scores 8–10. Beyond: 4–7, or 1–3 if severe_gate.
 NORMAL_DELTA_E = 3.0
+# Cut between the 4–7 band and the gated 1–3 band (~0.65·ΔE_ref).
+SEVERE_DELTA_E_FRAC = 0.65
+HEALTHY_SCORE_MIN = 8
+# Opens the 1–3 band when ΔE is extreme (checked conditions or severe symptom wording).
+SEVERE_SYMPTOM_KEYWORDS = (
+    "很痛",
+    "劇痛",
+    "極度",
+    "非常不舒服",
+    "難受",
+    "痛到",
+    "無法",
+    "嚴重",
+)
 FACE_ZH_TO_ORGAN = {
     "小腸": "small_intestine",
     "大腸": "large_intestine",
@@ -88,23 +103,49 @@ def relative_delta_health_score(
     return clamp(10 - 9 * (delta_e - d_min) / span)
 
 
+def severe_health_gate(
+    conditions: list[str] | tuple[str, ...] | None = None,
+    symptoms: str = "",
+    discomfort: str = "",
+) -> bool:
+    """True when 1–3 scores may open: any checked special disease or severe wording."""
+    allowed = set(CONDITION_OPTIONS)
+    for label in conditions or ():
+        text = str(label or "").strip()
+        if text and text in allowed:
+            return True
+    blob = f"{symptoms or ''} {discomfort or ''}"
+    return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
+
+
 def delta_e_ref_health_score(
     delta_e: float,
     ref: float = DELTA_E_REF,
     spec: float = NORMAL_DELTA_E,
+    severe_gate: bool = False,
 ) -> int:
-    """Inside the normal ΔE spec: 10 at the teaching color, 7 at the spec edge.
+    """Three bands from ΔE vs teaching normal.
 
-    Outside the spec: 6 just past the edge, 1 at ΔE_ref (face/舌質 20, 舌苔 24) or farther.
+    8–10: ΔE ≤ spec (0→10, spec→8).
+    4–7: past spec until ~0.65·ref (just past→7, cut→4); without severe_gate floor is 4.
+    1–3: only if severe_gate and ΔE ≥ ~0.65·ref (cut→3, ΔE≥ref→1).
     """
     delta = max(0.0, float(delta_e))
+    ref_v = max(float(ref), 1e-6)
     if spec <= 0:
         return 10
     if delta <= spec:
-        return clamp(10 - 3 * delta / spec)
-    span = max(float(ref) - spec, 1e-6)
-    outside = min(1.0, (delta - spec) / span)
-    return clamp(6 - 5 * outside)
+        return clamp(10 - 2 * delta / spec)
+    cut = SEVERE_DELTA_E_FRAC * ref_v
+    if delta < cut:
+        span = max(cut - spec, 1e-6)
+        outside = min(1.0, (delta - spec) / span)
+        return clamp(7 - 3 * outside)
+    if not severe_gate:
+        return 4
+    span = max(ref_v - cut, 1e-6)
+    outside = min(1.0, (delta - cut) / span)
+    return clamp(3 - 2 * outside)
 
 
 def apply_relative_color_scores(
@@ -112,6 +153,7 @@ def apply_relative_color_scores(
     tiny: float = COLOR_DELTA_TINY,
     ref: float = DELTA_E_REF,
     mode: str = "ref",
+    severe_gate: bool = False,
 ) -> dict[str, Any]:
     """1–10 health from ΔE vs teaching normal (ref) or min-max across blocks."""
     deltas = [float(block.get("delta_e") or 0) for block in blocks]
@@ -122,15 +164,19 @@ def apply_relative_color_scores(
         if mode == "minmax":
             block["health_score"] = relative_delta_health_score(delta, d_min, d_max, tiny)
         else:
-            block["health_score"] = delta_e_ref_health_score(delta, ref)
+            block["health_score"] = delta_e_ref_health_score(
+                delta, ref, severe_gate=severe_gate
+            )
     return {
         "formula": (
-            "規格內（ΔE≤3）10→7；超出規格 6→1（ΔE_ref 為 1 分）。7–10 正常。"
+            "規格內（ΔE≤3）10→8；超出規格 7→4；嚴重門開啟且 ΔE≳0.65·ref 才 3→1。"
+            "8–10 健康。"
             if mode != "minmax"
             else "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；近基準→10，最大ΔE→1。"
         ),
         "mode": mode,
         "ref": ref,
+        "severe_gate": bool(severe_gate),
         "d_min": round(d_min, 3),
         "d_max": round(d_max, 3),
         "tiny": tiny,
@@ -162,11 +208,16 @@ def nearest_face_class(stats: dict[str, float]) -> dict[str, Any]:
     return {**best, "centroid_delta_e": round(best_d, 2)}
 
 
-def make_face_block(label: str, stats: dict[str, float], organs: list[str] | tuple[str, ...]) -> dict[str, Any]:
+def make_face_block(
+    label: str,
+    stats: dict[str, float],
+    organs: list[str] | tuple[str, ...],
+    severe_gate: bool = False,
+) -> dict[str, Any]:
     delta = round(lab_cie76(stats, FACE_NORMAL_LAB), 2)
     hit = nearest_face_class(stats)
-    health = delta_e_ref_health_score(delta, DELTA_E_REF)
-    overlay = hit["overlay"] if health < 7 and hit["id"] != "normal" else None
+    health = delta_e_ref_health_score(delta, DELTA_E_REF, severe_gate=severe_gate)
+    overlay = hit["overlay"] if health < HEALTHY_SCORE_MIN and hit["id"] != "normal" else None
     return {
         "label": label,
         "organs": list(organs or []),
@@ -174,7 +225,9 @@ def make_face_block(label: str, stats: dict[str, float], organs: list[str] | tup
         "class_id": hit["id"],
         "class_label": hit["label"],
         "bias": hit["bias"],
-        "api_pattern": "健康" if hit["id"] == "normal" or health >= 7 else hit["api_pattern"],
+        "api_pattern": (
+            "健康" if hit["id"] == "normal" or health >= HEALTHY_SCORE_MIN else hit["api_pattern"]
+        ),
         "overlay": overlay,
         "patterns": hit["patterns"] if overlay else (),
         "look": hit["look"],
@@ -193,6 +246,7 @@ def classify_tongue_bianzheng(
     coat: dict[str, float],
     coating_ratio: float,
     surface: dict[str, float] | None = None,
+    severe_gate: bool = False,
 ) -> dict[str, Any]:
     """Three core logics: 實熱/虛熱 by coat vs peel; 實寒/虛寒 by L*; 濕 primarily coat."""
     body = body or {}
@@ -244,14 +298,24 @@ def classify_tongue_bianzheng(
     elif damp_coat or (db_c >= 14 and greasy):
         label, reason = "濕症", "苔厚膩偏黃"
     meta = TONGUE_CLASS_META[label]
-    body_health = delta_e_ref_health_score(body_de, DELTA_E_REF)
-    coat_health = delta_e_ref_health_score(coat_de, TONGUE_COAT_DELTA_E_REF)
-    overlay = meta["overlay"] if min(body_health, coat_health) < 7 and label != "正常" else None
+    body_health = delta_e_ref_health_score(body_de, DELTA_E_REF, severe_gate=severe_gate)
+    coat_health = delta_e_ref_health_score(
+        coat_de, TONGUE_COAT_DELTA_E_REF, severe_gate=severe_gate
+    )
+    overlay = (
+        meta["overlay"]
+        if min(body_health, coat_health) < HEALTHY_SCORE_MIN and label != "正常"
+        else None
+    )
     return {
         "label": label,
         "bias": meta["bias"],
         "meaning": reason,
-        "api_pattern": "健康" if label == "正常" or min(body_health, coat_health) >= 7 else meta["api_pattern"],
+        "api_pattern": (
+            "健康"
+            if label == "正常" or min(body_health, coat_health) >= HEALTHY_SCORE_MIN
+            else meta["api_pattern"]
+        ),
         "overlay": overlay,
         "patterns": meta["patterns"],
         "targets": meta["targets"],
@@ -1425,7 +1489,7 @@ def classify_face_lab(
     hit = nearest_face_class(stats)
     delta = lab_cie76(stats, FACE_NORMAL_LAB)
     health = delta_e_ref_health_score(delta, DELTA_E_REF)
-    overlay = hit["overlay"] if health < 7 and hit["id"] != "normal" else None
+    overlay = hit["overlay"] if health < HEALTHY_SCORE_MIN and hit["id"] != "normal" else None
     meaning = f"{hit['look']}（近 {hit['hex']}，ΔE* {delta:.1f} vs L*65 a*12 b*20）"
     return pack(hit["bias"], meaning, overlay, hit["patterns"] if overlay else (), delta)
 
@@ -1753,7 +1817,7 @@ def _melasma_patch(stats: dict[str, float], base: dict[str, float]) -> bool:
 
 
 def _uterus_block(label: str, api_pattern: str, overlay: str, strength: float, note: str) -> dict[str, Any]:
-    # ΔE 6–18 stays on the 1–6 side of the face color scale (7–10 would clear the sticker).
+    # ΔE 6–18 stays outside the healthy 8–10 band (so stickers can still show for 1–7).
     delta = round(6 + 12 * max(0.0, min(1.0, strength)), 2)
     return {
         "label": label,
@@ -1852,6 +1916,7 @@ def analyze_face_grid(
     image: Image.Image,
     personal_lab: dict[str, Any] | None = None,
     female: bool = False,
+    severe_gate: bool = False,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
     findings: list[str] = []
     cells: list[dict[str, Any]] = []
@@ -1880,7 +1945,7 @@ def analyze_face_grid(
     _base_y, base_cb, base_cr = rgb_to_ycrcb(complexion_stats["r"], complexion_stats["g"], complexion_stats["b"])
     c_text = (
         f"教學正常值 L*65 a*12 b*20 #E2AC8A（紅黃隱隱）。本圖平均 {base_hex}，"
-        f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。臉色分數 ΔE*/20 → 1–10（7–10 健康）（{TEACHING_NOTE}）"
+        f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。臉色分數 ΔE*/20 → 1–10（8–10 健康）（{TEACHING_NOTE}）"
     )
     findings.append(c_text)
 
@@ -1935,7 +2000,9 @@ def analyze_face_grid(
             if "spleen" in lip_organs and "stomach" in lip_organs:
                 drop = "spleen" if reading.get("bias") == "實熱" else "stomach"
                 lip_organs = [organ for organ in lip_organs if organ != drop]
-            face_blocks.append(make_face_block(f"face-{cell_id}", stats, lip_organs))
+            face_blocks.append(
+                make_face_block(f"face-{cell_id}", stats, lip_organs, severe_gate=severe_gate)
+            )
         elif kind == "nose":
             # 人中 for the existing uterus rule stays on the original cell-8 lower half.
             nose_lower_stats = region_stats(crop_cell(image, spec["row"], spec["col"], "lower"))
@@ -1969,7 +2036,9 @@ def analyze_face_grid(
                 zread["targets"] = zone_targets
                 remember(zone_targets, zread)
                 block_label = f"face-{cell_id}-{zone['id']}"
-                face_blocks.append(make_face_block(block_label, zstats, zone_targets))
+                face_blocks.append(
+                    make_face_block(block_label, zstats, zone_targets, severe_gate=severe_gate)
+                )
                 split.append(
                     {
                         "id": zone["id"],
@@ -2037,7 +2106,11 @@ def analyze_face_grid(
             stats = stats_by_id[cell_id]
             base = cheek_base if kind == "cheek" else lab_base
             reading = read_cell(stats, base, kind, crops[cell_id])
-            face_blocks.append(make_face_block(f"face-{cell_id}", stats, spec["targets"] or []))
+            face_blocks.append(
+                make_face_block(
+                    f"face-{cell_id}", stats, spec["targets"] or [], severe_gate=severe_gate
+                )
+            )
             if cell_id == 2 and reading["bias"] == "實熱":
                 reading["meaning"] = "額頭實熱 → 心火（區塊對應第2格；使用者所稱區塊3為本格右側面）"
                 reading["targets"] = ["heart"]
@@ -2105,7 +2178,7 @@ def analyze_face_grid(
                 "score": float(block["delta_e"]),
             },
         )
-    color_health = apply_relative_color_scores(face_blocks)
+    color_health = apply_relative_color_scores(face_blocks, severe_gate=severe_gate)
     score_by_label = {block["label"]: block for block in face_blocks}
 
     def attach_face_health(cell: dict[str, Any]) -> None:
@@ -2900,6 +2973,7 @@ def uterus_tongue_blocks(
 def analyze_tongue_grid(
     image: Image.Image,
     female: bool = False,
+    severe_gate: bool = False,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
     findings: list[str] = []
     marks: list[dict[str, Any]] = []
@@ -3274,7 +3348,9 @@ def analyze_tongue_grid(
             "delta_e": round(lab_cie76(coat_box_stats, TONGUE_COAT_NORMAL), 2),
         }
     )
-    bianzheng = classify_tongue_bianzheng(body_all, coat_box_stats, coating_ratio, surface)
+    bianzheng = classify_tongue_bianzheng(
+        body_all, coat_box_stats, coating_ratio, surface, severe_gate=severe_gate
+    )
     for block in body_blocks + coat_blocks:
         block["class_label"] = bianzheng.get("label")
         block["api_pattern"] = bianzheng.get("api_pattern")
@@ -3303,8 +3379,12 @@ def analyze_tongue_grid(
         float(20 - min(bianzheng["body_health"], bianzheng["coat_health"])),
         "coat" if bianzheng["label"] in ("濕症", "實熱") else "body",
     )
-    body_color_health = apply_relative_color_scores(body_blocks, ref=DELTA_E_REF)
-    coat_color_health = apply_relative_color_scores(coat_blocks, ref=TONGUE_COAT_DELTA_E_REF)
+    body_color_health = apply_relative_color_scores(
+        body_blocks, ref=DELTA_E_REF, severe_gate=severe_gate
+    )
+    coat_color_health = apply_relative_color_scores(
+        coat_blocks, ref=TONGUE_COAT_DELTA_E_REF, severe_gate=severe_gate
+    )
     body_by_label = {block["label"]: block for block in body_blocks}
     coat_by_label = {block["label"]: block for block in coat_blocks}
     for zone in zones:
@@ -3852,8 +3932,25 @@ def inspect_image(
     personal_lab: dict[str, Any] | None = None,
     female: bool = False,
     color_temperature_k: int | float | str | None = None,
+    severe_gate: bool = False,
+    confounders: str | None = None,
 ) -> dict[str, Any]:
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    # Additive stool / urine path: text notes only, no preview persistence.
+    if shot_type in ("stool", "urine"):
+        from .stool_urine import analyze_stool_image, analyze_urine_image
+
+        if shot_type == "stool":
+            return analyze_stool_image(
+                raw_image,
+                color_temperature_k=color_temperature_k,
+                confounders=confounders,
+            )
+        return analyze_urine_image(
+            raw_image,
+            color_temperature_k=color_temperature_k,
+            confounders=confounders,
+        )
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
     else:
@@ -3887,10 +3984,14 @@ def inspect_image(
     face_grid = None
     tongue_grid = None
     if shot_type == "tongue":
-        tongue_grid, grid_findings, colors = analyze_tongue_grid(image, female=female)
+        tongue_grid, grid_findings, colors = analyze_tongue_grid(
+            image, female=female, severe_gate=severe_gate
+        )
         findings.extend(grid_findings)
     else:
-        face_grid, grid_findings, colors = analyze_face_grid(image, personal_lab=personal_lab, female=female)
+        face_grid, grid_findings, colors = analyze_face_grid(
+            image, personal_lab=personal_lab, female=female, severe_gate=severe_gate
+        )
         findings.extend(grid_findings)
 
     if not findings:
@@ -3940,6 +4041,8 @@ def analyze_session(
     female: bool = False,
     color_temperature_k: int | float | str | None = None,
     prior_session: dict[str, Any] | None = None,
+    conditions: list[str] | tuple[str, ...] | None = None,
+    confounders: str | None = None,
 ) -> dict[str, Any]:
     # Prefer camera auto-CCT per shot; ignore legacy discrete UI presets.
     cct_arg: int | float | str | None = "auto"
@@ -3951,6 +4054,7 @@ def analyze_session(
             preset = None
         if preset is not None and preset not in COLOR_TEMPERATURE_CHOICES:
             cct_arg = preset
+    gate = severe_health_gate(conditions, symptoms, discomfort)
     color_reports = [
         inspect_image(
             raw,
@@ -3958,10 +4062,13 @@ def analyze_session(
             personal_lab=personal_lab if shot_type == "face" else None,
             female=female,
             color_temperature_k=cct_arg,
+            severe_gate=gate,
+            confounders=confounders if shot_type in ("stool", "urine") else None,
         )
         for shot_type, raw in images
     ]
     findings: list[str] = []
+    stool_urine_findings: list[str] = []
     region_colors: dict[str, str | None] = {
         "face_color": None,
         "lip_color": None,
@@ -3976,23 +4083,35 @@ def analyze_session(
     face_preview = None
     tongue_preview = None
     crops: dict[str, Any] = {}
+    stool_note = None
+    urine_note = None
     for report in color_reports:
-        findings.extend(report["findings"])
-        for key, value in report["region_colors"].items():
+        shot = report.get("shot_type")
+        # Keep stool/urine text out of organ-score keyword mapping.
+        if shot in ("stool", "urine"):
+            stool_urine_findings.extend(report.get("findings") or [])
+            if report.get("stool"):
+                stool_note = report["stool"]
+            if report.get("urine"):
+                urine_note = report["urine"]
+        else:
+            findings.extend(report["findings"])
+        for key, value in (report.get("region_colors") or {}).items():
             if value:
                 region_colors[key] = value
-        dominant = report["dominant_color"]
-        hsv = report["hsv"]
-        color_label = report["color_label"]
+        dominant = report.get("dominant_color")
+        hsv = report.get("hsv")
+        color_label = report.get("color_label") or color_label
         if report.get("face_grid"):
             face_grid = report["face_grid"]
         if report.get("tongue_grid"):
             tongue_grid = report["tongue_grid"]
-        if report.get("crop"):
-            crops[report["shot_type"]] = {k: v for k, v in report["crop"].items() if k != "preview"}
-        if report["shot_type"] == "face" and report.get("preview"):
+        if report.get("crop") and shot:
+            crops[shot] = {k: v for k, v in report["crop"].items() if k != "preview"}
+        # Never persist stool/urine previews; face/tongue only.
+        if shot == "face" and report.get("preview"):
             face_preview = report["preview"]
-        if report["shot_type"] == "tongue" and report.get("preview"):
+        if shot == "tongue" and report.get("preview"):
             tongue_preview = report["preview"]
 
     evidence = empty_evidence()
@@ -4025,10 +4144,28 @@ def analyze_session(
     face_scores = face_color.get("organ_scores") if face_grid else None
     body_scores = body_color.get("organ_scores") if tongue_grid else None
     coat_scores = coat_color.get("organ_scores") if tongue_grid else None
+    # Modality organ scores only when this session actually captured them with numerics.
+    stool_scores = None
+    urine_scores = None
+    if isinstance(stool_note, dict):
+        raw = stool_note.get("organ_scores")
+        if isinstance(raw, dict) and raw:
+            stool_scores = {k: int(v) for k, v in raw.items() if v is not None}
+            if not stool_scores:
+                stool_scores = None
+    if isinstance(urine_note, dict):
+        raw = urine_note.get("organ_scores")
+        if isinstance(raw, dict) and raw:
+            urine_scores = {k: int(v) for k, v in raw.items() if v is not None}
+            if not urine_scores:
+                urine_scores = None
+    # Denominator per organ = sources present this session (unshot modalities omitted).
     source_maps = {
         "face": face_scores,
         "tongue_body": body_scores,
         "tongue_coat": coat_scores,
+        "stool": stool_scores,
+        "urine": urine_scores,
     }
     scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
     used_sources = [key for key, value in source_maps.items() if value is not None]
@@ -4064,6 +4201,13 @@ def analyze_session(
     organ_health["pattern_scores"] = pattern_scores
     organ_health["lighting"] = session_lighting
     organ_health["score_stabilize"] = stabilize_meta
+    # Text-only stool/urine notes (no image blobs) ride along existing composite JSON.
+    if stool_note or urine_note or stool_urine_findings:
+        organ_health["stool_urine"] = {
+            "stool": stool_note,
+            "urine": urine_note,
+            "findings": list(stool_urine_findings),
+        }
 
     def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
         for organ, label in (pattern_map or {}).items():
@@ -4102,7 +4246,7 @@ def analyze_session(
         if not female and key == "uterus":
             continue
         score = scores[score_key]
-        if score >= 7:
+        if score >= HEALTHY_SCORE_MIN:
             patterns[pattern_key] = "健康"
             overlays[key] = None
             continue
@@ -4120,7 +4264,7 @@ def analyze_session(
             overlay = overlay_from_pattern_label(worst_label)
             if overlay:
                 overlays[key] = overlay
-    all_findings = findings + text_notes + pulse_notes
+    all_findings = findings + stool_urine_findings + text_notes + pulse_notes
     if not female:
         all_findings = [item for item in all_findings if "子宮" not in str(item)]
     if not all_findings:
@@ -4142,6 +4286,8 @@ def analyze_session(
         "complexion": (face_grid or {}).get("complexion"),
         "face_preview": face_preview,
         "tongue_preview": tongue_preview,
+        "stool": stool_note,
+        "urine": urine_note,
         "crop": crops,
         "color_temperature_k": session_lighting["color_temperature_k"],
         "color_temperature_auto": True,

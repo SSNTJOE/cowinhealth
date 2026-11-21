@@ -14,7 +14,10 @@ let lastTonguePreviewUrl = null;
 const ALIGN_FRAMES = {
   face: { left: 0.275, top: 0.10, width: 0.45, height: 0.80, zoom: 2, yBias: 0 },
   tongue: { left: 0.36, top: 0.22, width: 0.28, height: 0.52, zoom: 3.7, yBias: 0.08 },
+  stool: { left: 0.27, top: 0.14, width: 0.46, height: 0.72, zoom: 2, yBias: 0 },
+  urine: { left: 0.27, top: 0.14, width: 0.46, height: 0.72, zoom: 2, yBias: 0 },
 };
+const CIRCLE_SHOTS = new Set(["stool", "urine"]);
 /**
  * Face color JPEG vs the yellow guides. Guides stay put. Tongue capture does not use this.
  * One cell is 1/4 of the analysis frame. The face itself moves UP by 1/4 of a cell,
@@ -25,6 +28,8 @@ const FACE_SCALE = 0.9;
 const ALIGN_HINTS = {
   face: "對準臉：髮際以下～下巴，兩耳以內",
   tongue: "對準舌：上緣對齊上排牙齒，舌體填滿黃框",
+  stool: "對準大便：置於黃圓內；油光／淡脂為教學線索（非診斷）",
+  urine: "對準尿尿：置於黃圓內（教學示範，非診斷）",
 };
 let alignMode = "face";
 let lastFaceGrid = null;
@@ -314,7 +319,11 @@ async function startCamera() {
 }
 
 function setAlignMode(mode) {
-  alignMode = mode === "tongue" ? "tongue" : "face";
+  if (mode === "tongue") alignMode = "tongue";
+  else if (mode === "stool") alignMode = "stool";
+  else if (mode === "urine") alignMode = "urine";
+  else alignMode = "face";
+  const isCircle = CIRCLE_SHOTS.has(alignMode);
   const stage = document.getElementById("camera-stage");
   const frame = document.getElementById("align-frame");
   const dim = document.getElementById("align-dim");
@@ -322,16 +331,19 @@ function setAlignMode(mode) {
   if (stage) {
     stage.classList.toggle("is-face", alignMode === "face");
     stage.classList.toggle("is-tongue", alignMode === "tongue");
+    stage.classList.toggle("is-circle", isCircle);
   }
   if (frame) {
     frame.classList.toggle("is-face", alignMode === "face");
     frame.classList.toggle("is-tongue", alignMode === "tongue");
+    frame.classList.toggle("is-circle", isCircle);
   }
   if (dim) {
     dim.classList.toggle("is-face", alignMode === "face");
     dim.classList.toggle("is-tongue", alignMode === "tongue");
+    dim.classList.toggle("is-circle", isCircle);
   }
-  if (hint) hint.textContent = ALIGN_HINTS[alignMode];
+  if (hint) hint.textContent = ALIGN_HINTS[alignMode] || ALIGN_HINTS.face;
   syncAlignMask();
   requestAnimationFrame(syncAlignMask);
 }
@@ -346,12 +358,31 @@ function syncAlignMask() {
   if (sr.width < 2 || sr.height < 2 || fr.width < 2 || fr.height < 2) return;
   const left = Math.max(0, fr.left - sr.left);
   const top = Math.max(0, fr.top - sr.top);
+  if (CIRCLE_SHOTS.has(alignMode)) {
+    const cx = left + fr.width / 2;
+    const cy = top + fr.height / 2;
+    const r = Math.min(fr.width, fr.height) / 2;
+    const hole = `radial-gradient(circle ${r}px at ${cx}px ${cy}px, transparent ${r}px, #000 ${r + 0.5}px)`;
+    dim.style.webkitMaskImage = hole;
+    dim.style.maskImage = hole;
+    dim.style.webkitMaskSize = "100% 100%";
+    dim.style.maskSize = "100% 100%";
+    dim.style.webkitMaskPosition = "0 0";
+    dim.style.maskPosition = "0 0";
+    dim.style.webkitMaskComposite = "source-over";
+    dim.style.maskComposite = "overwrite";
+    return;
+  }
+  dim.style.webkitMaskImage = "linear-gradient(#000 0 0), linear-gradient(#000 0 0)";
+  dim.style.maskImage = "linear-gradient(#000 0 0), linear-gradient(#000 0 0)";
   const size = `100% 100%, ${fr.width}px ${fr.height}px`;
   const pos = `0 0, ${left}px ${top}px`;
   dim.style.webkitMaskSize = size;
   dim.style.maskSize = size;
   dim.style.webkitMaskPosition = pos;
   dim.style.maskPosition = pos;
+  dim.style.webkitMaskComposite = "xor";
+  dim.style.maskComposite = "exclude";
 }
 
 function objectPositionFractions(value) {
@@ -535,11 +566,84 @@ function captureFaceFrame() {
   });
 }
 
+/** Circle ROI crop at ~2× zoom (stool / urine). No preview UI. */
+function circleClipSource(vw, vh, kind) {
+  const clip = document.getElementById("camera-clip");
+  const vr = video.getBoundingClientRect();
+  const cr = clip ? clip.getBoundingClientRect() : null;
+  if (cr && vr.width > 2 && vr.height > 2 && cr.width > 2 && cr.height > 2) {
+    const pos = objectPositionFractions(getComputedStyle(video).objectPosition);
+    return coverSourceWindow(vw, vh, vr.width, vr.height, localXSafe(cr, vr), localYSafe(cr, vr), cr.width, cr.height, pos);
+  }
+  const stage = document.getElementById("camera-stage") || video;
+  const sw = Math.max(1, stage.clientWidth || 640);
+  const sh = Math.max(1, stage.clientHeight || 480);
+  const frame = ALIGN_FRAMES[kind] || ALIGN_FRAMES.stool;
+  const clipW = frame.width * sw;
+  const clipH = frame.height * sh;
+  const zoom = frame.zoom || 1;
+  const ew = clipW * zoom;
+  const eh = clipH * zoom;
+  const localX = -((clipW - ew) / 2);
+  const localY = -((clipH - eh) / 2 + (frame.yBias || 0) * clipH);
+  return coverSourceWindow(vw, vh, ew, eh, localX, localY, clipW, clipH, { x: 0.5, y: 0.5 });
+}
+
+function localXSafe(cr, vr) {
+  return cr.left - vr.left;
+}
+
+function localYSafe(cr, vr) {
+  return cr.top - vr.top;
+}
+
+function captureCircleFrame(kind) {
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  const source = circleClipSource(vw, vh, kind);
+  let sx = source.sx;
+  let sy = source.sy;
+  let srcW = source.srcW;
+  let srcH = source.srcH;
+  const x0 = Math.max(0, sx);
+  const y0 = Math.max(0, sy);
+  const x1 = Math.min(vw, sx + srcW);
+  const y1 = Math.min(vh, sy + srcH);
+  if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+    sx = x0;
+    sy = y0;
+    srcW = x1 - x0;
+    srcH = y1 - y0;
+  }
+  const destW = Math.max(1, Math.round(source.destW));
+  const destH = Math.max(1, Math.round(source.destH));
+  canvas.width = destW;
+  canvas.height = destH;
+  const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.translate(destW, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, sx, sy, srcW, srcH, 0, 0, destW, destH);
+  ctx.restore();
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
+  });
+}
+
 function captureFrame(kind) {
-  const mode = kind === "tongue" ? "tongue" : "face";
+  const mode = CIRCLE_SHOTS.has(kind) ? kind : kind === "tongue" ? "tongue" : "face";
   setAlignMode(mode);
   if (mode === "tongue") return captureTongueFrame();
+  if (CIRCLE_SHOTS.has(mode)) return captureCircleFrame(mode);
   return captureFaceFrame();
+}
+
+function selectedConfounders(kind) {
+  const name = kind === "urine" ? "urine-cf" : "stool-cf";
+  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
+    .map((el) => el.value)
+    .filter(Boolean)
+    .join(",");
 }
 
 const SYNDROME_STICKERS = new Set([
@@ -550,14 +654,14 @@ const SYNDROME_STICKERS = new Set([
   "mositure.png",
 ]);
 
-/** Opacity for the four syndrome stickers. 7–10 is normal, so those stickers are hidden. */
+/** Opacity for the four syndrome stickers. 8–10 is healthy, so those stickers are hidden. */
 function syndromeStickerOpacity(score) {
-  const transparency = { 1: 0, 2: 0.2, 3: 0.4, 4: 0.5, 5: 0.6, 6: 0.8 };
+  const transparency = { 1: 0, 2: 0.2, 3: 0.4, 4: 0.5, 5: 0.6, 6: 0.7, 7: 0.8 };
   if (score == null || score === "") return 1;
   const n = Math.round(Number(score));
   if (!Number.isFinite(n)) return 1;
-  if (n >= 7) return 0;
-  const t = transparency[Math.max(1, Math.min(6, n))];
+  if (n >= 8) return 0;
+  const t = transparency[Math.max(1, Math.min(7, n))];
   return 1 - t;
 }
 
@@ -821,7 +925,7 @@ function hidesSpleenStomachPatternList(text) {
 
 function patternLabel(score, pattern) {
   const n = Number(score);
-  if (!Number.isFinite(n) || n >= 7) return "健康";
+  if (!Number.isFinite(n) || n >= 8) return "健康";
   if (n === 5 && (pattern === "未定" || pattern == null || pattern === "")) return "待觀察";
   return pattern || "";
 }
@@ -2114,7 +2218,10 @@ async function sendRecord(extraShot) {
   if (extraShot) {
     const blob = await captureFrame(extraShot);
     if (!blob) throw new Error("無法擷取畫面");
-    lastShots[extraShot] = blob;
+    // Face/tongue may be re-sent later; stool/urine are analyze-only (no photo keep/display).
+    if (!CIRCLE_SHOTS.has(extraShot)) {
+      lastShots[extraShot] = blob;
+    }
     if (extraShot === "face") {
       if (lastFacePreviewUrl && lastFacePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(lastFacePreviewUrl);
       lastFacePreviewUrl = URL.createObjectURL(blob);
@@ -2125,12 +2232,25 @@ async function sendRecord(extraShot) {
     }
     body.append("shot_type", extraShot);
     body.append("image", blob, `${extraShot}.jpg`);
+    if (CIRCLE_SHOTS.has(extraShot)) {
+      const cf = selectedConfounders(extraShot);
+      if (cf) body.append("confounders", cf);
+    }
   }
   if (lastShots.face && extraShot !== "face") body.append("face", lastShots.face, "face.jpg");
   if (lastShots.tongue && extraShot !== "tongue") body.append("tongue", lastShots.tongue, "tongue.jpg");
   const result = await api("/api/record", { method: "POST", body });
-  camMsg.textContent = "已寫入 health_records";
+  camMsg.textContent = CIRCLE_SHOTS.has(extraShot)
+    ? "已產生文字判斷（未存照片）"
+    : "已寫入 health_records";
   camMsg.className = "status ok";
+  // Stool/urine: never show captured image grids.
+  if (CIRCLE_SHOTS.has(extraShot)) {
+    if (result) {
+      result.face_preview = result.face_preview || lastFacePreviewUrl;
+      result.tongue_preview = result.tongue_preview || lastTonguePreviewUrl;
+    }
+  }
   renderResult(result);
   await loadRecords();
 }
@@ -2197,6 +2317,10 @@ setAlignMode(alignMode);
 
 document.getElementById("btn-face").addEventListener("pointerenter", () => setAlignMode("face"));
 document.getElementById("btn-tongue").addEventListener("pointerenter", () => setAlignMode("tongue"));
+const btnStool = document.getElementById("btn-stool");
+const btnUrine = document.getElementById("btn-urine");
+if (btnStool) btnStool.addEventListener("pointerenter", () => setAlignMode("stool"));
+if (btnUrine) btnUrine.addEventListener("pointerenter", () => setAlignMode("urine"));
 document.getElementById("btn-face").addEventListener("click", async () => {
   try {
     setAlignMode("face");
@@ -2219,6 +2343,19 @@ document.getElementById("btn-tongue").addEventListener("click", async () => {
     camMsg.className = "status err";
   }
 });
+async function captureCircleShot(kind) {
+  try {
+    setAlignMode(kind);
+    await startCamera();
+    if (!cameraIsLive()) return;
+    await sendRecord(kind);
+  } catch (err) {
+    camMsg.textContent = formatApiError(err);
+    camMsg.className = "status err";
+  }
+}
+if (btnStool) btnStool.addEventListener("click", () => captureCircleShot("stool"));
+if (btnUrine) btnUrine.addEventListener("click", () => captureCircleShot("urine"));
 document.getElementById("btn-save").addEventListener("click", async () => {
   try { await sendRecord(null); } catch (err) {
     camMsg.textContent = formatApiError(err);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=acu-search1" />
+  <link rel="stylesheet" href="/static/styles.css?v=stool-urine1" />
 </head>
 <body>
   <div class="wrap">
@@ -112,9 +112,32 @@
         <p id="align-hint" class="align-hint">對準臉：髮際以下～下巴，兩耳以內</p>
       </div>
       <canvas id="snap" class="hidden"></canvas>
+      <details class="stool-urine-confounders">
+        <summary>近２４小時飲食／藥物（選填，教學用）</summary>
+        <fieldset id="stool-confounders" class="confounder-set">
+          <legend>大便混淆因子</legend>
+          <label><input type="checkbox" name="stool-cf" value="pitaya" />火龍果／紅色蔬果</label>
+          <label><input type="checkbox" name="stool-cf" value="pig_blood" />豬血／血品</label>
+          <label><input type="checkbox" name="stool-cf" value="dark_greens" />深綠色蔬菜</label>
+          <label><input type="checkbox" name="stool-cf" value="iron" />鐵劑</label>
+          <label><input type="checkbox" name="stool-cf" value="antacid" />制酸劑／鋇劑</label>
+          <label><input type="checkbox" name="stool-cf" value="bismuth" />鉍劑</label>
+          <label><input type="checkbox" name="stool-cf" value="oily" />高油脂飲食（淡黃／油光混淆）</label>
+          <label><input type="checkbox" name="stool-cf" value="antibiotics" />抗生素</label>
+        </fieldset>
+        <fieldset id="urine-confounders" class="confounder-set">
+          <legend>尿尿染色因子</legend>
+          <label><input type="checkbox" name="urine-cf" value="pitaya" />火龍果</label>
+          <label><input type="checkbox" name="urine-cf" value="beet" />甜菜</label>
+          <label><input type="checkbox" name="urine-cf" value="b_vitamins" />Ｂ群</label>
+          <label><input type="checkbox" name="urine-cf" value="drug_stain" />藥物染色</label>
+        </fieldset>
+      </details>
       <div class="actions">
         <button type="button" id="btn-face">拍臉 / 眼 / 唇</button>
         <button type="button" id="btn-tongue" class="secondary">拍舌頭</button>
+        <button type="button" id="btn-stool" class="secondary">大便</button>
+        <button type="button" id="btn-urine" class="secondary">尿尿</button>
         <button type="button" id="btn-save" class="ghost">儲存今日紀錄（含狀況文字）</button>
       </div>
       <p id="cam-msg" class="status"></p>
@@ -215,11 +238,11 @@
         <div id="organ-pins"></div>
       </div>
       <div id="scores" class="scores"></div>
-      <p class="note">臉色、舌色、舌苔各自對教學正常值。規格內（ΔE≤3）記 7–10，越接近正常越靠近 10，貼到規格邊緣為 7。超過規格記 1–6，剛超出為 6，離越遠越靠近 1。臟腑最終分只平均有判到的項目：一項用該分，兩項或三項再平均。7–10 不放證型圖；1–6 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，6 分 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。<span class="uterus-note hidden">子宮只在女生圖上。</span>臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。<span class="uterus-note hidden">照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</span></p>
+      <p class="note">臉色、舌色、舌苔各自對教學正常值；大便／尿尿若有教學色分也會併入該臟腑。規格內（ΔE≤3）記 8–10，越接近正常越靠近 10，貼到規格邊緣為 8。超過規格記 4–7，剛超出為 7，離越遠越靠近 4；僅勾選特殊疾病或今日感覺／不舒服達嚴重程度，且色差極大時才開 1–3。臟腑最終分只平均<strong>本場有拍到且有分數</strong>的來源（臉色／舌色／舌苔／大便／尿尿）：未拍者不進分母；一項用該分，多項再平均。大便／尿尿僅文字、無分數時不進平均。8–10 不放證型圖；1–7 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，7 分約 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。<span class="uterus-note hidden">子宮只在女生圖上。</span>臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。<span class="uterus-note hidden">照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</span></p>
       <p class="note" id="disclaimer"></p>
 
       <h3>臟腑分數趨勢</h3>
-      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（近基本色 10，最大色差 1；7–10 健康）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
+      <p class="note">橫軸為檢測時間、縱軸為 1–10 分（近基本色 10，最大色差 1；8–10 健康）。每條線一種臟腑顏色，節點形狀也不同。教學參考，非診斷。</p>
       <div class="trend-wrap">
         <canvas id="trend-chart"></canvas>
       </div>
@@ -246,7 +269,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=acu-search1"></script>
-  <script src="/static/app.js?v=acu-search1"></script>
+  <script src="/static/common.js?v=stool-urine1"></script>
+  <script src="/static/app.js?v=stool-urine1"></script>
 </body>
 </html>

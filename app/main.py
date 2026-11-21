@@ -1074,6 +1074,7 @@ async def analyze(
     pulse_json: str | None = Form(default=None),
     include_pulse: str | None = Form(default=None),
     color_temperature_k: str | None = Form(default=None),
+    confounders: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
@@ -1106,6 +1107,8 @@ async def analyze(
         female=(profile or {}).get("gender") == "female",
         color_temperature_k=color_temperature_k,
         prior_session=prior_session,
+        conditions=user_conditions(profile),
+        confounders=confounders,
     )
     week_records = fetch_week_records_for_advice(user_id)
     advice = build_advice(

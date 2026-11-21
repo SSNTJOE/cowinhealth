@@ -37,17 +37,18 @@ private val SYNDROME_STICKERS = setOf(
     "mositure.png",
 )
 
-/** Alpha for the four syndrome stickers. Null hides 7–10, which count as normal. */
+/** Alpha for the four syndrome stickers. Null hides 8–10, which count as healthy. */
 fun syndromeStickerAlpha(file: String, score: Int?): Float? {
     if (file !in SYNDROME_STICKERS) return 1f
     val n = score ?: return 1f
-    if (n >= 7) return null
-    val transparency = when (n.coerceIn(1, 6)) {
+    if (n >= 8) return null
+    val transparency = when (n.coerceIn(1, 7)) {
         1 -> 0f
         2 -> 0.2f
         3 -> 0.4f
         4 -> 0.5f
         5 -> 0.6f
+        6 -> 0.7f
         else -> 0.8f
     }
     return 1f - transparency

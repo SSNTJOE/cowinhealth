@@ -32,10 +32,11 @@ TONGUE_ZONES = (
     ("right", "舌右"),
 )
 GENDER_LABELS = {"female": "女", "male": "男", "other": "其他"}
-# People with no disease and no discomfort are expected in this health-score band.
-QUIET_LOW = 3.0
-QUIET_HIGH = 6.0
-SEVERE_HIGH = 2.0
+# Quiet people (no disease / discomfort) floor at 4; 4–7 is outside-spec without severe gate.
+QUIET_LOW = 4.0
+QUIET_HIGH = 7.0
+# Below this for quiet cohorts should not happen under the gated 1–3 rule.
+SEVERE_HIGH = 3.0
 
 HEADER = (
     ["年齡", "性別", "特殊疾病與不舒服"]
@@ -274,13 +275,13 @@ def _cohorts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         elif mean_all is None:
             verdict = "缺測"
         elif mean_all <= SEVERE_HIGH:
-            verdict = "無病者均分落在1–2，視為重症，這個年齡性別的判讀偏嚴"
-        elif QUIET_LOW <= mean_all <= QUIET_HIGH:
-            verdict = "無病者均分在3–6，符合參考"
-        elif mean_all > QUIET_HIGH:
-            verdict = "無病者均分高於3–6，判讀偏鬆"
+            verdict = "無病者均分落在1–3，視為重症，這個年齡性別的判讀偏嚴"
+        elif mean_all < QUIET_LOW:
+            verdict = "無病者均分低於4，異常偏低"
+        elif mean_all <= QUIET_HIGH:
+            verdict = "無病者均分在4–7，符合規格外一般色差參考"
         else:
-            verdict = "無病者均分低於3–6、尚未到1–2"
+            verdict = "無病者均分在8–10健康帶"
         cohorts.append(
             {
                 "age_band": item["age_band"],
@@ -388,7 +389,8 @@ def export_workbook(conn: sqlite3.Connection) -> None:
     learning = book.add_sheet("年齡性別學習")
     note = (
         "差異值是與教學正常色的ΔE。ΔE在3以內為綠色，超過為紅色。"
-        "沒有特殊疾病、也沒有不舒服的人，臉色、舌色、舌苔平均健康分應在3到6；平均1到2視為重症。"
+        "沒有特殊疾病、也沒有不舒服的人，臉色、舌色、舌苔平均健康分應在4到7（規格外一般色差；健康帶為8–10）；"
+        "平均1到3視為重症（不應在無嚴重門時出現）。"
         "同一年齡區塊、同一性別累積至少5次無不適紀錄後，用這個範圍核對判讀偏鬆或偏嚴。"
         "完整每次紀錄在 deviation.db；本表只顯示最近65000列。"
     )

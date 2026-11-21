@@ -115,6 +115,15 @@ video, canvas, img.preview {
   --align-radius: 8px 8px 50% 50% / 8px 8px 40% 40%;
   --align-zoom: 3.7;
 }
+.camera-stage.is-circle {
+  /* Yellow circle ROI for stool / urine; ~2× digital zoom. */
+  --align-left: 27%;
+  --align-top: 14%;
+  --align-width: 46%;
+  --align-height: 72%;
+  --align-radius: 50%;
+  --align-zoom: 2;
+}
 .camera-clip {
   position: absolute;
   left: var(--align-left);
@@ -159,6 +168,13 @@ video, canvas, img.preview {
   left: calc((100% - 100% * var(--align-zoom)) / 2);
   top: calc((100% - 100% * var(--align-zoom)) / 2 + 12%);
   object-position: 50% 62%;
+}
+.camera-stage.is-circle video {
+  width: calc(100% * var(--align-zoom));
+  height: calc(100% * var(--align-zoom));
+  left: calc((100% - 100% * var(--align-zoom)) / 2);
+  top: calc((100% - 100% * var(--align-zoom)) / 2);
+  object-position: 50% 50%;
 }
 .align-dim {
   position: absolute;
@@ -219,6 +235,36 @@ video, canvas, img.preview {
 .align-frame.is-tongue .tongue-guides {
   display: block;
   filter: drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.7));
+}
+.align-frame.is-circle {
+  border-radius: 50%;
+}
+.stool-urine-confounders {
+  margin: 8px 0 4px;
+  font-size: 0.92rem;
+}
+.stool-urine-confounders summary {
+  cursor: pointer;
+  color: var(--accent, #5b4a3a);
+}
+.confounder-set {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.confounder-set legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.confounder-set label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 .align-hint {
   position: absolute;

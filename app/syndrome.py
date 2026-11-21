@@ -45,13 +45,15 @@ PULSE_ORGAN_NOTE = (
     "right_chi_heavy=腎(命門), right_chi_light=膀胱(三焦)"
 )
 COLOR_HEALTH_FORMULA = (
-    "正常規格 ΔE≤3：ΔE=0→10，貼到規格邊緣→7。超過規格：剛超出→6，ΔE_ref→1（臉／舌質 20，舌苔 24）。"
-    "7–10 正常，1–6 異常。臉正常 L*65 a*12 b*20；舌質 L*53 a*23 b*12；舌苔 L*70 a*4 b*8。"
-    "證型取有判分來源裡分數最低者；濕熱／寒濕用 mositure。7–10 不放證型圖。"
+    "正常規格 ΔE≤3：ΔE=0→10，貼到規格邊緣→8。超過規格：剛超出→7，約 0.65·ΔE_ref→4；"
+    "僅特殊疾病或嚴重不適且色差極大時才開 1–3（切點→3，ΔE_ref→1；臉／舌質 20，舌苔 24）。"
+    "8–10 健康，4–7 一般色差，1–3 嚴重。臉正常 L*65 a*12 b*20；舌質 L*53 a*23 b*12；舌苔 L*70 a*4 b*8。"
+    "證型取有判分來源裡分數最低者；濕熱／寒濕用 mositure。8–10 不放證型圖。"
 )
 HEALTH_FORMULA = (
-    "臟腑分=round(mean(有判到的臉色、舌色、舌苔))。只有一項就用該分，兩項平均，三項平均。"
-    "沒有判到的項目不列入。三項都沒有則記 10（正常，不放圖）。"
+    "臟腑分=round(mean(本場有拍到且有分數的來源：臉色、舌色、舌苔、大便、尿尿))。"
+    "只平均實際拍攝的模態；未拍者不列入分母。一項用該分，多項再平均。"
+    "都沒有則記 10（正常，不放圖）。大便／尿尿若僅文字教學而無 organ_scores 則不進平均。"
     + COLOR_HEALTH_FORMULA
 )
 
@@ -479,7 +481,11 @@ def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
     include_uterus: bool = True,
 ) -> tuple[dict[str, int], dict[str, Any]]:
-    """Mean of face, tongue body, and tongue coat scores that actually exist for the organ."""
+    """Mean of available modality scores per organ (face / tongue_body / tongue_coat / stool / urine).
+
+    Denominator = count of sources that actually have a score for that organ this session.
+    Unshot or text-only modalities are omitted (None / missing key).
+    """
     composites: dict[str, int] = {}
     breakdown: dict[str, Any] = {}
     for key, name, score_key, _pattern_key in ORGAN_META:

@@ -956,7 +956,7 @@ class MainActivity : AppCompatActivity() {
             if (!patternKey.endsWith("_pattern")) continue
             val scoreKey = patternKey.removeSuffix("_pattern") + "_score"
             val score = scores?.optInt(scoreKey, -1) ?: -1
-            if (score >= 7) copy.put(patternKey, "健康")
+            if (score >= 8) copy.put(patternKey, "健康")
         }
         return copy.toString()
     }
