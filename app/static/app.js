@@ -701,32 +701,70 @@ function renderFaceGrid(grid, previewUrl) {
   });
 }
 
+function syncTongueStageAspect(img) {
+  const stage = document.getElementById("tongue-grid-stage");
+  if (!stage) return;
+  const w = img && img.naturalWidth;
+  const h = img && img.naturalHeight;
+  if (w > 0 && h > 0) {
+    stage.style.aspectRatio = `${w} / ${h}`;
+  } else {
+    stage.style.aspectRatio = "";
+  }
+}
+
+function syncTongueDetailFold(grid) {
+  const fold = document.getElementById("tongue-detail-fold");
+  if (!fold) return;
+  const hasTongue = Boolean(grid && grid.cells && grid.cells.length);
+  const colorLabel = (document.getElementById("color-label") || {}).textContent || "";
+  const colorHex = (document.getElementById("color-hex") || {}).textContent || "";
+  const hasColor = Boolean(String(colorLabel).trim() || String(colorHex).trim());
+  if (hasTongue || hasColor) fold.classList.remove("hidden");
+  else fold.classList.add("hidden");
+}
+
 function renderTongueGrid(grid, previewUrl) {
   const wrap = document.getElementById("tongue-grid-wrap");
   if (!grid || !grid.cells) {
     wrap.classList.add("hidden");
+    syncTongueDetailFold(null);
     return;
   }
   lastTongueGrid = grid;
   wrap.classList.remove("hidden");
+  syncTongueDetailFold(grid);
   const img = document.getElementById("tongue-preview");
-  if (previewUrl) {
-    img.src = previewUrl;
+  const src = previewUrl || grid.preview || "";
+  img.onload = () => syncTongueStageAspect(img);
+  img.onerror = () => syncTongueStageAspect(null);
+  if (src) {
+    if (img.src !== src) img.src = src;
     img.classList.remove("hidden");
-  } else if (!img.src) {
+    if (img.complete) syncTongueStageAspect(img);
+  } else {
     img.removeAttribute("src");
+    img.classList.add("hidden");
+    syncTongueStageAspect(null);
   }
   const overlay = document.getElementById("tongue-grid-overlay");
   overlay.innerHTML = "";
   (grid.cells || []).forEach((cell) => {
     const box = document.createElement("div");
     box.className = "tongue-zone";
-    box.style.left = (cell.left * 100) + "%";
-    box.style.top = (cell.top * 100) + "%";
-    box.style.width = ((cell.right - cell.left) * 100) + "%";
-    box.style.height = ((cell.bottom - cell.top) * 100) + "%";
+    const left = Number(cell.left);
+    const top = Number(cell.top);
+    const right = Number(cell.right);
+    const bottom = Number(cell.bottom);
+    if (![left, top, right, bottom].every(Number.isFinite) || right <= left || bottom <= top) {
+      return;
+    }
+    box.style.left = (left * 100) + "%";
+    box.style.top = (top * 100) + "%";
+    box.style.width = ((right - left) * 100) + "%";
+    box.style.height = ((bottom - top) * 100) + "%";
     const labText = cell.lab_text || "";
-    box.innerHTML = `<strong>${cell.label}</strong> ${cell.organs}<br>${cell.anatomy}<br>${labText}<br>${cell.bias || ""}`;
+    box.innerHTML = `<strong>${cell.label}</strong> ${cell.organs}<br>${cell.anatomy || ""}<br>${labText}<br>${cell.bias || ""}`;
     overlay.appendChild(box);
   });
   const flagEl = document.getElementById("tongue-tip-flag");
@@ -855,6 +893,7 @@ function renderResult(result) {
   }
   const lightNote = lightBits.length ? `（自動${lightBits.join("，")}）` : "";
   document.getElementById("color-label").textContent = " " + (result.color_label || "") + lightNote;
+  syncTongueDetailFold(result.tongue_grid || lastTongueGrid);
   document.getElementById("disclaimer").textContent = result.disclaimer || "";
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
