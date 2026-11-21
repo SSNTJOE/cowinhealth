@@ -12,6 +12,9 @@ id birthYear
 id bmiLive
 id bodyImage
 id bodyMap
+id captchaAnswer
+id captchaImage
+id captchaRefresh
 id cct2700
 id cct4200
 id cct6500
@@ -57,6 +60,7 @@ id start
 id symptoms
 id tongueGuide
 id trendChart
+id websiteUrl
 id weight
 layout activity_main
 layout activity_pulse

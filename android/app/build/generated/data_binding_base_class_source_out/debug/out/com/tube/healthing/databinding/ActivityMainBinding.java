@@ -57,6 +57,15 @@ public final class ActivityMainBinding implements ViewBinding {
   public final FrameLayout bodyMap;
 
   @NonNull
+  public final EditText captchaAnswer;
+
+  @NonNull
+  public final ImageView captchaImage;
+
+  @NonNull
+  public final Button captchaRefresh;
+
+  @NonNull
   public final RadioButton cct2700;
 
   @NonNull
@@ -180,16 +189,20 @@ public final class ActivityMainBinding implements ViewBinding {
   public final CombinedChart trendChart;
 
   @NonNull
+  public final EditText websiteUrl;
+
+  @NonNull
   public final EditText weight;
 
   private ActivityMainBinding(@NonNull ScrollView rootView, @NonNull TextView acupointLink,
       @NonNull LinearLayout allergiesGroup, @NonNull TextView anon, @NonNull EditText birthYear,
       @NonNull TextView bmiLive, @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap,
-      @NonNull RadioButton cct2700, @NonNull RadioButton cct4200, @NonNull RadioButton cct6500,
-      @NonNull RadioGroup cctGroup, @NonNull CircleGuideView circleGuide,
-      @NonNull LinearLayout conditionsGroup, @NonNull CheckBox confounderFood,
-      @NonNull TextView dietLink, @NonNull EditText discomfort, @NonNull EditText email,
-      @NonNull FaceGuideView faceGuide, @NonNull RadioButton genderFemale,
+      @NonNull EditText captchaAnswer, @NonNull ImageView captchaImage,
+      @NonNull Button captchaRefresh, @NonNull RadioButton cct2700, @NonNull RadioButton cct4200,
+      @NonNull RadioButton cct6500, @NonNull RadioGroup cctGroup,
+      @NonNull CircleGuideView circleGuide, @NonNull LinearLayout conditionsGroup,
+      @NonNull CheckBox confounderFood, @NonNull TextView dietLink, @NonNull EditText discomfort,
+      @NonNull EditText email, @NonNull FaceGuideView faceGuide, @NonNull RadioButton genderFemale,
       @NonNull RadioGroup genderGroup, @NonNull RadioButton genderMale,
       @NonNull RadioButton genderOther, @NonNull EditText height, @NonNull Spinner langSelect,
       @NonNull Button login, @NonNull EditText nickname, @NonNull Button openPulse,
@@ -201,7 +214,7 @@ public final class ActivityMainBinding implements ViewBinding {
       @NonNull Button saveProfile, @NonNull EditText server, @NonNull Button shotFace,
       @NonNull Button shotStool, @NonNull Button shotTongue, @NonNull Button shotUrine,
       @NonNull EditText symptoms, @NonNull TongueGuideView tongueGuide,
-      @NonNull CombinedChart trendChart, @NonNull EditText weight) {
+      @NonNull CombinedChart trendChart, @NonNull EditText websiteUrl, @NonNull EditText weight) {
     this.rootView = rootView;
     this.acupointLink = acupointLink;
     this.allergiesGroup = allergiesGroup;
@@ -210,6 +223,9 @@ public final class ActivityMainBinding implements ViewBinding {
     this.bmiLive = bmiLive;
     this.bodyImage = bodyImage;
     this.bodyMap = bodyMap;
+    this.captchaAnswer = captchaAnswer;
+    this.captchaImage = captchaImage;
+    this.captchaRefresh = captchaRefresh;
     this.cct2700 = cct2700;
     this.cct4200 = cct4200;
     this.cct6500 = cct6500;
@@ -251,6 +267,7 @@ public final class ActivityMainBinding implements ViewBinding {
     this.symptoms = symptoms;
     this.tongueGuide = tongueGuide;
     this.trendChart = trendChart;
+    this.websiteUrl = websiteUrl;
     this.weight = weight;
   }
 
@@ -320,6 +337,24 @@ public final class ActivityMainBinding implements ViewBinding {
       id = R.id.bodyMap;
       FrameLayout bodyMap = ViewBindings.findChildViewById(rootView, id);
       if (bodyMap == null) {
+        break missingId;
+      }
+
+      id = R.id.captchaAnswer;
+      EditText captchaAnswer = ViewBindings.findChildViewById(rootView, id);
+      if (captchaAnswer == null) {
+        break missingId;
+      }
+
+      id = R.id.captchaImage;
+      ImageView captchaImage = ViewBindings.findChildViewById(rootView, id);
+      if (captchaImage == null) {
+        break missingId;
+      }
+
+      id = R.id.captchaRefresh;
+      Button captchaRefresh = ViewBindings.findChildViewById(rootView, id);
+      if (captchaRefresh == null) {
         break missingId;
       }
 
@@ -569,6 +604,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.websiteUrl;
+      EditText websiteUrl = ViewBindings.findChildViewById(rootView, id);
+      if (websiteUrl == null) {
+        break missingId;
+      }
+
       id = R.id.weight;
       EditText weight = ViewBindings.findChildViewById(rootView, id);
       if (weight == null) {
@@ -576,12 +617,13 @@ public final class ActivityMainBinding implements ViewBinding {
       }
 
       return new ActivityMainBinding((ScrollView) rootView, acupointLink, allergiesGroup, anon,
-          birthYear, bmiLive, bodyImage, bodyMap, cct2700, cct4200, cct6500, cctGroup, circleGuide,
-          conditionsGroup, confounderFood, dietLink, discomfort, email, faceGuide, genderFemale,
-          genderGroup, genderMale, genderOther, height, langSelect, login, nickname, openPulse,
-          password, preview, recipeBodyAdvice, recipeCountry, recipeDetail, recipeEnsure,
-          recipeHeading, recipeNote, recipePick, register, result, save, saveProfile, server,
-          shotFace, shotStool, shotTongue, shotUrine, symptoms, tongueGuide, trendChart, weight);
+          birthYear, bmiLive, bodyImage, bodyMap, captchaAnswer, captchaImage, captchaRefresh,
+          cct2700, cct4200, cct6500, cctGroup, circleGuide, conditionsGroup, confounderFood,
+          dietLink, discomfort, email, faceGuide, genderFemale, genderGroup, genderMale,
+          genderOther, height, langSelect, login, nickname, openPulse, password, preview,
+          recipeBodyAdvice, recipeCountry, recipeDetail, recipeEnsure, recipeHeading, recipeNote,
+          recipePick, register, result, save, saveProfile, server, shotFace, shotStool, shotTongue,
+          shotUrine, symptoms, tongueGuide, trendChart, websiteUrl, weight);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));
