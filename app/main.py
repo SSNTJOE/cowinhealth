@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
-import hmac
 import json
-import os
 import random
 import re
 from datetime import datetime
@@ -17,6 +14,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
 from pymysql.err import IntegrityError
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .advice import build_advice
 from .analysis import analyze_session
@@ -38,6 +38,15 @@ from .health_flags import (
 from .nutrient_targets import lookup_targets
 from .recipe_ensure import ensure_recipe
 from .recipes import TEACHING_DISCLAIMER, filter_recipes, find_recipes_by_name, split_csv, usable_countries
+from .security import (
+    assert_allowed_columns,
+    assert_allowed_table,
+    hash_password,
+    issue_captcha,
+    needs_rehash,
+    reject_bot_or_captcha,
+    verify_password,
+)
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
 from . import user_meals
@@ -60,8 +69,12 @@ MEDIA_ALIASES = {
 }
 signer = TimestampSigner(SECRET_KEY)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+AUTH_RATE_LIMIT = "5/minute"
 
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
 app = FastAPI(title="Health-ing")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
@@ -75,23 +88,12 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.on_event("startup")
 def startup():
     init_schema()
-
-
-def hash_password(password: str) -> str:
-    salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
-    return f"{salt.hex()}${digest.hex()}"
-
-
-def verify_password(password: str, stored: str) -> bool:
     try:
-        salt_hex, digest_hex = stored.split("$", 1)
-        salt = bytes.fromhex(salt_hex)
-        expected = bytes.fromhex(digest_hex)
-    except ValueError:
-        return False
-    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
-    return hmac.compare_digest(actual, expected)
+        from .shared_catalog import seed_from_excel_if_empty
+
+        seed_from_excel_if_empty()
+    except Exception:
+        logger.exception("startup catalog seed failed")
 
 
 GENDER_VALUES = {"female", "male", "other"}
@@ -274,7 +276,8 @@ def fetch_user(user_id: str) -> dict | None:
             cur.execute(
                 """
                 SELECT user_id, email, nickname, birth_year, height, weight, age, gender,
-                       medical_history, conditions_json, allergies_json, complexion_lab_json
+                       medical_history, conditions_json, allergies_json, complexion_lab_json,
+                       lighting_calib_json
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -313,32 +316,38 @@ def _stored_organ_pattern(patterns: dict, key: str) -> str:
     raise KeyError(key)
 
 
+_HEALTH_RECORD_INSERT_COLUMNS = (
+    "user_id",
+    "record_date",
+    "symptoms",
+    "discomfort",
+    "face_color",
+    "lip_color",
+    "tongue_body_color",
+    "tongue_coat_color",
+    *ORGAN_KEYS,
+    *PATTERN_KEYS,
+    "diet_advice",
+    "diet_url",
+    "acupoint_url",
+    "pulse_json",
+    "face_grid_json",
+    "face_measurements_json",
+    "complexion_label",
+    "complexion_hex",
+    "complexion_hsv_json",
+    "tongue_grid_json",
+    "tongue_measurements_json",
+    "organ_composite_json",
+)
+
+
 def insert_record(user_id: str, result: dict, extra: dict) -> int:
     record_date = datetime.now()
-    columns = [
-        "user_id",
-        "record_date",
-        "symptoms",
-        "discomfort",
-        "face_color",
-        "lip_color",
-        "tongue_body_color",
-        "tongue_coat_color",
-        *ORGAN_KEYS,
-        *PATTERN_KEYS,
-        "diet_advice",
-        "diet_url",
-        "acupoint_url",
-        "pulse_json",
-        "face_grid_json",
-        "face_measurements_json",
-        "complexion_label",
-        "complexion_hex",
-        "complexion_hsv_json",
-        "tongue_grid_json",
-        "tongue_measurements_json",
-        "organ_composite_json",
-    ]
+    columns = assert_allowed_columns(
+        _HEALTH_RECORD_INSERT_COLUMNS,
+        _HEALTH_RECORD_INSERT_COLUMNS,
+    )
     colors = result.get("region_colors") or {}
     complexion = result.get("complexion") or {}
     face_grid = result.get("face_grid")
@@ -372,8 +381,10 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
     conn = connect()
     try:
         with conn.cursor() as cur:
+            placeholders = ", ".join(["%s"] * len(columns))
+            col_sql = ", ".join(columns)
             cur.execute(
-                f"INSERT INTO health_records ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
+                "INSERT INTO health_records (" + col_sql + ") VALUES (" + placeholders + ")",
                 values,
             )
             record_id = cur.lastrowid
@@ -434,9 +445,106 @@ def health():
         with conn.cursor() as cur:
             cur.execute("SELECT 1 AS ok")
             row = cur.fetchone()
-        return {"ok": True, "mysql": row["ok"] == 1}
+            catalog = {}
+            for table in (
+                "catalog_recipes",
+                "catalog_foods",
+                "catalog_daily_nutrient",
+                "catalog_deviations",
+            ):
+                try:
+                    safe = assert_allowed_table(table)
+                    cur.execute("SELECT COUNT(*) AS c FROM `" + safe + "`")
+                    catalog[table] = int((cur.fetchone() or {}).get("c") or 0)
+                except Exception:
+                    catalog[table] = None
+        return {"ok": True, "mysql": row["ok"] == 1, "catalog": catalog}
     finally:
         conn.close()
+
+
+@app.get("/api/captcha")
+@limiter.limit(AUTH_RATE_LIMIT)
+def api_captcha(request: Request):
+    """Local ImageCaptcha — no third-party API quota."""
+    del request  # required by slowapi
+    payload = issue_captcha()
+    return {
+        "captcha_token": payload["captcha_token"],
+        "image_base64": payload["image_base64"],
+        "mime": payload["mime"],
+        "expires_in": int(payload["expires_in"]),
+    }
+
+
+@app.get("/api/backup/status")
+def backup_status(request: Request):
+    require_user(request)
+    from .shared_catalog import table_count
+
+    return {
+        "ok": True,
+        "source": "mysql",
+        "counts": {
+            "Recipe.xls": table_count("catalog_recipes"),
+            "Foods.xls": table_count("catalog_foods"),
+            "daily_nutrient.xlsx": table_count("catalog_daily_nutrient"),
+            "deviation.xls": table_count("catalog_deviations"),
+        },
+        "download": {
+            "Recipe.xls": "/api/backup/Recipe.xls",
+            "Foods.xls": "/api/backup/Foods.xls",
+            "daily_nutrient.xlsx": "/api/backup/daily_nutrient.xlsx",
+            "deviation.xls": "/api/backup/deviation.xls",
+            "all": "/api/backup/export-all",
+        },
+        "note": "網站與 App 共用 MySQL；下載可把即時資料備存成 Excel。",
+    }
+
+
+@app.get("/api/backup/{name}")
+def backup_download(name: str, request: Request):
+    """Export live MySQL catalog rows to Excel for local backup."""
+    require_user(request)
+    from .shared_catalog import (
+        export_daily_xlsx,
+        export_deviation_xls,
+        export_foods_xls,
+        export_recipes_xls,
+    )
+
+    mapping = {
+        "Recipe.xls": ("Recipe.xls", export_recipes_xls, "application/vnd.ms-excel"),
+        "Foods.xls": ("Foods.xls", export_foods_xls, "application/vnd.ms-excel"),
+        "daily_nutrient.xlsx": (
+            "daily_nutrient.xlsx",
+            export_daily_xlsx,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        "deviation.xls": ("deviation.xls", export_deviation_xls, "application/vnd.ms-excel"),
+    }
+    item = mapping.get(name)
+    if not item:
+        raise HTTPException(status_code=404, detail="未知備存檔名")
+    filename, exporter, media = item
+    try:
+        path = exporter()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"匯出失敗：{exc}") from exc
+    return FileResponse(path, media_type=media, filename=filename)
+
+
+@app.post("/api/backup/export-all")
+def backup_export_all(request: Request):
+    """Rewrite local Excel backups from MySQL for the operator machine."""
+    require_user(request)
+    from .shared_catalog import export_all_backups
+
+    try:
+        paths = export_all_backups()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"備存失敗：{exc}") from exc
+    return {"ok": True, "files": paths}
 
 
 @app.get("/api/flags")
@@ -450,13 +558,14 @@ def health_flag_options():
 
 
 def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]]:
-    columns = [*ORGAN_KEYS, *PATTERN_KEYS]
+    columns = assert_allowed_columns([*ORGAN_KEYS, *PATTERN_KEYS], [*ORGAN_KEYS, *PATTERN_KEYS])
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT {", ".join(columns)}
+                "SELECT "
+                + ", ".join(columns)
+                + """
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -482,7 +591,7 @@ def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]
 
 def fetch_week_records_for_advice(user_id: str) -> list[dict]:
     """Last 7 days of symptoms/discomfort + color fields for search keyword aggregation."""
-    columns = [
+    allowed = [
         "symptoms",
         "discomfort",
         "face_color",
@@ -492,12 +601,14 @@ def fetch_week_records_for_advice(user_id: str) -> list[dict]:
         "complexion_label",
         *PATTERN_KEYS,
     ]
+    columns = assert_allowed_columns(allowed, allowed)
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT {", ".join(columns)}
+                "SELECT "
+                + ", ".join(columns)
+                + """
                 FROM health_records
                 WHERE user_id = %s
                   AND record_date >= (NOW() - INTERVAL 7 DAY)
@@ -514,13 +625,15 @@ def fetch_week_records_for_advice(user_id: str) -> list[dict]:
 
 def fetch_prior_session_context(user_id: str) -> dict | None:
     """Previous record scores + lighting (from organ_composite_json) for day-to-day stabilize."""
-    columns = [*ORGAN_KEYS, "organ_composite_json", "record_date"]
+    allowed = [*ORGAN_KEYS, "organ_composite_json", "record_date"]
+    columns = assert_allowed_columns(allowed, allowed)
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
-                SELECT {", ".join(columns)}
+                "SELECT "
+                + ", ".join(columns)
+                + """
                 FROM health_records
                 WHERE user_id = %s
                 ORDER BY record_date DESC
@@ -843,10 +956,21 @@ def api_meals_delete(request: Request, meal_id: int, date: str | None = None):
 
 
 @app.post("/api/register")
+@limiter.limit(AUTH_RATE_LIMIT)
 def register(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    captcha_token: str = Form(...),
+    captcha_answer: str = Form(...),
+    website_url: str = Form(""),
 ):
+    del request
+    reject_bot_or_captcha(
+        website_url=website_url,
+        captcha_token=captcha_token,
+        captcha_answer=captcha_answer,
+    )
     email = email.strip().lower()
     if not EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="E-mail 格式不正確")
@@ -887,8 +1011,23 @@ def register(
 
 
 @app.post("/api/login")
-def login(email: str = Form(...), password: str = Form(...)):
+@limiter.limit(AUTH_RATE_LIMIT)
+def login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    captcha_token: str = Form(...),
+    captcha_answer: str = Form(...),
+    website_url: str = Form(""),
+):
+    del request
+    reject_bot_or_captcha(
+        website_url=website_url,
+        captcha_token=captcha_token,
+        captcha_answer=captcha_answer,
+    )
     email = email.strip().lower()
+    user_id: str | None = None
     conn = connect()
     try:
         with conn.cursor() as cur:
@@ -897,13 +1036,22 @@ def login(email: str = Form(...), password: str = Form(...)):
                 (email,),
             )
             row = cur.fetchone()
+            if not row or not verify_password(password, row["password_hash"]):
+                raise HTTPException(status_code=401, detail="E-mail 或密碼錯誤")
+            user_id = row["user_id"]
+            # Upgrade legacy pbkdf2 hashes to bcrypt after a successful login.
+            if needs_rehash(row["password_hash"]):
+                cur.execute(
+                    "UPDATE users SET password_hash = %s WHERE user_id = %s",
+                    (hash_password(password), user_id),
+                )
+    except HTTPException:
+        raise
     finally:
         conn.close()
 
-    if not row or not verify_password(password, row["password_hash"]):
+    if not user_id:
         raise HTTPException(status_code=401, detail="E-mail 或密碼錯誤")
-
-    user_id = row["user_id"]
     token = signer.sign(user_id.encode("utf-8")).decode("utf-8")
     user = fetch_user(user_id) or {"user_id": user_id}
     payload = JSONResponse(
@@ -1075,6 +1223,7 @@ async def analyze(
     include_pulse: str | None = Form(default=None),
     color_temperature_k: str | None = Form(default=None),
     confounders: str | None = Form(default=None),
+    device_hint: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
@@ -1095,6 +1244,15 @@ async def analyze(
             personal_lab = json.loads(raw_lab) if isinstance(raw_lab, str) else raw_lab
         except json.JSONDecodeError:
             personal_lab = None
+    lighting_calib = None
+    raw_calib = profile.get("lighting_calib_json")
+    if raw_calib:
+        try:
+            lighting_calib = json.loads(raw_calib) if isinstance(raw_calib, str) else raw_calib
+        except json.JSONDecodeError:
+            lighting_calib = None
+    # Silent device hint: form field, else User-Agent (never ask the user).
+    hint = (device_hint or "").strip() or (request.headers.get("user-agent") or "").strip()
     confirm_with_pulse = str(include_pulse or "").strip().lower() in {"1", "true", "yes", "android"}
     prior_session = fetch_prior_session_context(user_id)
     result = analyze_session(
@@ -1109,7 +1267,26 @@ async def analyze(
         prior_session=prior_session,
         conditions=user_conditions(profile),
         confounders=confounders,
+        lighting_calib=lighting_calib,
+        device_hint=hint,
     )
+    # Persist learned lighting compensation for this user+device.
+    updated_calib = result.get("lighting_calib_json")
+    if updated_calib is not None:
+        try:
+            from .lighting_calib import dump_calib
+
+            conn = connect()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE users SET lighting_calib_json = %s WHERE user_id = %s",
+                        (dump_calib(updated_calib), user_id),
+                    )
+            finally:
+                conn.close()
+        except Exception:
+            logger.exception("lighting_calib_json 寫入失敗")
     week_records = fetch_week_records_for_advice(user_id)
     advice = build_advice(
         result["findings"],
@@ -1146,12 +1323,17 @@ def records(request: Request):
     conn = connect()
     try:
         with conn.cursor() as cur:
+            organ_cols = ", ".join(assert_allowed_columns(ORGAN_KEYS, ORGAN_KEYS))
+            pattern_cols = ", ".join(assert_allowed_columns(PATTERN_KEYS, PATTERN_KEYS))
             cur.execute(
-                f"""
+                """
                 SELECT record_id, user_id, record_date, symptoms, discomfort,
                        face_color, lip_color, tongue_body_color, tongue_coat_color,
-                       {", ".join(ORGAN_KEYS)},
-                       {", ".join(PATTERN_KEYS)},
+                       """
+                + organ_cols
+                + ", "
+                + pattern_cols
+                + """,
                        diet_advice, diet_url, acupoint_url,
                        face_grid_json, face_measurements_json,
                        complexion_label, complexion_hex, complexion_hsv_json,

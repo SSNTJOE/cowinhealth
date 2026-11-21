@@ -146,11 +146,36 @@ const TREND_POINT_STYLE = {
 async function checkMysql() {
   try {
     const data = await api("/api/health");
-    mysqlStatus.textContent = data.mysql ? "MySQL 連線成功" : "MySQL 回應異常";
+    const cat = data.catalog || {};
+    const parts = [
+      cat.catalog_recipes != null ? `食譜 ${cat.catalog_recipes}` : null,
+      cat.catalog_foods != null ? `食材 ${cat.catalog_foods}` : null,
+      cat.catalog_daily_nutrient != null ? `營養建議 ${cat.catalog_daily_nutrient}` : null,
+      cat.catalog_deviations != null ? `檢測差異 ${cat.catalog_deviations}` : null,
+    ].filter(Boolean);
+    mysqlStatus.textContent = data.mysql
+      ? "MySQL 連線成功" + (parts.length ? `（${parts.join("／")}）` : "")
+      : "MySQL 回應異常";
     mysqlStatus.className = data.mysql ? "status ok" : "status err";
   } catch (err) {
     mysqlStatus.textContent = "MySQL 尚未連上：" + formatApiError(err);
     mysqlStatus.className = "status err";
+  }
+}
+
+async function loadBackupStatus() {
+  const el = document.getElementById("backup-status");
+  if (!el) return;
+  try {
+    const data = await api("/api/backup/status");
+    const c = data.counts || {};
+    el.textContent =
+      `MySQL 即時筆數：Recipe ${c["Recipe.xls"] ?? "—"}／Foods ${c["Foods.xls"] ?? "—"}／` +
+      `daily_nutrient ${c["daily_nutrient.xlsx"] ?? "—"}／deviation ${c["deviation.xls"] ?? "—"}`;
+    el.className = "status ok";
+  } catch (err) {
+    el.textContent = "備存狀態：" + formatApiError(err);
+    el.className = "status err";
   }
 }
 
@@ -205,6 +230,7 @@ async function loadMe() {
   }
   await startCamera();
   await loadRecords();
+  await loadBackupStatus();
   try {
     await initMealCalendar();
   } catch (err) {
@@ -805,14 +831,27 @@ function renderFaceGrid(grid, previewUrl) {
   });
 }
 
+function syncTongueDetailFold(grid) {
+  const fold = document.getElementById("tongue-detail-fold");
+  if (!fold) return;
+  const hasTongue = Boolean(grid && grid.cells && grid.cells.length);
+  const colorLabel = (document.getElementById("color-label") || {}).textContent || "";
+  const colorHex = (document.getElementById("color-hex") || {}).textContent || "";
+  const hasColor = Boolean(String(colorLabel).trim() || String(colorHex).trim());
+  if (hasTongue || hasColor) fold.classList.remove("hidden");
+  else fold.classList.add("hidden");
+}
+
 function renderTongueGrid(grid, previewUrl) {
   const wrap = document.getElementById("tongue-grid-wrap");
   if (!grid || !grid.cells) {
     wrap.classList.add("hidden");
+    syncTongueDetailFold(null);
     return;
   }
   lastTongueGrid = grid;
   wrap.classList.remove("hidden");
+  syncTongueDetailFold(grid);
   const img = document.getElementById("tongue-preview");
   if (previewUrl) {
     img.src = previewUrl;
@@ -959,6 +998,7 @@ function renderResult(result) {
   }
   const lightNote = lightBits.length ? `（自動${lightBits.join("，")}）` : "";
   document.getElementById("color-label").textContent = " " + (result.color_label || "") + lightNote;
+  syncTongueDetailFold(result.tongue_grid || lastTongueGrid);
   document.getElementById("disclaimer").textContent = result.disclaimer || "";
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
@@ -2209,12 +2249,24 @@ function renderTrend(trend) {
   });
 }
 
+function silentDeviceHint() {
+  try {
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    const touch = navigator.maxTouchPoints || 0;
+    return `${ua} | ${platform} | touch:${touch}`;
+  } catch (_err) {
+    return navigator.userAgent || "";
+  }
+}
+
 async function sendRecord(extraShot) {
   camMsg.textContent = "傳送中…";
   const body = new FormData();
   body.append("symptoms", document.getElementById("symptoms").value);
   body.append("discomfort", document.getElementById("discomfort").value);
   body.append("color_temperature_k", "auto");
+  body.append("device_hint", silentDeviceHint());
   if (extraShot) {
     const blob = await captureFrame(extraShot);
     if (!blob) throw new Error("無法擷取畫面");
@@ -2255,6 +2307,8 @@ async function sendRecord(extraShot) {
   await loadRecords();
 }
 
+const loginCaptcha = bindCaptchaControls();
+
 document.getElementById("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   authMsg.textContent = "";
@@ -2264,6 +2318,7 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
       body: formBody({
         email: document.getElementById("email").value,
         password: document.getElementById("password").value,
+        ...authCaptchaFields(),
       }),
     });
     sessionStorage.removeItem("daily-asked");
@@ -2275,6 +2330,7 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
   } catch (err) {
     authMsg.textContent = formatApiError(err);
     authMsg.className = "status err";
+    loginCaptcha.reload();
   }
 });
 
@@ -2367,6 +2423,25 @@ document.getElementById("open-dialog").addEventListener("click", () => {
   document.getElementById("dialog-discomfort").value = document.getElementById("discomfort").value;
   dailyDialog.showModal();
 });
+const backupExportBtn = document.getElementById("backup-export-all");
+if (backupExportBtn) {
+  backupExportBtn.addEventListener("click", async () => {
+    const msg = document.getElementById("backup-msg");
+    try {
+      const data = await api("/api/backup/export-all", { method: "POST" });
+      if (msg) {
+        msg.textContent = "已寫回本機：" + Object.values(data.files || {}).join("、");
+        msg.className = "status ok";
+      }
+      await loadBackupStatus();
+    } catch (err) {
+      if (msg) {
+        msg.textContent = formatApiError(err);
+        msg.className = "status err";
+      }
+    }
+  });
+}
 document.getElementById("daily-form").addEventListener("submit", (e) => {
   if (e.submitter && e.submitter.value === "ok") {
     document.getElementById("symptoms").value = document.getElementById("dialog-symptoms").value;

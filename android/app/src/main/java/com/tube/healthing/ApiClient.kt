@@ -25,19 +25,46 @@ class ApiClient(
 
     fun mediaUrl(name: String): String = "$baseUrl/media/$name"
 
-    fun register(email: String, password: String): JSONObject {
+    fun captcha(): JSONObject {
+        val req = Request.Builder().url("$baseUrl/api/captcha").get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "取得驗證碼失敗"))
+            return json
+        }
+    }
+
+    fun register(
+        email: String,
+        password: String,
+        captchaToken: String,
+        captchaAnswer: String,
+        websiteUrl: String = "",
+    ): JSONObject {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("email", email)
             .addFormDataPart("password", password)
+            .addFormDataPart("captcha_token", captchaToken)
+            .addFormDataPart("captcha_answer", captchaAnswer)
+            .addFormDataPart("website_url", websiteUrl)
             .build()
         val req = Request.Builder().url("$baseUrl/api/register").post(body).build()
         return executeAuth(req, "註冊失敗")
     }
 
-    fun login(email: String, password: String): JSONObject {
+    fun login(
+        email: String,
+        password: String,
+        captchaToken: String,
+        captchaAnswer: String,
+        websiteUrl: String = "",
+    ): JSONObject {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("email", email)
             .addFormDataPart("password", password)
+            .addFormDataPart("captcha_token", captchaToken)
+            .addFormDataPart("captcha_answer", captchaAnswer)
+            .addFormDataPart("website_url", websiteUrl)
             .build()
         val req = Request.Builder().url("$baseUrl/api/login").post(body).build()
         return executeAuth(req, "登入失敗")
@@ -145,21 +172,48 @@ class ApiClient(
         face: File?,
         tongue: File?,
         pulseJson: String?,
-        colorTemperatureK: String = "auto"
+        colorTemperatureK: String = "auto",
+        shotType: String? = null,
+        shotFile: File? = null,
+        confounders: String? = null,
+        includePulse: Boolean = true,
+        deviceHint: String? = null,
     ): JSONObject {
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("symptoms", symptoms)
             .addFormDataPart("discomfort", discomfort)
-            .addFormDataPart("include_pulse", "1")
+            .addFormDataPart("include_pulse", if (includePulse) "1" else "0")
             .addFormDataPart("color_temperature_k", colorTemperatureK)
         if (pulseJson != null) builder.addFormDataPart("pulse_json", pulseJson)
+        if (!confounders.isNullOrBlank()) builder.addFormDataPart("confounders", confounders)
+        if (!deviceHint.isNullOrBlank()) builder.addFormDataPart("device_hint", deviceHint)
         val jpeg = "image/jpeg".toMediaType()
         if (face != null) builder.addFormDataPart("face", "face.jpg", face.asRequestBody(jpeg))
         if (tongue != null) builder.addFormDataPart("tongue", "tongue.jpg", tongue.asRequestBody(jpeg))
+        // Same MySQL path as website: shot_type + image for stool/urine (text-only teaching).
+        if (!shotType.isNullOrBlank() && shotFile != null) {
+            builder.addFormDataPart("shot_type", shotType)
+            builder.addFormDataPart("image", "$shotType.jpg", shotFile.asRequestBody(jpeg))
+        }
         val req = Request.Builder().url("$baseUrl/api/record").auth().post(builder.build()).build()
         client.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "送出失敗"))
+            return json
+        }
+    }
+
+    /** Create / research a recipe into Recipe.xls via the same API the website uses. */
+    fun ensureRecipe(country: String, name: String, lang: String): JSONObject {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("country", country)
+            .addFormDataPart("name", name)
+            .addFormDataPart("lang", lang)
+            .build()
+        val req = Request.Builder().url("$baseUrl/api/recipes/ensure").auth().post(body).build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "建立食譜失敗"))
             return json
         }
     }

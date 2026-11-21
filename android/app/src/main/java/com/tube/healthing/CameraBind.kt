@@ -1,5 +1,6 @@
 package com.tube.healthing
 
+import android.content.Context
 import android.os.Build
 import android.util.Size
 import androidx.camera.core.Camera
@@ -70,4 +71,16 @@ object CameraBind {
         provider: ProcessCameraProvider,
         vararg useCases: UseCase
     ): Camera? = bindFacing(owner, provider, CameraSelector.DEFAULT_BACK_CAMERA, *useCases)
+
+    /**
+     * Bind the lens configured for [kind] via [CameraFacing]
+     * (face/tongue → front; stool/urine → back). No silent facing fallback.
+     */
+    fun bindForCaptureKind(
+        owner: LifecycleOwner,
+        provider: ProcessCameraProvider,
+        context: Context,
+        kind: String,
+        vararg useCases: UseCase
+    ): Camera? = bindFacing(owner, provider, CameraFacing.selector(context, kind), *useCases)
 }

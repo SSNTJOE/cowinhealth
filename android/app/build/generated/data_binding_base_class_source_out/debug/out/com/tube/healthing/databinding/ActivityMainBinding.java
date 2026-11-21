@@ -6,6 +6,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -22,6 +23,7 @@ import androidx.camera.view.PreviewView;
 import androidx.viewbinding.ViewBinding;
 import androidx.viewbinding.ViewBindings;
 import com.github.mikephil.charting.charts.CombinedChart;
+import com.tube.healthing.CircleGuideView;
 import com.tube.healthing.FaceGuideView;
 import com.tube.healthing.R;
 import com.tube.healthing.TongueGuideView;
@@ -67,7 +69,13 @@ public final class ActivityMainBinding implements ViewBinding {
   public final RadioGroup cctGroup;
 
   @NonNull
+  public final CircleGuideView circleGuide;
+
+  @NonNull
   public final LinearLayout conditionsGroup;
+
+  @NonNull
+  public final CheckBox confounderFood;
 
   @NonNull
   public final TextView dietLink;
@@ -124,6 +132,9 @@ public final class ActivityMainBinding implements ViewBinding {
   public final TextView recipeDetail;
 
   @NonNull
+  public final Button recipeEnsure;
+
+  @NonNull
   public final TextView recipeHeading;
 
   @NonNull
@@ -151,7 +162,13 @@ public final class ActivityMainBinding implements ViewBinding {
   public final Button shotFace;
 
   @NonNull
+  public final Button shotStool;
+
+  @NonNull
   public final Button shotTongue;
+
+  @NonNull
+  public final Button shotUrine;
 
   @NonNull
   public final EditText symptoms;
@@ -169,7 +186,8 @@ public final class ActivityMainBinding implements ViewBinding {
       @NonNull LinearLayout allergiesGroup, @NonNull TextView anon, @NonNull EditText birthYear,
       @NonNull TextView bmiLive, @NonNull ImageView bodyImage, @NonNull FrameLayout bodyMap,
       @NonNull RadioButton cct2700, @NonNull RadioButton cct4200, @NonNull RadioButton cct6500,
-      @NonNull RadioGroup cctGroup, @NonNull LinearLayout conditionsGroup,
+      @NonNull RadioGroup cctGroup, @NonNull CircleGuideView circleGuide,
+      @NonNull LinearLayout conditionsGroup, @NonNull CheckBox confounderFood,
       @NonNull TextView dietLink, @NonNull EditText discomfort, @NonNull EditText email,
       @NonNull FaceGuideView faceGuide, @NonNull RadioButton genderFemale,
       @NonNull RadioGroup genderGroup, @NonNull RadioButton genderMale,
@@ -177,12 +195,13 @@ public final class ActivityMainBinding implements ViewBinding {
       @NonNull Button login, @NonNull EditText nickname, @NonNull Button openPulse,
       @NonNull EditText password, @NonNull PreviewView preview,
       @NonNull ToggleButton recipeBodyAdvice, @NonNull AutoCompleteTextView recipeCountry,
-      @NonNull TextView recipeDetail, @NonNull TextView recipeHeading, @NonNull TextView recipeNote,
-      @NonNull AutoCompleteTextView recipePick, @NonNull Button register, @NonNull TextView result,
-      @NonNull Button save, @NonNull Button saveProfile, @NonNull EditText server,
-      @NonNull Button shotFace, @NonNull Button shotTongue, @NonNull EditText symptoms,
-      @NonNull TongueGuideView tongueGuide, @NonNull CombinedChart trendChart,
-      @NonNull EditText weight) {
+      @NonNull TextView recipeDetail, @NonNull Button recipeEnsure, @NonNull TextView recipeHeading,
+      @NonNull TextView recipeNote, @NonNull AutoCompleteTextView recipePick,
+      @NonNull Button register, @NonNull TextView result, @NonNull Button save,
+      @NonNull Button saveProfile, @NonNull EditText server, @NonNull Button shotFace,
+      @NonNull Button shotStool, @NonNull Button shotTongue, @NonNull Button shotUrine,
+      @NonNull EditText symptoms, @NonNull TongueGuideView tongueGuide,
+      @NonNull CombinedChart trendChart, @NonNull EditText weight) {
     this.rootView = rootView;
     this.acupointLink = acupointLink;
     this.allergiesGroup = allergiesGroup;
@@ -195,7 +214,9 @@ public final class ActivityMainBinding implements ViewBinding {
     this.cct4200 = cct4200;
     this.cct6500 = cct6500;
     this.cctGroup = cctGroup;
+    this.circleGuide = circleGuide;
     this.conditionsGroup = conditionsGroup;
+    this.confounderFood = confounderFood;
     this.dietLink = dietLink;
     this.discomfort = discomfort;
     this.email = email;
@@ -214,6 +235,7 @@ public final class ActivityMainBinding implements ViewBinding {
     this.recipeBodyAdvice = recipeBodyAdvice;
     this.recipeCountry = recipeCountry;
     this.recipeDetail = recipeDetail;
+    this.recipeEnsure = recipeEnsure;
     this.recipeHeading = recipeHeading;
     this.recipeNote = recipeNote;
     this.recipePick = recipePick;
@@ -223,7 +245,9 @@ public final class ActivityMainBinding implements ViewBinding {
     this.saveProfile = saveProfile;
     this.server = server;
     this.shotFace = shotFace;
+    this.shotStool = shotStool;
     this.shotTongue = shotTongue;
+    this.shotUrine = shotUrine;
     this.symptoms = symptoms;
     this.tongueGuide = tongueGuide;
     this.trendChart = trendChart;
@@ -323,9 +347,21 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.circleGuide;
+      CircleGuideView circleGuide = ViewBindings.findChildViewById(rootView, id);
+      if (circleGuide == null) {
+        break missingId;
+      }
+
       id = R.id.conditionsGroup;
       LinearLayout conditionsGroup = ViewBindings.findChildViewById(rootView, id);
       if (conditionsGroup == null) {
+        break missingId;
+      }
+
+      id = R.id.confounderFood;
+      CheckBox confounderFood = ViewBindings.findChildViewById(rootView, id);
+      if (confounderFood == null) {
         break missingId;
       }
 
@@ -437,6 +473,12 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.recipeEnsure;
+      Button recipeEnsure = ViewBindings.findChildViewById(rootView, id);
+      if (recipeEnsure == null) {
+        break missingId;
+      }
+
       id = R.id.recipeHeading;
       TextView recipeHeading = ViewBindings.findChildViewById(rootView, id);
       if (recipeHeading == null) {
@@ -491,9 +533,21 @@ public final class ActivityMainBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.shotStool;
+      Button shotStool = ViewBindings.findChildViewById(rootView, id);
+      if (shotStool == null) {
+        break missingId;
+      }
+
       id = R.id.shotTongue;
       Button shotTongue = ViewBindings.findChildViewById(rootView, id);
       if (shotTongue == null) {
+        break missingId;
+      }
+
+      id = R.id.shotUrine;
+      Button shotUrine = ViewBindings.findChildViewById(rootView, id);
+      if (shotUrine == null) {
         break missingId;
       }
 
@@ -522,12 +576,12 @@ public final class ActivityMainBinding implements ViewBinding {
       }
 
       return new ActivityMainBinding((ScrollView) rootView, acupointLink, allergiesGroup, anon,
-          birthYear, bmiLive, bodyImage, bodyMap, cct2700, cct4200, cct6500, cctGroup,
-          conditionsGroup, dietLink, discomfort, email, faceGuide, genderFemale, genderGroup,
-          genderMale, genderOther, height, langSelect, login, nickname, openPulse, password,
-          preview, recipeBodyAdvice, recipeCountry, recipeDetail, recipeHeading, recipeNote,
-          recipePick, register, result, save, saveProfile, server, shotFace, shotTongue, symptoms,
-          tongueGuide, trendChart, weight);
+          birthYear, bmiLive, bodyImage, bodyMap, cct2700, cct4200, cct6500, cctGroup, circleGuide,
+          conditionsGroup, confounderFood, dietLink, discomfort, email, faceGuide, genderFemale,
+          genderGroup, genderMale, genderOther, height, langSelect, login, nickname, openPulse,
+          password, preview, recipeBodyAdvice, recipeCountry, recipeDetail, recipeEnsure,
+          recipeHeading, recipeNote, recipePick, register, result, save, saveProfile, server,
+          shotFace, shotStool, shotTongue, shotUrine, symptoms, tongueGuide, trendChart, weight);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

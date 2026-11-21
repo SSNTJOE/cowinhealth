@@ -1,4 +1,10 @@
 com.tube.healthing
+color ic_launcher_background
+dimen body_text
+dimen camera_preview_height
+dimen screen_padding
+dimen title_text
+dimen trend_chart_height
 id acupointLink
 id allergiesGroup
 id anon
@@ -10,7 +16,9 @@ id cct2700
 id cct4200
 id cct6500
 id cctGroup
+id circleGuide
 id conditionsGroup
+id confounderFood
 id count
 id diagram
 id dietLink
@@ -32,6 +40,7 @@ id preview
 id recipeBodyAdvice
 id recipeCountry
 id recipeDetail
+id recipeEnsure
 id recipeHeading
 id recipeNote
 id recipePick
@@ -41,7 +50,9 @@ id save
 id saveProfile
 id server
 id shotFace
+id shotStool
 id shotTongue
+id shotUrine
 id start
 id symptoms
 id tongueGuide
@@ -49,4 +60,11 @@ id trendChart
 id weight
 layout activity_main
 layout activity_pulse
+mipmap ic_launcher
+mipmap ic_launcher_foreground
+mipmap ic_launcher_round
 string app_name
+string camera_facing_face
+string camera_facing_stool
+string camera_facing_tongue
+string camera_facing_urine

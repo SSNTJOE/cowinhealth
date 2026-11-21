@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Capture type → camera lens: "front" or "back". Seeded into SharedPreferences. -->
+    <string name="camera_facing_face" translatable="false">front</string>
+    <string name="camera_facing_tongue" translatable="false">front</string>
+    <string name="camera_facing_stool" translatable="false">back</string>
+    <string name="camera_facing_urine" translatable="false">back</string>
+</resources>

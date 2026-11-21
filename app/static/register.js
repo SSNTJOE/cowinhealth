@@ -1,5 +1,6 @@
 const mysqlStatus = document.getElementById("mysql-status");
 const authMsg = document.getElementById("auth-msg");
+const captcha = bindCaptchaControls();
 
 async function checkMysql() {
   try {
@@ -26,7 +27,11 @@ document.getElementById("register-form").addEventListener("submit", async (event
   try {
     const data = await api("/api/register", {
       method: "POST",
-      body: formBody({ email, password }),
+      body: formBody({
+        email,
+        password,
+        ...authCaptchaFields(),
+      }),
     });
     authMsg.textContent = "已建立匿名 ID：" + data.user_id;
     authMsg.className = "status ok";
@@ -35,6 +40,7 @@ document.getElementById("register-form").addEventListener("submit", async (event
   } catch (err) {
     authMsg.textContent = formatApiError(err);
     authMsg.className = "status err";
+    captcha.reload();
   }
 });
 

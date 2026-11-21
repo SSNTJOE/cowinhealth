@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>註冊 — Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=auth-secure1" />
 </head>
 <body>
   <div class="wrap">
@@ -19,6 +19,16 @@
         <input type="email" id="email" required placeholder="you@example.com" autocomplete="email" />
         <label>密碼</label>
         <input type="password" id="password" required minlength="6" placeholder="至少 6 個字元" autocomplete="new-password" />
+        <label class="hp-field" aria-hidden="true">網站網址
+          <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off" />
+        </label>
+        <label for="captcha_answer">驗證碼</label>
+        <div class="captcha-row">
+          <img id="captcha-img" alt="驗證碼" width="160" height="56" />
+          <button type="button" id="captcha-refresh" class="ghost">換一張</button>
+        </div>
+        <input type="hidden" id="captcha_token" value="" />
+        <input type="text" id="captcha_answer" required maxlength="8" autocomplete="off" placeholder="輸入圖片中的字元" />
         <div class="actions">
           <button type="submit">註冊並產生匿名 ID</button>
           <a href="/"><button type="button" class="ghost">已有帳號？登入</button></a>
@@ -27,7 +37,7 @@
       <p id="auth-msg" class="status"></p>
     </section>
   </div>
-  <script src="/static/common.js?v=allergy3"></script>
-  <script src="/static/register.js"></script>
+  <script src="/static/common.js?v=auth-secure1"></script>
+  <script src="/static/register.js?v=auth-secure1"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-"""One row per reading. SQLite holds every row; deviation.xls is the colored view."""
+"""One row per reading. MySQL catalog_deviations is live; deviation.xls is backup view."""
 
 from __future__ import annotations
 
@@ -423,6 +423,27 @@ def record_deviation(
 ) -> None:
     row = build_deviation_row(profile, result, symptoms, discomfort)
     with _LOCK:
+        mysql_ok = False
+        try:
+            from .shared_catalog import best_effort_export, insert_deviation
+
+            insert_deviation(user_id, row)
+            mysql_ok = True
+            best_effort_export("deviation")
+        except Exception:
+            logger.exception("檢測差異寫入 MySQL 失敗，改寫本地 deviation.db")
+        if mysql_ok:
+            # Keep local SQLite mirror for offline tools.
+            try:
+                conn = _connect()
+                try:
+                    _insert(conn, user_id, row)
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                logger.warning("deviation.db 鏡像寫入失敗", exc_info=True)
+            return
         conn = _connect()
         try:
             _insert(conn, user_id, row)

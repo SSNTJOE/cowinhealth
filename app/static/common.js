@@ -55,6 +55,36 @@ function formBody(obj) {
   return body;
 }
 
+async function loadCaptcha(imgEl, tokenEl, answerEl) {
+  const data = await api("/api/captcha");
+  if (tokenEl) tokenEl.value = data.captcha_token || "";
+  if (answerEl) answerEl.value = "";
+  if (imgEl) {
+    const mime = data.mime || "image/png";
+    imgEl.src = `data:${mime};base64,${data.image_base64 || ""}`;
+  }
+  return data;
+}
+
+function bindCaptchaControls(prefix = "") {
+  const img = document.getElementById(prefix ? `${prefix}-captcha-img` : "captcha-img");
+  const token = document.getElementById(prefix ? `${prefix}-captcha_token` : "captcha_token");
+  const answer = document.getElementById(prefix ? `${prefix}-captcha_answer` : "captcha_answer");
+  const refresh = document.getElementById(prefix ? `${prefix}-captcha-refresh` : "captcha-refresh");
+  const reload = () => loadCaptcha(img, token, answer).catch(() => {});
+  if (refresh) refresh.addEventListener("click", (e) => { e.preventDefault(); reload(); });
+  reload();
+  return { reload, img, token, answer };
+}
+
+function authCaptchaFields() {
+  return {
+    captcha_token: (document.getElementById("captcha_token") || {}).value || "",
+    captcha_answer: (document.getElementById("captcha_answer") || {}).value || "",
+    website_url: (document.getElementById("website_url") || {}).value || "",
+  };
+}
+
 let CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
 let ALLERGY_OPTIONS = ["蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
 

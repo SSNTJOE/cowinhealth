@@ -39,6 +39,8 @@ TONGUE_COAT_DELTA_E_REF = 24.0
 NORMAL_DELTA_E = 3.0
 # Cut between the 4–7 band and the gated 1–3 band (~0.65·ΔE_ref).
 SEVERE_DELTA_E_FRAC = 0.65
+# Quiet cohort (no special disease / severe wording): never show 1–3.
+QUIET_HEALTH_FLOOR = 4
 HEALTHY_SCORE_MIN = 8
 # Opens the 1–3 band when ΔE is extreme (checked conditions or severe symptom wording).
 SEVERE_SYMPTOM_KEYWORDS = (
@@ -118,6 +120,14 @@ def severe_health_gate(
     return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
 
 
+def clamp_organ_health_score(score: int | float, severe_gate: bool = False) -> int:
+    """1–10 organ health; without severe_gate never below QUIET_HEALTH_FLOOR (4)."""
+    n = max(1, min(10, int(round(float(score)))))
+    if not severe_gate and n < QUIET_HEALTH_FLOOR:
+        return QUIET_HEALTH_FLOOR
+    return n
+
+
 def delta_e_ref_health_score(
     delta_e: float,
     ref: float = DELTA_E_REF,
@@ -142,7 +152,7 @@ def delta_e_ref_health_score(
         outside = min(1.0, (delta - spec) / span)
         return clamp(7 - 3 * outside)
     if not severe_gate:
-        return 4
+        return QUIET_HEALTH_FLOOR
     span = max(ref_v - cut, 1e-6)
     outside = min(1.0, (delta - cut) / span)
     return clamp(3 - 2 * outside)
@@ -3868,16 +3878,26 @@ def stabilize_organ_scores(
     prior_scores: dict[str, int] | None,
     lighting: dict[str, Any] | None,
     prior_lighting: dict[str, Any] | None,
+    severe_gate: bool = False,
 ) -> tuple[dict[str, int], dict[str, Any]]:
-    """Limit day-to-day organ score swings; pull harder toward prior when lighting changed a lot."""
+    """Limit day-to-day organ score swings; pull harder toward prior when lighting changed a lot.
+
+    Without severe_gate, never leave a score below QUIET_HEALTH_FLOOR (prior 1s must not
+    re-open the 1–3 band for quiet cohorts).
+    """
     meta = {
         "applied": False,
         "max_step": MAX_DAILY_SCORE_STEP,
         "light_shift": 0.0,
         "prior_blend": 0.0,
+        "severe_gate": bool(severe_gate),
+        "quiet_floor": QUIET_HEALTH_FLOOR,
     }
     if not prior_scores:
-        return dict(scores), meta
+        return {
+            key: clamp_organ_health_score(value, severe_gate=severe_gate)
+            for key, value in scores.items()
+        }, meta
     lighting = lighting or {}
     prior_lighting = prior_lighting or {}
     try:
@@ -3902,14 +3922,14 @@ def stabilize_organ_scores(
     for key, value in scores.items():
         curr = int(value)
         if key not in prior_scores or prior_scores.get(key) is None:
-            out[key] = curr
+            out[key] = clamp_organ_health_score(curr, severe_gate=severe_gate)
             continue
         prev = int(prior_scores[key])
         delta = curr - prev
         capped = max(-max_step, min(max_step, delta))
         stepped = prev + capped
         blended = (1.0 - prior_blend) * stepped + prior_blend * prev
-        out[key] = max(1, min(10, int(round(blended))))
+        out[key] = clamp_organ_health_score(blended, severe_gate=severe_gate)
     return out, meta
 
 
@@ -3934,7 +3954,11 @@ def inspect_image(
     color_temperature_k: int | float | str | None = None,
     severe_gate: bool = False,
     confounders: str | None = None,
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
 ) -> dict[str, Any]:
+    from .lighting_calib import compensate_lighting
+
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
     # Additive stool / urine path: text notes only, no preview persistence.
     if shot_type in ("stool", "urine"):
@@ -3945,11 +3969,13 @@ def inspect_image(
                 raw_image,
                 color_temperature_k=color_temperature_k,
                 confounders=confounders,
+                severe_gate=severe_gate,
             )
         return analyze_urine_image(
             raw_image,
             color_temperature_k=color_temperature_k,
             confounders=confounders,
+            severe_gate=severe_gate,
         )
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
@@ -3960,16 +3986,28 @@ def inspect_image(
         crop_info = dict(crop_info)
         crop_info["color_shift_cells"] = FACE_COLOR_SHIFT_CELLS
         crop_info["color_scale"] = FACE_COLOR_SCALE
-    # Auto CCT + exposure from the analysis frame, then face / tongue / coat scoring.
+    # Auto CCT + exposure from the analysis frame, then device-learned compensation.
     auto_cct = _wants_auto_color_temperature(color_temperature_k)
     if auto_cct:
-        cct = estimate_color_temperature_k(image)
+        raw_cct = float(estimate_color_temperature_k(image))
     else:
-        cct = normalize_color_temperature_k(color_temperature_k)
+        raw_cct = float(normalize_color_temperature_k(color_temperature_k))
+    raw_brightness = float(estimate_relative_brightness(image))
+    raw_gain = float(brightness_gain_to_target(raw_brightness))
+    cct, _blended_bright, brightness_gain, calib_meta = compensate_lighting(
+        raw_cct,
+        raw_brightness,
+        raw_gain,
+        lighting_calib,
+        device_key,
+    )
+    cct = int(round(normalize_color_temperature_k(cct)))
     image = adapt_rgb_image(image, cct)
     brightness = estimate_relative_brightness(image)
-    brightness_gain = brightness_gain_to_target(brightness)
-    image = adapt_brightness_image(image, brightness_gain)
+    # Prefer compensated gain; fall back to fresh estimate if calibration missing.
+    if brightness_gain is None:
+        brightness_gain = brightness_gain_to_target(brightness)
+    image = adapt_brightness_image(image, float(brightness_gain))
     brightness_after = estimate_relative_brightness(image)
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
@@ -4026,8 +4064,11 @@ def inspect_image(
         "color_temperature_k": cct,
         "color_temperature_auto": auto_cct,
         "brightness": round(float(brightness), 4),
+        "brightness_raw": round(float(raw_brightness), 4),
         "brightness_gain": round(float(brightness_gain), 4),
         "brightness_after": round(float(brightness_after), 4),
+        "lighting_calib": calib_meta,
+        "cct_raw": round(float(raw_cct), 1),
     }
 
 
@@ -4043,7 +4084,11 @@ def analyze_session(
     prior_session: dict[str, Any] | None = None,
     conditions: list[str] | tuple[str, ...] | None = None,
     confounders: str | None = None,
+    lighting_calib: dict[str, Any] | None = None,
+    device_hint: str | None = None,
 ) -> dict[str, Any]:
+    from .lighting_calib import device_key_from_hint, learn_from_session, parse_calib_blob
+
     # Prefer camera auto-CCT per shot; ignore legacy discrete UI presets.
     cct_arg: int | float | str | None = "auto"
     if color_temperature_k is not None and not _wants_auto_color_temperature(color_temperature_k):
@@ -4055,6 +4100,8 @@ def analyze_session(
         if preset is not None and preset not in COLOR_TEMPERATURE_CHOICES:
             cct_arg = preset
     gate = severe_health_gate(conditions, symptoms, discomfort)
+    device_key = device_key_from_hint(device_hint)
+    calib_state = parse_calib_blob(lighting_calib)
     color_reports = [
         inspect_image(
             raw,
@@ -4064,6 +4111,8 @@ def analyze_session(
             color_temperature_k=cct_arg,
             severe_gate=gate,
             confounders=confounders if shot_type in ("stool", "urine") else None,
+            lighting_calib=calib_state,
+            device_key=device_key,
         )
         for shot_type, raw in images
     ]
@@ -4150,13 +4199,21 @@ def analyze_session(
     if isinstance(stool_note, dict):
         raw = stool_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            stool_scores = {k: int(v) for k, v in raw.items() if v is not None}
+            stool_scores = {
+                k: clamp_organ_health_score(v, severe_gate=gate)
+                for k, v in raw.items()
+                if v is not None
+            }
             if not stool_scores:
                 stool_scores = None
     if isinstance(urine_note, dict):
         raw = urine_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            urine_scores = {k: int(v) for k, v in raw.items() if v is not None}
+            urine_scores = {
+                k: clamp_organ_health_score(v, severe_gate=gate)
+                for k, v in raw.items()
+                if v is not None
+            }
             if not urine_scores:
                 urine_scores = None
     # Denominator per organ = sources present this session (unshot modalities omitted).
@@ -4168,6 +4225,10 @@ def analyze_session(
         "urine": urine_scores,
     }
     scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
+    scores = {
+        key: clamp_organ_health_score(value, severe_gate=gate)
+        for key, value in scores.items()
+    }
     used_sources = [key for key, value in source_maps.items() if value is not None]
 
     # Aggregate lighting from this session's shots (mean CCT / brightness).
@@ -4190,17 +4251,61 @@ def analyze_session(
     }
     prior_scores = (prior_session or {}).get("scores") if prior_session else None
     prior_lighting = (prior_session or {}).get("lighting") if prior_session else None
-    scores, stabilize_meta = stabilize_organ_scores(scores, prior_scores, session_lighting, prior_lighting)
+    scores, stabilize_meta = stabilize_organ_scores(
+        scores, prior_scores, session_lighting, prior_lighting, severe_gate=gate
+    )
     for key, info in breakdown.items():
         score_key = next((sk for k, _n, sk, _pk in ORGAN_META if k == key), None)
         if score_key and score_key in scores:
             info["composite"] = scores[score_key]
             info["stabilized"] = bool(stabilize_meta.get("applied"))
 
+    # Learn device lighting habits (silent). Prefer raw CCT/brightness when present.
+    raw_ccts = [float(r["cct_raw"]) for r in color_reports if r.get("cct_raw") is not None]
+    raw_brights = [
+        float(r.get("brightness_raw") if r.get("brightness_raw") is not None else r.get("brightness"))
+        for r in color_reports
+        if r.get("brightness_raw") is not None or r.get("brightness") is not None
+    ]
+    mean_delta = None
+    if prior_scores:
+        deltas: list[float] = []
+        for key, value in scores.items():
+            if key in prior_scores and prior_scores.get(key) is not None:
+                deltas.append(float(value) - float(prior_scores[key]))
+        if deltas:
+            mean_delta = sum(deltas) / len(deltas)
+    measured_cct = (
+        sum(raw_ccts) / len(raw_ccts)
+        if raw_ccts
+        else float(session_lighting["color_temperature_k"])
+    )
+    measured_bright = (
+        sum(raw_brights) / len(raw_brights)
+        if raw_brights
+        else float(session_lighting.get("brightness") or TARGET_RELATIVE_BRIGHTNESS)
+    )
+    updated_calib = learn_from_session(
+        calib_state,
+        device_key,
+        measured_cct=measured_cct,
+        measured_brightness=measured_bright,
+        quiet=not gate,
+        mean_score_delta=mean_delta,
+    )
+    session_lighting["device_key"] = device_key
+    session_lighting["calib"] = {
+        report["shot_type"]: report.get("lighting_calib")
+        for report in color_reports
+        if report.get("lighting_calib")
+    }
+
     organ_health = serialize_organ_health(scores, breakdown, used_sources)
     organ_health["pattern_scores"] = pattern_scores
     organ_health["lighting"] = session_lighting
     organ_health["score_stabilize"] = stabilize_meta
+    organ_health["lighting_calib"] = updated_calib
+    organ_health["device_key"] = device_key
     # Text-only stool/urine notes (no image blobs) ride along existing composite JSON.
     if stool_note or urine_note or stool_urine_findings:
         organ_health["stool_urine"] = {
@@ -4300,6 +4405,8 @@ def analyze_session(
         "brightness_gain": session_lighting.get("brightness_gain"),
         "lighting": session_lighting,
         "score_stabilize": stabilize_meta,
+        "device_key": device_key,
+        "lighting_calib_json": updated_calib,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }
     if not female:

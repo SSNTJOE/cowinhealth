@@ -841,11 +841,21 @@ def classify_urine_lab(
     }
 
 
-def _organ_scores_from_keys(organ_keys: list[str], health_score: int) -> dict[str, int]:
-    """Map organ keys → *_score ints for compose_organ_health."""
+def _organ_scores_from_keys(
+    organ_keys: list[str],
+    health_score: int,
+    severe_gate: bool = False,
+) -> dict[str, int]:
+    """Map organ keys → *_score ints for compose_organ_health.
+
+    Without severe_gate, teaching class scores of 1–3 are floored to 4 so stool/urine
+    cannot reopen the severe band for quiet cohorts.
+    """
     from .syndrome import ORGAN_META
 
     score = max(1, min(10, int(health_score)))
+    if not severe_gate and score < 4:
+        score = 4
     out: dict[str, int] = {}
     for organ in organ_keys:
         for key, _name, score_key, _pk in ORGAN_META:
@@ -905,6 +915,7 @@ def analyze_stool_image(
     image: Image.Image,
     color_temperature_k: int | float | str | None = "auto",
     confounders: str | None = None,
+    severe_gate: bool = False,
 ) -> dict[str, Any]:
     work, lighting = _preprocess_circle_image(image, color_temperature_k)
     L, a, b, lab_meta = _lab_from_roi(work)
@@ -931,7 +942,9 @@ def analyze_stool_image(
 
     user_conf = _parse_confounders(confounders, STOOL_CONFOUNDER_LABELS)
     water_red = _surrounding_water_reddish(work)
-    organ_scores = _organ_scores_from_keys(hit.get("organ_keys") or [], hit.get("health_score", 8))
+    organ_scores = _organ_scores_from_keys(
+        hit.get("organ_keys") or [], hit.get("health_score", 8), severe_gate=severe_gate
+    )
     findings = [
         (
             f"大便色觀察：{hit['label']} → 臟腑聯想 {hit['organs']}；"
@@ -997,6 +1010,7 @@ def analyze_urine_image(
     image: Image.Image,
     color_temperature_k: int | float | str | None = "auto",
     confounders: str | None = None,
+    severe_gate: bool = False,
 ) -> dict[str, Any]:
     work, lighting = _preprocess_circle_image(image, color_temperature_k)
     L, a, b, lab_meta = _lab_from_roi(work)
@@ -1004,10 +1018,14 @@ def analyze_urine_image(
     foam = _foam_metrics(work)
     hit = classify_urine_lab(L, a, b, turbidity=turbidity)
     user_conf = _parse_confounders(confounders, URINE_CONFOUNDER_LABELS)
-    organ_scores = _organ_scores_from_keys(hit.get("organ_keys") or [], hit.get("health_score", 8))
+    organ_scores = _organ_scores_from_keys(
+        hit.get("organ_keys") or [], hit.get("health_score", 8), severe_gate=severe_gate
+    )
     # Foam teaching may also soft-nudge kidney/spleen scores when fine dense
     if foam.get("persistent_foam_teaching_alert"):
-        for key, val in _organ_scores_from_keys(["kidney", "spleen"], 5).items():
+        for key, val in _organ_scores_from_keys(
+            ["kidney", "spleen"], 5, severe_gate=severe_gate
+        ).items():
             prev = organ_scores.get(key)
             organ_scores[key] = val if prev is None else min(prev, val)
 

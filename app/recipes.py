@@ -188,6 +188,14 @@ def _rows_cached(mtime_ns: int) -> tuple[dict, ...]:
 
 
 def recipe_rows() -> tuple[dict, ...]:
+    try:
+        from .shared_catalog import fetch_recipe_rows
+
+        mysql_rows = fetch_recipe_rows()
+        if mysql_rows is not None:
+            return mysql_rows
+    except Exception:
+        pass
     path = active_recipe_path()
     mtime = path.stat().st_mtime_ns if path.exists() else 0
     # Include which file we read so cache busts when .new appears/disappears.
@@ -300,8 +308,14 @@ def recipe_nutrient_map(row: dict | None) -> dict[str, float]:
 
 
 def invalidate_recipe_cache() -> None:
-    """Drop the xlrd row cache after Recipe.xls is rewritten on disk."""
+    """Drop row caches after Recipe.xls / MySQL catalog changes."""
     _rows_cached.cache_clear()
+    try:
+        from .shared_catalog import invalidate_recipe_mysql_cache
+
+        invalidate_recipe_mysql_cache()
+    except Exception:
+        pass
 
 
 def countries(prefix: str | None = None) -> list[str]:
@@ -692,7 +706,15 @@ def _ordered_organs(names: set[str]) -> list[str]:
 
 
 def foods_index() -> dict[str, dict[str, str]]:
-    """Cached Foods.xls index; invalidated when the file mtime changes."""
+    """Prefer MySQL catalog_foods; fall back to Foods.xls mtime cache."""
+    try:
+        from .shared_catalog import fetch_foods_index
+
+        mysql_foods = fetch_foods_index()
+        if mysql_foods is not None:
+            return mysql_foods
+    except Exception:
+        pass
     path = ROOT / "Foods.xls"
     try:
         mtime = path.stat().st_mtime if path.exists() else 0.0
@@ -713,6 +735,12 @@ def _foods_index_cached(_mtime: float) -> dict[str, dict[str, str]]:
 
 def invalidate_foods_cache() -> None:
     _foods_index_cached.cache_clear()
+    try:
+        from .shared_catalog import invalidate_foods_mysql_cache
+
+        invalidate_foods_mysql_cache()
+    except Exception:
+        pass
 
 
 def food_effect_tag_maps(

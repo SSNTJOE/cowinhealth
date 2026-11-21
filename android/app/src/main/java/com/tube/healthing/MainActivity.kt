@@ -4,10 +4,12 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.text.method.LinkMovementMethod
+import android.util.Base64
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -35,9 +37,12 @@ class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
     private var faceFile: File? = null
     private var tongueFile: File? = null
+    private var stoolFile: File? = null
+    private var urineFile: File? = null
     private var alignKind = "face"
     private var pulseJson: String? = null
     private var female = false
+    @Volatile private var captchaToken: String = ""
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val http = okhttp3.OkHttpClient()
     private val prefs by lazy { getSharedPreferences("healthing", MODE_PRIVATE) }
@@ -88,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
         HealthFlags.inflate(binding.conditionsGroup, HealthFlags.CONDITIONS)
         HealthFlags.inflate(binding.allergiesGroup, HealthFlags.ALLERGIES)
+        CameraFacing.ensureDefaults(this)
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         binding.preview.scaleType = PreviewView.ScaleType.FILL_CENTER
         binding.server.setText(prefs.getString("base_url", "http://10.0.2.2:8000"))
@@ -109,6 +115,8 @@ class MainActivity : AppCompatActivity() {
         binding.weight.addTextChangedListener(bmiWatcher)
         refreshBmi()
 
+        binding.captchaRefresh.setOnClickListener { Thread { refreshCaptcha() }.start() }
+        Thread { refreshCaptcha() }.start()
         binding.login.setOnClickListener { Thread { login() }.start() }
         binding.register.setOnClickListener { Thread { register() }.start() }
         binding.saveProfile.setOnClickListener {
@@ -125,11 +133,14 @@ class MainActivity : AppCompatActivity() {
         }
         binding.shotFace.setOnClickListener { captureAligned("face") }
         binding.shotTongue.setOnClickListener { captureAligned("tongue") }
+        binding.shotStool.setOnClickListener { captureAligned("stool") }
+        binding.shotUrine.setOnClickListener { captureAligned("urine") }
         showAlign("face")
         binding.openPulse.setOnClickListener {
             pulseLauncher.launch(Intent(this, PulseActivity::class.java))
         }
         binding.save.setOnClickListener { Thread { save() }.start() }
+        binding.recipeEnsure.setOnClickListener { Thread { ensureTypedRecipe() }.start() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
@@ -159,6 +170,26 @@ class MainActivity : AppCompatActivity() {
         api.setBaseUrl(url)
     }
 
+    private fun refreshCaptcha() {
+        try {
+            rememberServer()
+            val json = api.captcha()
+            val token = json.optString("captcha_token")
+            val b64 = json.optString("image_base64")
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            captchaToken = token
+            runOnUiThread {
+                binding.captchaImage.setImageBitmap(bmp)
+                binding.captchaAnswer.setText("")
+            }
+        } catch (e: Exception) {
+            runOnUiThread {
+                Toast.makeText(this, e.message ?: "驗證碼載入失敗", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun loadFlagOptions() {
         try {
             rememberServer()
@@ -171,9 +202,18 @@ class MainActivity : AppCompatActivity() {
     private fun login() {
         try {
             rememberServer()
+            val answer = binding.captchaAnswer.text.toString().trim()
+            val honeypot = binding.websiteUrl.text?.toString().orEmpty()
+            if (captchaToken.isBlank() || answer.isBlank()) {
+                runOnUiThread { Toast.makeText(this, "請輸入驗證碼", Toast.LENGTH_SHORT).show() }
+                return
+            }
             api.login(
                 binding.email.text.toString(),
-                binding.password.text.toString()
+                binding.password.text.toString(),
+                captchaToken,
+                answer,
+                honeypot,
             )
             val me = api.me()
             val flags = flagsOrNull()
@@ -185,7 +225,9 @@ class MainActivity : AppCompatActivity() {
             }
             refreshTrend()
             loadLatestAdvice()
+            refreshCaptcha()
         } catch (e: Exception) {
+            refreshCaptcha()
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
         }
     }
@@ -193,9 +235,18 @@ class MainActivity : AppCompatActivity() {
     private fun register() {
         try {
             rememberServer()
+            val answer = binding.captchaAnswer.text.toString().trim()
+            val honeypot = binding.websiteUrl.text?.toString().orEmpty()
+            if (captchaToken.isBlank() || answer.isBlank()) {
+                runOnUiThread { Toast.makeText(this, "請輸入驗證碼", Toast.LENGTH_SHORT).show() }
+                return
+            }
             val json = api.register(
                 binding.email.text.toString(),
-                binding.password.text.toString()
+                binding.password.text.toString(),
+                captchaToken,
+                answer,
+                honeypot,
             )
             val me = api.me()
             val flags = flagsOrNull()
@@ -209,7 +260,9 @@ class MainActivity : AppCompatActivity() {
                 refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
+            refreshCaptcha()
         } catch (e: Exception) {
+            refreshCaptcha()
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
         }
     }
@@ -323,16 +376,24 @@ class MainActivity : AppCompatActivity() {
                     }
                     val preview = previewBuilder.build()
                     capture = captureBuilder.build()
-                    if (CameraBind.bindFrontOnly(this, provider, preview, capture) != null) {
+                    if (CameraBind.bindForCaptureKind(
+                            this, provider, this, alignKind, preview, capture
+                        ) != null
+                    ) {
                         preview.setSurfaceProvider(binding.preview.surfaceProvider)
-                        showAlign(alignKind)
+                        applyAlignGuides(alignKind)
                         bound = true
                         break
                     }
                 }
                 imageCapture = if (bound) capture else null
                 if (!bound) {
-                    Toast.makeText(this, "打不開前置鏡頭（臉／舌）。模擬器請把 Front camera 設成 Webcam 或 Emulated。", Toast.LENGTH_LONG).show()
+                    val lens = if (CameraFacing.isFront(this, alignKind)) "前置" else "後置"
+                    Toast.makeText(
+                        this,
+                        "打不開${lens}鏡頭（${alignKind}）。模擬器請檢查 Front/Back camera 設定。",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             } catch (e: Exception) {
                 imageCapture = null
@@ -342,35 +403,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAlign(kind: String) {
-        alignKind = if (kind == "tongue") "tongue" else "face"
-        val face = alignKind == "face"
+        val previousFacing = CameraFacing.facingString(this, alignKind)
+        alignKind = CameraFacing.normalize(kind)
+        applyAlignGuides(alignKind)
+        if (previousFacing != CameraFacing.facingString(this, alignKind)) {
+            // face/tongue → front; stool/urine → back — rebind when lens changes
+            startCamera()
+        }
+    }
+
+    private fun applyAlignGuides(kind: String) {
+        val mode = CameraFacing.normalize(kind)
+        val face = mode == CameraFacing.FACE
+        val tongue = mode == CameraFacing.TONGUE
+        val circle = mode == CameraFacing.STOOL || mode == CameraFacing.URINE
         binding.faceGuide.visibility = if (face) View.VISIBLE else View.GONE
-        binding.tongueGuide.visibility = if (face) View.GONE else View.VISIBLE
-        val zoom = if (face) FaceFrame.PREVIEW_ZOOM else 1f
+        binding.tongueGuide.visibility = if (tongue) View.VISIBLE else View.GONE
+        binding.circleGuide.visibility = if (circle) View.VISIBLE else View.GONE
+        // Face + circle shots use ~2× preview zoom (matches website).
+        val zoom = when {
+            face -> FaceFrame.PREVIEW_ZOOM
+            circle -> 2f
+            else -> 1f
+        }
         binding.preview.scaleX = zoom
         binding.preview.scaleY = zoom
     }
 
     private fun captureAligned(kind: String) {
-        if (alignKind != kind) {
-            showAlign(kind)
-            val message = if (kind == "face") {
-                "臉部預覽已放大兩倍，對準黃線後再按一次"
-            } else {
-                "已切換舌頭黃框，對準後再按一次"
+        val mode = CameraFacing.normalize(kind)
+        if (alignKind != mode) {
+            showAlign(mode)
+            val message = when (mode) {
+                CameraFacing.FACE -> "臉部預覽已放大兩倍，對準黃線後再按一次"
+                CameraFacing.TONGUE -> "已切換舌頭黃框，對準後再按一次"
+                CameraFacing.STOOL -> "已切換後置鏡頭拍大便，對準後再按一次"
+                CameraFacing.URINE -> "已切換後置鏡頭拍尿尿，對準後再按一次"
+                else -> "已切換鏡頭，對準後再按一次"
             }
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             return
         }
-        capture(kind)
+        capture(mode)
     }
 
     private fun capture(kind: String) {
+        val mode = CameraFacing.normalize(kind)
         val capture = imageCapture ?: run {
-            Toast.makeText(this, "鏡頭尚未就緒（臉／舌用前置鏡頭）", Toast.LENGTH_SHORT).show()
+            val lens = if (CameraFacing.isFront(this, mode)) "前置" else "後置"
+            Toast.makeText(this, "鏡頭尚未就緒（$mode 用${lens}鏡頭）", Toast.LENGTH_SHORT).show()
             return
         }
-        val file = File(cacheDir, "$kind.jpg")
+        val file = File(cacheDir, "$mode.jpg")
         val options = ImageCapture.OutputFileOptions.Builder(file).build()
         val previewW = binding.preview.width
         val previewH = binding.preview.height
@@ -379,19 +463,33 @@ class MainActivity : AppCompatActivity() {
             cameraExecutor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    if (kind == "face") {
-                        try {
-                            FaceFrame.cropFileToVisiblePreview(file, previewW, previewH)
-                        } catch (_: Exception) {
+                    when (mode) {
+                        CameraFacing.FACE -> {
+                            try {
+                                FaceFrame.cropFileToVisiblePreview(file, previewW, previewH)
+                            } catch (_: Exception) {
+                            }
+                            faceFile = file
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, "已拍臉／唇", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    } else if (kind == "tongue") {
-                        try {
-                            TongueFrame.cropFileToYellowFrame(file, previewW, previewH)
-                        } catch (_: Exception) {
+                        CameraFacing.TONGUE -> {
+                            try {
+                                TongueFrame.cropFileToYellowFrame(file, previewW, previewH)
+                            } catch (_: Exception) {
+                            }
+                            tongueFile = file
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, "已拍舌頭", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        CameraFacing.STOOL, CameraFacing.URINE -> {
+                            if (mode == CameraFacing.STOOL) stoolFile = file else urineFile = file
+                            // Same as website: analyze immediately; text only, no photo keep/display.
+                            Thread { submitCircleShot(mode, file) }.start()
                         }
                     }
-                    if (kind == "face") faceFile = file else tongueFile = file
-                    runOnUiThread { Toast.makeText(this@MainActivity, "已拍$kind", Toast.LENGTH_SHORT).show() }
                 }
                 override fun onError(exception: ImageCaptureException) {
                     runOnUiThread { Toast.makeText(this@MainActivity, exception.message, Toast.LENGTH_LONG).show() }
@@ -444,6 +542,90 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectedColorTemperatureK(): String = "auto"
 
+    /** Silent device fingerprint for lighting calibration (never shown as a form). */
+    private fun silentDeviceHint(): String {
+        return listOf(
+            "Android",
+            Build.MANUFACTURER.orEmpty(),
+            Build.MODEL.orEmpty(),
+            Build.DEVICE.orEmpty(),
+            "sdk=${Build.VERSION.SDK_INT}",
+        ).joinToString("|")
+    }
+
+    private fun confoundersCsv(): String? {
+        if (!binding.confounderFood.isChecked) return null
+        return "近24小時飲食或藥物可能染色"
+    }
+
+    /** Immediate stool/urine analyze via same /api/record → MySQL as the website. */
+    private fun submitCircleShot(kind: String, file: File) {
+        try {
+            rememberServer()
+            runOnUiThread {
+                Toast.makeText(this, "傳送文字判斷中…", Toast.LENGTH_SHORT).show()
+            }
+            val json = api.submit(
+                symptoms = binding.symptoms.text.toString(),
+                discomfort = binding.discomfort.text.toString(),
+                face = faceFile,
+                tongue = tongueFile,
+                pulseJson = if (pulseReady(pulseJson)) pulseJson else null,
+                colorTemperatureK = selectedColorTemperatureK(),
+                shotType = kind,
+                shotFile = file,
+                confounders = confoundersCsv(),
+                includePulse = pulseReady(pulseJson),
+                deviceHint = silentDeviceHint(),
+            )
+            // Do not keep stool/urine photo for display.
+            if (kind == CameraFacing.STOOL) stoolFile = null
+            if (kind == CameraFacing.URINE) urineFile = null
+            runOnUiThread {
+                binding.result.text = prettyCircle(json, kind)
+                bindAdvice(json)
+                refreshTrend()
+                refreshRecipeChoices(keepSelection = true)
+                Toast.makeText(this, "已寫入 MySQL（文字判斷，未存照片）", Toast.LENGTH_SHORT).show()
+                binding.bodyImage.post {
+                    Thread {
+                        applyBodyOverlays(
+                            binding.bodyMap,
+                            binding.bodyImage,
+                            json.optJSONObject("overlays"),
+                            json.optJSONObject("scores"),
+                            female,
+                            api::mediaUrl,
+                            http
+                        )
+                    }.start()
+                }
+            }
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun prettyCircle(json: JSONObject, kind: String): String {
+        val label = if (kind == CameraFacing.URINE) "尿尿" else "大便"
+        val findings = json.optJSONArray("findings")
+        val lines = mutableListOf<String>()
+        lines.add("${label}文字判斷（教學示範，非診斷）")
+        if (findings != null) {
+            for (i in 0 until findings.length()) {
+                val text = findings.optString(i).trim()
+                if (text.isNotBlank()) lines.add("・$text")
+            }
+        }
+        val note = json.optJSONObject(kind)
+        if (note != null) {
+            val cls = note.optString("class_label").ifBlank { note.optString("label") }
+            if (cls.isNotBlank()) lines.add("分類：$cls")
+        }
+        lines.add(pretty(json))
+        return lines.joinToString("\n")
+    }
+
     private fun save() {
         if (!pulseReady(pulseJson)) {
             runOnUiThread {
@@ -458,12 +640,13 @@ class MainActivity : AppCompatActivity() {
         try {
             rememberServer()
             val json = api.submit(
-                binding.symptoms.text.toString(),
-                binding.discomfort.text.toString(),
-                faceFile,
-                tongueFile,
-                pulseJson,
-                selectedColorTemperatureK()
+                symptoms = binding.symptoms.text.toString(),
+                discomfort = binding.discomfort.text.toString(),
+                face = faceFile,
+                tongue = tongueFile,
+                pulseJson = pulseJson,
+                colorTemperatureK = selectedColorTemperatureK(),
+                deviceHint = silentDeviceHint(),
             )
             runOnUiThread {
                 binding.result.text = pretty(json)
@@ -577,7 +760,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 val name = s?.toString()?.trim().orEmpty()
                 if (name.isEmpty()) {
-                    binding.recipeCountry.adapter?.filter?.filter("")
+                    (binding.recipeCountry.adapter as? ArrayAdapter<*>)?.filter?.filter("")
                 }
                 if (name == loadedCountry && name.isNotEmpty()) return
                 if (name in countryNames) {
@@ -601,7 +784,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 val label = s?.toString()?.trim().orEmpty()
                 if (label.isEmpty()) {
-                    binding.recipePick.adapter?.filter?.filter("")
+                    (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter("")
                 }
                 showRecipeDetail(label)
             }
@@ -620,7 +803,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCountryMenu() {
-        val adapter = binding.recipeCountry.adapter ?: return
+        val adapter = binding.recipeCountry.adapter as? ArrayAdapter<*> ?: return
         val query = binding.recipeCountry.text?.toString()?.trim().orEmpty()
         if (query.isEmpty()) {
             adapter.filter.filter("") { binding.recipeCountry.showDropDown() }
@@ -636,7 +819,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (recipeRows.isEmpty()) return
         synchronized(this) { recipeShowAllPasses = 2 }
-        binding.recipePick.adapter?.filter?.filter("") {
+        (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter("") {
             binding.recipePick.showDropDown()
         }
     }
@@ -838,6 +1021,36 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
             null
+        }
+    }
+
+    private fun ensureTypedRecipe() {
+        val country = binding.recipeCountry.text?.toString()?.trim().orEmpty().ifBlank { "Global" }
+        val name = binding.recipePick.text?.toString()?.trim().orEmpty()
+        if (name.isBlank()) {
+            runOnUiThread {
+                Toast.makeText(this, "請先輸入要建立的食譜名稱", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        try {
+            rememberServer()
+            runOnUiThread { Toast.makeText(this, "建立食譜中…", Toast.LENGTH_SHORT).show() }
+            val data = api.ensureRecipe(country, name, currentLang())
+            runOnUiThread {
+                val recipe = data.optJSONObject("recipe")
+                val shown = recipe?.optString("name")?.ifBlank { name } ?: name
+                Toast.makeText(
+                    this,
+                    if (data.optBoolean("created", true)) "已寫入共用食譜庫：$shown（網站／App 同步）"
+                    else "已更新／取得：$shown",
+                    Toast.LENGTH_LONG
+                ).show()
+                refreshRecipeChoices(keepSelection = false)
+                if (recipe != null) showRecipeDetail(recipeLabel(recipe))
+            }
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
         }
     }
 

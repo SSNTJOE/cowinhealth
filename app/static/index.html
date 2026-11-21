@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=stool-urine2" />
+  <link rel="stylesheet" href="/static/styles.css?v=auth-secure1" />
 </head>
 <body>
   <div class="wrap">
@@ -26,6 +26,16 @@
         <input type="email" id="email" required placeholder="you@example.com" autocomplete="email" />
         <label>密碼</label>
         <input type="password" id="password" required minlength="6" autocomplete="current-password" />
+        <label class="hp-field" aria-hidden="true">網站網址
+          <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off" />
+        </label>
+        <label for="captcha_answer">驗證碼</label>
+        <div class="captcha-row">
+          <img id="captcha-img" alt="驗證碼" width="160" height="56" />
+          <button type="button" id="captcha-refresh" class="ghost">換一張</button>
+        </div>
+        <input type="hidden" id="captcha_token" value="" />
+        <input type="text" id="captcha_answer" required maxlength="8" autocomplete="off" placeholder="輸入圖片中的字元" />
         <div class="actions">
           <button type="submit">登入</button>
           <a href="/register"><button type="button" id="register-btn" class="secondary">前往註冊</button></a>
@@ -147,29 +157,35 @@
           <img id="face-preview" alt="臉部擷取" />
           <div id="face-grid-overlay" class="face-grid-overlay"></div>
         </div>
-        <p id="face-lab-flags" class="advice tongue-flag hidden"></p>
-        <p id="complexion-now" class="advice"></p>
-        <div id="face-cells-list" class="face-cells-list"></div>
-        <h4>臉色歷史</h4>
-        <div id="complexion-history"></div>
+        <details class="detail-fold" id="face-detail-fold">
+          <summary>詳細資料</summary>
+          <p id="face-lab-flags" class="advice tongue-flag hidden"></p>
+          <p id="complexion-now" class="advice"></p>
+          <div id="face-cells-list" class="face-cells-list"></div>
+          <h4>臉色歷史</h4>
+          <div id="complexion-history"></div>
+        </details>
       </div>
       <div id="tongue-grid-wrap" class="hidden">
         <h3>舌部分區（上中下左右＋舌苔，教學示範）</h3>
-        <p class="note">相片方向：舌尖朝下（近唇）、舌根朝上。五塊對應：上＝腎（舌根）：剝苔、a* 極高，且 L* 與有苔區有明顯斷層，為腎陰虛（虛熱）；舌根苔厚白（L* 高）、舌質淡嫩為命門火衰（腎陽虛）。中＝脾胃、下＝心肺（舌尖）、左／右＝肝膽：舌邊 a* 明顯高於舌中為肝火旺，再帶暗紫（b* 下降）為肝膽濕熱、氣鬱化火；舌邊 a* 偏低為肝血虛，舌體瘦小時一併註明。使用者說「六塊」但列了上中下左右五區；第六層採<strong>全舌舌苔疊加</strong>（不把中區再切成中上／中下）。舌苔看顏色和表面：黃厚膩（b* 高、L* 中等、能量高、無高光）為胃腸濕熱、積食化火；黃燥裂（b* 極高、L* 低、對比極高、無高光）為實熱亢盛、熱極傷津；白厚滑（b* 近 0、L* 高、能量高、大面積高光）為脾胃虛寒、寒濕內停；光剝無苔（a* 高、幾乎無苔、能量極高、全舌高光）為胃陰枯竭、全身大虛。此為教學示範，不能取代醫師診斷。</p>
         <div class="face-grid-stage" id="tongue-grid-stage">
           <img id="tongue-preview" alt="舌頭擷取" />
           <div id="tongue-grid-overlay" class="tongue-grid-overlay"></div>
         </div>
         <p id="tongue-tip-flag" class="advice tongue-flag hidden"></p>
+      </div>
+      <details class="detail-fold hidden" id="tongue-detail-fold">
+        <summary>細部說明</summary>
+        <p class="note">相片方向：舌尖朝下（近唇）、舌根朝上。五塊對應：上＝腎（舌根）：剝苔、a* 極高，且 L* 與有苔區有明顯斷層，為腎陰虛（虛熱）；舌根苔厚白（L* 高）、舌質淡嫩為命門火衰（腎陽虛）。中＝脾胃、下＝心肺（舌尖）、左／右＝肝膽：舌邊 a* 明顯高於舌中為肝火旺，再帶暗紫（b* 下降）為肝膽濕熱、氣鬱化火；舌邊 a* 偏低為肝血虛，舌體瘦小時一併註明。使用者說「六塊」但列了上中下左右五區；第六層採<strong>全舌舌苔疊加</strong>（不把中區再切成中上／中下）。舌苔看顏色和表面：黃厚膩（b* 高、L* 中等、能量高、無高光）為胃腸濕熱、積食化火；黃燥裂（b* 極高、L* 低、對比極高、無高光）為實熱亢盛、熱極傷津；白厚滑（b* 近 0、L* 高、能量高、大面積高光）為脾胃虛寒、寒濕內停；光剝無苔（a* 高、幾乎無苔、能量極高、全舌高光）為胃陰枯竭、全身大虛。此為教學示範，不能取代醫師診斷。</p>
         <p id="tongue-coat-now" class="advice"></p>
         <div id="tongue-cells-list" class="face-cells-list"></div>
-      </div>
-      <p>
-        主要顏色：
-        <span id="color-chip" class="color-chip"></span>
-        <span id="color-hex"></span>
-        <span id="color-label"></span>
-      </p>
+        <p id="color-summary">
+          主要顏色：
+          <span id="color-chip" class="color-chip"></span>
+          <span id="color-hex"></span>
+          <span id="color-label"></span>
+        </p>
+      </details>
       <ul id="findings"></ul>
       <p id="advice" class="advice"></p>
       <p id="links"></p>
@@ -238,7 +254,10 @@
         <div id="organ-pins"></div>
       </div>
       <div id="scores" class="scores"></div>
-      <p class="note">臉色、舌色、舌苔各自對教學正常值；大便／尿尿若有教學色分也會併入該臟腑。規格內（ΔE≤3）記 8–10，越接近正常越靠近 10，貼到規格邊緣為 8。超過規格記 4–7，剛超出為 7，離越遠越靠近 4；僅勾選特殊疾病或今日感覺／不舒服達嚴重程度，且色差極大時才開 1–3。臟腑最終分只平均<strong>本場有拍到且有分數</strong>的來源（臉色／舌色／舌苔／大便／尿尿）：未拍者不進分母；一項用該分，多項再平均。大便／尿尿僅文字、無分數時不進平均。8–10 不放證型圖；1–7 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，7 分約 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。<span class="uterus-note hidden">子宮只在女生圖上。</span>臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。<span class="uterus-note hidden">照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</span></p>
+      <details class="detail-fold" id="organ-score-detail-fold">
+        <summary>細項說明</summary>
+        <p class="note">臉色、舌色、舌苔各自對教學正常值；大便／尿尿若有教學色分也會併入該臟腑。規格內（ΔE≤3）記 8–10，越接近正常越靠近 10，貼到規格邊緣為 8。超過規格記 4–7，剛超出為 7，離越遠越靠近 4；僅勾選特殊疾病或今日感覺／不舒服達嚴重程度，且色差極大時才開 1–3。臟腑最終分只平均<strong>本場有拍到且有分數</strong>的來源（臉色／舌色／舌苔／大便／尿尿）：未拍者不進分母；一項用該分，多項再平均。大便／尿尿僅文字、無分數時不進平均。8–10 不放證型圖；1–7 用實熱、實寒、虛熱、虛寒、濕氣貼圖，1 分不透明，7 分約 80% 透明。脾與胃各自計分，脾的證型不會併進胃，胃也不併進脾。<span class="uterus-note hidden">子宮只在女生圖上。</span>臉色：下巴第12格與人中（第8格下）偏暗、發青或發白為虛寒；全臉發青、發烏或暗沉為實寒；第7、9、10、11格黃褐斑為虛熱；面色蒼白或暗淡為虛寒。舌上區：淡白無血色為虛寒；暗紅、青紫或瘀斑瘀點為血瘀，計實寒；鮮紅或深紅為實熱；舌紅而少苔或無苔為虛熱。上區白膩苔為寒濕，黃膩苔為濕熱，少苔、剝苔或無苔為陰血虧虛。<span class="uterus-note hidden">照片不能判斷肌瘤、肌腺症、內膜異位、盆腔炎、子宮內膜炎或多囊。</span></p>
+      </details>
       <p class="note" id="disclaimer"></p>
 
       <h3>臟腑分數趨勢</h3>
@@ -248,8 +267,24 @@
       </div>
       <p id="trend-empty" class="note hidden">尚無足夠紀錄可畫趨勢。</p>
 
-      <h3>歷史紀錄</h3>
-      <div id="records"></div>
+      <details class="detail-fold" id="backup-detail-fold">
+        <summary>共用資料庫備存（Excel）</summary>
+        <p class="note">食譜、食材、每日營養建議與檢測差異以 MySQL 即時同步給網站與 App。需要備存時可下載目前內容，或寫回本機 Excel。</p>
+        <p id="backup-status" class="status">登入後載入筆數…</p>
+        <div class="actions" id="backup-actions">
+          <a href="/api/backup/Recipe.xls"><button type="button" class="ghost">下載 Recipe.xls</button></a>
+          <a href="/api/backup/Foods.xls"><button type="button" class="ghost">下載 Foods.xls</button></a>
+          <a href="/api/backup/daily_nutrient.xlsx"><button type="button" class="ghost">下載 daily_nutrient.xlsx</button></a>
+          <a href="/api/backup/deviation.xls"><button type="button" class="ghost">下載 deviation.xls</button></a>
+          <button type="button" id="backup-export-all" class="secondary">寫回本機 Excel 備存</button>
+        </div>
+        <p id="backup-msg" class="status"></p>
+      </details>
+
+      <details class="detail-fold" id="records-detail-fold">
+        <summary>歷史紀錄</summary>
+        <div id="records"></div>
+      </details>
     </section>
   </div>
 
@@ -269,7 +304,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="/static/common.js?v=stool-urine2"></script>
-  <script src="/static/app.js?v=stool-urine2"></script>
+  <script src="/static/common.js?v=auth-secure1"></script>
+  <script src="/static/app.js?v=auth-secure1"></script>
 </body>
 </html>

@@ -812,6 +812,14 @@ def _wiki_langlinks(title: str, wiki_lang: str) -> dict[str, str]:
 
 def load_food_name_index() -> dict[str, dict[str, str]]:
     """Map 食材中文 / other language names -> food row fields."""
+    try:
+        from .shared_catalog import fetch_foods_index
+
+        mysql_foods = fetch_foods_index()
+        if mysql_foods is not None:
+            return mysql_foods
+    except Exception:
+        pass
     import xlrd
 
     if not FOODS_PATH.exists():
@@ -1258,11 +1266,38 @@ def _guess_food_effect_tags(name: str, blob: str = "") -> tuple[str, str]:
 
 
 def _patch_foods_rows(updates: dict[str, dict[str, str]]) -> None:
-    """Patch Foods.xls 益處／禁忌／元素／外文名 for known 食材中文 rows."""
+    """Patch Foods catalog (MySQL) then Excel backup for known 食材中文 rows."""
+    if not updates:
+        return
+    try:
+        from .shared_catalog import best_effort_export, fetch_foods_index, patch_foods
+
+        index = fetch_foods_index() or {}
+        filtered: dict[str, dict[str, str]] = {}
+        for zh, item in updates.items():
+            existing = index.get(zh) or {}
+            patch: dict[str, str] = {}
+            for field in ("benefit", "ban", "nutrient", "name_en", "name_ja", "name_ko"):
+                new_val = str(item.get(field) or "").strip()
+                if not new_val:
+                    continue
+                if str(existing.get(field) or "").strip():
+                    continue
+                patch[field] = new_val
+            if patch:
+                filtered[zh] = patch
+        if filtered:
+            patch_foods(filtered)
+            best_effort_export("foods")
+            return
+    except Exception:
+        logger = __import__("logging").getLogger(__name__)
+        logger.exception("MySQL Foods patch failed; falling back to Excel")
+
     import xlrd
     import xlwt
 
-    if not updates or not FOODS_PATH.exists():
+    if not FOODS_PATH.exists():
         return
     book = xlrd.open_workbook(str(FOODS_PATH))
     sheet = book.sheet_by_index(0)
@@ -1314,10 +1349,22 @@ def _patch_foods_rows(updates: dict[str, dict[str, str]]) -> None:
 
 
 def sync_foods_for_ingredients(recipe_text: str) -> list[str]:
-    """Append missing ingredient rows to Foods.xls. Returns newly added 中文 names."""
+    """Append missing ingredient rows to MySQL Foods (+ Excel backup). Returns new 中文 names."""
     pairs = parse_ingredient_text(recipe_text)
     if not pairs:
         return []
+    names = [name for name, _gram in pairs]
+    try:
+        from .shared_catalog import append_missing_foods, best_effort_export
+
+        added = append_missing_foods(names)
+        if added:
+            best_effort_export("foods")
+        return added
+    except Exception:
+        logger = __import__("logging").getLogger(__name__)
+        logger.exception("MySQL Foods append failed; falling back to Excel")
+
     import xlrd
     import xlwt
 
@@ -1327,7 +1374,6 @@ def sync_foods_for_ingredients(recipe_text: str) -> list[str]:
     book = xlrd.open_workbook(str(FOODS_PATH))
     sheet = book.sheet_by_index(0)
     headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
-    # Preserve whatever columns exist; we only require the standard 7 when appending.
     rows: list[list] = []
     existing_zh: set[str] = set()
     zh_col = headers.index("食材中文") if "食材中文" in headers else 0
@@ -1379,16 +1425,29 @@ def sync_foods_for_ingredients(recipe_text: str) -> list[str]:
 
 
 def append_recipe_row(fields: dict[str, str]) -> dict[str, str]:
-    """Append one Recipe.xls row and return the in-memory row dict recipes() can read."""
+    """Append one recipe row to MySQL (+ Excel backup)."""
     return _write_recipe_rows(fields, replace_id=None)
 
 
 def update_recipe_row(row_id: str, fields: dict[str, str]) -> dict[str, str]:
-    """Overwrite COLUMN_FIELDS for an existing Recipe.xls row id; keep other columns."""
+    """Overwrite fields for an existing recipe id in MySQL (+ Excel backup)."""
     return _write_recipe_rows(fields, replace_id=str(row_id).strip())
 
 
 def _write_recipe_rows(fields: dict[str, str], replace_id: str | None) -> dict[str, str]:
+    try:
+        from .shared_catalog import best_effort_export, insert_recipe, update_recipe
+
+        if replace_id:
+            item = update_recipe(replace_id, fields)
+        else:
+            item = insert_recipe(fields)
+        best_effort_export("recipes")
+        return item
+    except Exception as mysql_exc:
+        logger = __import__("logging").getLogger(__name__)
+        logger.exception("MySQL recipe write failed; falling back to Excel: %s", mysql_exc)
+
     import xlrd
     import xlwt
 
@@ -1423,7 +1482,6 @@ def _write_recipe_rows(fields: dict[str, str], replace_id: str | None) -> dict[s
     if replace_id:
         target = None
         for idx, values in enumerate(existing_rows):
-            # recipe_rows ids are 1-based sheet row indices.
             if str(idx + 1) == replace_id:
                 target = idx
                 break

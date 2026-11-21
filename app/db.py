@@ -110,6 +110,7 @@ EXTRA_COLUMNS = [
     ("users", "conditions_json", "TEXT NULL"),
     ("users", "allergies_json", "TEXT NULL"),
     ("users", "complexion_lab_json", "TEXT NULL"),
+    ("users", "lighting_calib_json", "TEXT NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
     ("health_records", "face_color", "VARCHAR(255) NULL"),
@@ -141,6 +142,12 @@ COLUMN_RESIZES = [
     ("health_records", "tongue_coat_color", "VARCHAR(255) NULL"),
     ("health_records", "complexion_label", "VARCHAR(128) NULL"),
 ]
+
+
+def _catalog_schema_sql() -> list[str]:
+    from .shared_catalog import CATALOG_SCHEMA_SQL
+
+    return list(CATALOG_SCHEMA_SQL)
 
 
 def connect(with_db: bool = True, autocommit: bool = True, *, ensure: bool = True):
@@ -192,7 +199,7 @@ def init_schema(timeout_seconds: int = 8) -> bool:
         try:
             conn = connect(with_db=True, ensure=False)
             with conn.cursor() as cur:
-                for statement in SCHEMA_SQL:
+                for statement in SCHEMA_SQL + _catalog_schema_sql():
                     cur.execute(statement)
                 for table, column, ddl in EXTRA_COLUMNS:
                     cur.execute(
@@ -204,11 +211,40 @@ def init_schema(timeout_seconds: int = 8) -> bool:
                         (MYSQL_DATABASE, table, column),
                     )
                     if cur.fetchone()["c"] == 0:
-                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                        from .security import assert_allowed_table, assert_safe_identifier
+
+                        safe_table = assert_allowed_table(table)
+                        safe_column = assert_safe_identifier(column, kind="column")
+                        # ddl is a fixed schema constant from EXTRA_COLUMNS, never user input.
+                        cur.execute(
+                            "ALTER TABLE `"
+                            + safe_table
+                            + "` ADD COLUMN `"
+                            + safe_column
+                            + "` "
+                            + ddl
+                        )
                 for table, column, ddl in COLUMN_RESIZES:
-                    cur.execute(f"ALTER TABLE {table} MODIFY COLUMN {column} {ddl}")
+                    from .security import assert_allowed_table, assert_safe_identifier
+
+                    safe_table = assert_allowed_table(table)
+                    safe_column = assert_safe_identifier(column, kind="column")
+                    cur.execute(
+                        "ALTER TABLE `"
+                        + safe_table
+                        + "` MODIFY COLUMN `"
+                        + safe_column
+                        + "` "
+                        + ddl
+                    )
             _schema_ready = True
             logger.info("MySQL schema ready")
+            try:
+                from .shared_catalog import seed_from_excel_if_empty
+
+                seed_from_excel_if_empty()
+            except Exception:
+                logger.exception("Excel → MySQL catalog seed failed")
             return True
         except Exception as exc:
             logger.error("初始化 MySQL schema 失敗：%s", exc)

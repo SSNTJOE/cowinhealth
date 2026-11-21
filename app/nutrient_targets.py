@@ -200,6 +200,14 @@ def _load_rows(mtime_ns: int) -> tuple[dict, ...]:
 
 
 def nutrient_rows() -> tuple[dict, ...]:
+    try:
+        from .shared_catalog import fetch_daily_rows
+
+        mysql_rows = fetch_daily_rows()
+        if mysql_rows is not None:
+            return mysql_rows
+    except Exception:
+        pass
     path = XLSX_PATH
     mtime = path.stat().st_mtime_ns if path.exists() else 0
     return _load_rows(mtime)
