@@ -60,7 +60,7 @@ def main() -> None:
         "recipeEnsuring",
         "recipeCreateAction",
         "搜尋中",
-        "搜尋建立資料中",
+        "搜尋建檔中",
         "建立此食譜",
     ):
         assert key in js, key

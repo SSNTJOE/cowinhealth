@@ -3513,14 +3513,84 @@ _SRGB_TO_LINEAR = tuple(
 
 
 def normalize_color_temperature_k(value: int | float | str | None) -> int:
-    """Clamp ambient CCT to 2000–8000K. Missing/invalid values stay at 4200K."""
+    """Clamp ambient CCT to 2000–8000K. Missing/invalid/auto values stay at 4200K."""
     if value is None or value == "":
         return DEFAULT_COLOR_TEMPERATURE_K
+    text = str(value).strip().lower()
+    if text in {"auto", "detect", "camera"}:
+        return DEFAULT_COLOR_TEMPERATURE_K
     try:
-        kelvin = int(round(float(str(value).strip())))
+        kelvin = int(round(float(text)))
     except (TypeError, ValueError):
         return DEFAULT_COLOR_TEMPERATURE_K
     return max(MIN_COLOR_TEMPERATURE_K, min(MAX_COLOR_TEMPERATURE_K, kelvin))
+
+
+def _wants_auto_color_temperature(value: int | float | str | None) -> bool:
+    if value is None or value == "":
+        return True
+    text = str(value).strip().lower()
+    return text in {"auto", "detect", "camera"}
+
+
+def xy_to_correlated_color_temperature(x: float, y: float) -> float:
+    """McCamy (1992) approximation of CCT from CIE xy."""
+    denom = 0.1858 - y
+    if abs(denom) < 1e-9:
+        return float(DEFAULT_COLOR_TEMPERATURE_K)
+    n = (x - 0.3320) / denom
+    return 449.0 * n**3 + 3525.0 * n**2 + 6823.3 * n + 5520.33
+
+
+def estimate_color_temperature_k(image: Image.Image) -> int:
+    """Estimate ambient CCT from near-neutral / border pixels (gray-world → McCamy).
+
+    Skips very dark, clipped, and highly saturated pixels so yellow tongue frames
+    and strong skin chroma bias the estimate less. Falls back to 4200K if too few samples.
+    """
+    source = image.convert("RGB")
+    width, height = source.size
+    max_side = 160
+    largest = max(width, height)
+    if largest > max_side:
+        scale = max_side / float(largest)
+        source = source.resize(
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            Image.Resampling.BILINEAR,
+        )
+        width, height = source.size
+    pixels = source.load()
+    border = max(1, min(width, height) // 12)
+    sum_r = sum_g = sum_b = 0.0
+    count = 0
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            peak = max(r, g, b)
+            low = min(r, g, b)
+            if peak < 40 or peak > 250:
+                continue
+            saturation = 0.0 if peak <= 0 else (peak - low) / float(peak)
+            on_border = x < border or y < border or x >= width - border or y >= height - border
+            if on_border:
+                if saturation > 0.55:
+                    continue
+            elif saturation > 0.22:
+                continue
+            sum_r += _SRGB_TO_LINEAR[r]
+            sum_g += _SRGB_TO_LINEAR[g]
+            sum_b += _SRGB_TO_LINEAR[b]
+            count += 1
+    if count < 24:
+        return DEFAULT_COLOR_TEMPERATURE_K
+    mean = (sum_r / count, sum_g / count, sum_b / count)
+    xyz = _mat_vec(_RGB_TO_XYZ, mean)
+    total = xyz[0] + xyz[1] + xyz[2]
+    if total <= 1e-9 or xyz[1] <= 1e-9:
+        return DEFAULT_COLOR_TEMPERATURE_K
+    x = xyz[0] / total
+    y = xyz[1] / total
+    return normalize_color_temperature_k(xy_to_correlated_color_temperature(x, y))
 
 
 def planckian_xy(cct: float) -> tuple[float, float]:
@@ -3618,6 +3688,151 @@ def adapt_rgb_image(image: Image.Image, color_temperature_k: int | float | str |
     return out
 
 
+# Relative scene luminance (linear CIE Y) after CCT adapt; normalize toward this before color scoring.
+TARGET_RELATIVE_BRIGHTNESS = 0.42
+MIN_BRIGHTNESS_GAIN = 0.55
+MAX_BRIGHTNESS_GAIN = 1.85
+MAX_DAILY_SCORE_STEP = 2
+
+
+def _sample_linear_rgb_means(image: Image.Image) -> tuple[float, float, float, int]:
+    """Mean linear RGB from border / low-saturation mid-tones (same bias rules as CCT)."""
+    source = image.convert("RGB")
+    width, height = source.size
+    max_side = 160
+    largest = max(width, height)
+    if largest > max_side:
+        scale = max_side / float(largest)
+        source = source.resize(
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            Image.Resampling.BILINEAR,
+        )
+        width, height = source.size
+    pixels = source.load()
+    border = max(1, min(width, height) // 12)
+    sum_r = sum_g = sum_b = 0.0
+    count = 0
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            peak = max(r, g, b)
+            low = min(r, g, b)
+            if peak < 25 or peak > 252:
+                continue
+            saturation = 0.0 if peak <= 0 else (peak - low) / float(peak)
+            on_border = x < border or y < border or x >= width - border or y >= height - border
+            if on_border:
+                if saturation > 0.55:
+                    continue
+            elif saturation > 0.28:
+                continue
+            sum_r += _SRGB_TO_LINEAR[r]
+            sum_g += _SRGB_TO_LINEAR[g]
+            sum_b += _SRGB_TO_LINEAR[b]
+            count += 1
+    return sum_r, sum_g, sum_b, count
+
+
+def estimate_relative_brightness(image: Image.Image) -> float:
+    """Scene brightness as mean linear CIE Y from near-neutral samples (0–1-ish)."""
+    sum_r, sum_g, sum_b, count = _sample_linear_rgb_means(image)
+    if count < 24:
+        # Fallback: whole-frame mean Y
+        source = image.convert("RGB").resize((64, 64), Image.Resampling.BILINEAR)
+        total = 0.0
+        n = 0
+        for r, g, b in source.getdata():
+            total += (
+                0.2126729 * _SRGB_TO_LINEAR[r]
+                + 0.7151522 * _SRGB_TO_LINEAR[g]
+                + 0.0721750 * _SRGB_TO_LINEAR[b]
+            )
+            n += 1
+        return total / max(1, n)
+    mean = (sum_r / count, sum_g / count, sum_b / count)
+    return 0.2126729 * mean[0] + 0.7151522 * mean[1] + 0.0721750 * mean[2]
+
+
+def brightness_gain_to_target(
+    brightness: float,
+    target: float = TARGET_RELATIVE_BRIGHTNESS,
+) -> float:
+    if brightness is None or brightness <= 1e-5:
+        return 1.0
+    gain = float(target) / float(brightness)
+    return max(MIN_BRIGHTNESS_GAIN, min(MAX_BRIGHTNESS_GAIN, gain))
+
+
+def adapt_brightness_image(image: Image.Image, gain: float) -> Image.Image:
+    """Scale linear RGB by one exposure gain (shared for face / tongue / coat)."""
+    factor = float(gain)
+    if abs(factor - 1.0) < 0.02:
+        return image.convert("RGB")
+    source = image.convert("RGB")
+    out_pixels = []
+    for r, g, b in source.getdata():
+        out_pixels.append(
+            (
+                _linear_to_srgb_channel(_SRGB_TO_LINEAR[r] * factor),
+                _linear_to_srgb_channel(_SRGB_TO_LINEAR[g] * factor),
+                _linear_to_srgb_channel(_SRGB_TO_LINEAR[b] * factor),
+            )
+        )
+    out = Image.new("RGB", source.size)
+    out.putdata(out_pixels)
+    return out
+
+
+def stabilize_organ_scores(
+    scores: dict[str, int],
+    prior_scores: dict[str, int] | None,
+    lighting: dict[str, Any] | None,
+    prior_lighting: dict[str, Any] | None,
+) -> tuple[dict[str, int], dict[str, Any]]:
+    """Limit day-to-day organ score swings; pull harder toward prior when lighting changed a lot."""
+    meta = {
+        "applied": False,
+        "max_step": MAX_DAILY_SCORE_STEP,
+        "light_shift": 0.0,
+        "prior_blend": 0.0,
+    }
+    if not prior_scores:
+        return dict(scores), meta
+    lighting = lighting or {}
+    prior_lighting = prior_lighting or {}
+    try:
+        cct = float(lighting.get("color_temperature_k") or DEFAULT_COLOR_TEMPERATURE_K)
+        prior_cct = float(prior_lighting.get("color_temperature_k") or cct)
+    except (TypeError, ValueError):
+        cct = float(DEFAULT_COLOR_TEMPERATURE_K)
+        prior_cct = cct
+    try:
+        bright = float(lighting.get("brightness") or TARGET_RELATIVE_BRIGHTNESS)
+        prior_bright = float(prior_lighting.get("brightness") or bright)
+    except (TypeError, ValueError):
+        bright = TARGET_RELATIVE_BRIGHTNESS
+        prior_bright = bright
+    cct_shift = min(1.0, abs(cct - prior_cct) / 1500.0)
+    bright_shift = min(1.0, abs(bright - prior_bright) / 0.22)
+    light_shift = max(cct_shift, bright_shift) * 0.55 + min(cct_shift, bright_shift) * 0.45
+    max_step = MAX_DAILY_SCORE_STEP if light_shift < 0.4 else 1
+    prior_blend = min(0.55, 0.15 + 0.5 * light_shift)
+    meta.update({"applied": True, "max_step": max_step, "light_shift": round(light_shift, 3), "prior_blend": round(prior_blend, 3)})
+    out: dict[str, int] = {}
+    for key, value in scores.items():
+        curr = int(value)
+        if key not in prior_scores or prior_scores.get(key) is None:
+            out[key] = curr
+            continue
+        prev = int(prior_scores[key])
+        delta = curr - prev
+        capped = max(-max_step, min(max_step, delta))
+        stepped = prev + capped
+        blended = (1.0 - prior_blend) * stepped + prior_blend * prev
+        out[key] = max(1, min(10, int(round(blended))))
+    return out, meta
+
+
 def frame_tongue_image(image: Image.Image) -> tuple[Image.Image, dict[str, Any]]:
     """Client already cropped the yellow frame: teeth line → bottom arc, full width.
 
@@ -3638,7 +3853,6 @@ def inspect_image(
     female: bool = False,
     color_temperature_k: int | float | str | None = None,
 ) -> dict[str, Any]:
-    cct = normalize_color_temperature_k(color_temperature_k)
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
@@ -3649,8 +3863,17 @@ def inspect_image(
         crop_info = dict(crop_info)
         crop_info["color_shift_cells"] = FACE_COLOR_SHIFT_CELLS
         crop_info["color_scale"] = FACE_COLOR_SCALE
-    # One illuminant for the whole frame, before 臉色 YCrCb and 舌色／舌苔 Lab.
+    # Auto CCT + exposure from the analysis frame, then face / tongue / coat scoring.
+    auto_cct = _wants_auto_color_temperature(color_temperature_k)
+    if auto_cct:
+        cct = estimate_color_temperature_k(image)
+    else:
+        cct = normalize_color_temperature_k(color_temperature_k)
     image = adapt_rgb_image(image, cct)
+    brightness = estimate_relative_brightness(image)
+    brightness_gain = brightness_gain_to_target(brightness)
+    image = adapt_brightness_image(image, brightness_gain)
+    brightness_after = estimate_relative_brightness(image)
     dominant = dominant_color_hex(image)
     overall = region_stats(image)
     findings: list[str] = []
@@ -3700,6 +3923,10 @@ def inspect_image(
         "crop": crop_info,
         "preview": crop_info.get("preview"),
         "color_temperature_k": cct,
+        "color_temperature_auto": auto_cct,
+        "brightness": round(float(brightness), 4),
+        "brightness_gain": round(float(brightness_gain), 4),
+        "brightness_after": round(float(brightness_after), 4),
     }
 
 
@@ -3712,15 +3939,25 @@ def analyze_session(
     confirm_with_pulse: bool = False,
     female: bool = False,
     color_temperature_k: int | float | str | None = None,
+    prior_session: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    cct = normalize_color_temperature_k(color_temperature_k)
+    # Prefer camera auto-CCT per shot; ignore legacy discrete UI presets.
+    cct_arg: int | float | str | None = "auto"
+    if color_temperature_k is not None and not _wants_auto_color_temperature(color_temperature_k):
+        # Allow continuous numeric overrides (e.g. tests); 2700/4200/6500 presets → auto.
+        try:
+            preset = int(round(float(str(color_temperature_k).strip())))
+        except (TypeError, ValueError):
+            preset = None
+        if preset is not None and preset not in COLOR_TEMPERATURE_CHOICES:
+            cct_arg = preset
     color_reports = [
         inspect_image(
             raw,
             shot_type,
             personal_lab=personal_lab if shot_type == "face" else None,
             female=female,
-            color_temperature_k=cct,
+            color_temperature_k=cct_arg,
         )
         for shot_type, raw in images
     ]
@@ -3795,8 +4032,38 @@ def analyze_session(
     }
     scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
     used_sources = [key for key, value in source_maps.items() if value is not None]
+
+    # Aggregate lighting from this session's shots (mean CCT / brightness).
+    ccts = [float(r["color_temperature_k"]) for r in color_reports if r.get("color_temperature_k") is not None]
+    brights = [float(r["brightness"]) for r in color_reports if r.get("brightness") is not None]
+    gains = [float(r["brightness_gain"]) for r in color_reports if r.get("brightness_gain") is not None]
+    session_lighting = {
+        "color_temperature_k": int(round(sum(ccts) / len(ccts))) if ccts else DEFAULT_COLOR_TEMPERATURE_K,
+        "brightness": round(sum(brights) / len(brights), 4) if brights else None,
+        "brightness_gain": round(sum(gains) / len(gains), 4) if gains else None,
+        "per_shot": {
+            r["shot_type"]: {
+                "color_temperature_k": r.get("color_temperature_k"),
+                "brightness": r.get("brightness"),
+                "brightness_gain": r.get("brightness_gain"),
+            }
+            for r in color_reports
+            if r.get("shot_type")
+        },
+    }
+    prior_scores = (prior_session or {}).get("scores") if prior_session else None
+    prior_lighting = (prior_session or {}).get("lighting") if prior_session else None
+    scores, stabilize_meta = stabilize_organ_scores(scores, prior_scores, session_lighting, prior_lighting)
+    for key, info in breakdown.items():
+        score_key = next((sk for k, _n, sk, _pk in ORGAN_META if k == key), None)
+        if score_key and score_key in scores:
+            info["composite"] = scores[score_key]
+            info["stabilized"] = bool(stabilize_meta.get("applied"))
+
     organ_health = serialize_organ_health(scores, breakdown, used_sources)
     organ_health["pattern_scores"] = pattern_scores
+    organ_health["lighting"] = session_lighting
+    organ_health["score_stabilize"] = stabilize_meta
 
     def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
         for organ, label in (pattern_map or {}).items():
@@ -3876,7 +4143,17 @@ def analyze_session(
         "face_preview": face_preview,
         "tongue_preview": tongue_preview,
         "crop": crops,
-        "color_temperature_k": cct,
+        "color_temperature_k": session_lighting["color_temperature_k"],
+        "color_temperature_auto": True,
+        "color_temperatures": {
+            report["shot_type"]: report.get("color_temperature_k")
+            for report in color_reports
+            if report.get("shot_type")
+        },
+        "brightness": session_lighting.get("brightness"),
+        "brightness_gain": session_lighting.get("brightness_gain"),
+        "lighting": session_lighting,
+        "score_stabilize": stabilize_meta,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }
     if not female:

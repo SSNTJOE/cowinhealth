@@ -442,13 +442,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun selectedColorTemperatureK(): Int {
-        return when (binding.cctGroup.checkedRadioButtonId) {
-            binding.cct2700.id -> 2700
-            binding.cct6500.id -> 6500
-            else -> 4200
-        }
-    }
+    private fun selectedColorTemperatureK(): String = "auto"
 
     private fun save() {
         if (!pulseReady(pulseJson)) {
@@ -734,13 +728,50 @@ class MainActivity : AppCompatActivity() {
     private fun bindAdvice(json: JSONObject) {
         rememberJudgment(json)
         val diet = json.optString("diet_url")
+        val dietVideo = json.optString("diet_video_url").ifBlank {
+            googleVideoSearchFromWeb(diet)
+        }
         val acu = json.optString("acupoint_url")
-        binding.dietLink.text = if (diet.isNotBlank()) {
-            t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "\n" + diet
-        } else ""
-        binding.acupointLink.text = if (acu.isNotBlank()) {
-            t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "\n" + acu
-        } else ""
+        val acuVideo = json.optString("acupoint_video_url").ifBlank {
+            googleVideoSearchFromWeb(acu)
+        }
+        binding.dietLink.text = buildString {
+            if (diet.isNotBlank()) {
+                append(t("食譜文章搜尋", "Recipe articles", "レシピ記事検索", "레시피 글 검색"))
+                append("\n")
+                append(diet)
+            }
+            if (dietVideo.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append(t("食譜影片搜尋", "Recipe videos", "レシピ動画検索", "레시피 영상 검색"))
+                append("\n")
+                append(dietVideo)
+            }
+        }
+        binding.acupointLink.text = buildString {
+            if (acu.isNotBlank()) {
+                append(t("穴道按摩圖片搜尋", "Acupoint massage images", "経穴マッサージ画像検索", "혈자리 마사지 이미지 검색"))
+                append("\n")
+                append(acu)
+            }
+            if (acuVideo.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append(t("穴道按摩影片搜尋", "Acupoint massage videos", "経穴マッサージ動画検索", "혈자리 마사지 영상 검색"))
+                append("\n")
+                append(acuVideo)
+            }
+        }
+    }
+
+    private fun googleVideoSearchFromWeb(url: String): String {
+        if (url.isBlank()) return ""
+        return try {
+            val uri = android.net.Uri.parse(url)
+            val q = uri.getQueryParameter("q") ?: return ""
+            "https://www.google.com/search?tbm=vid&q=" + java.net.URLEncoder.encode(q, "UTF-8")
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun loadLatestAdvice() {
@@ -955,7 +986,9 @@ class MainActivity : AppCompatActivity() {
         return "匿名紀錄已寫入 MySQL（教學參考，非診斷）\n" +
             "食療：" + withoutMaleUterusText(json.optString("diet_advice")) + "\n" +
             t("網路食療搜尋連結", "Diet search link", "食事療法の検索リンク", "식이요법 검색 링크") + "：" + json.optString("diet_url") + "\n" +
-            t("穴道按摩搜尋連結", "Acupoint massage search", "経穴マッサージ検索", "혈자리 마사지 검색") + "：" + json.optString("acupoint_url") + "\n" +
+            t("穴道按摩圖片搜尋", "Acupoint massage images", "経穴マッサージ画像検索", "혈자리 마사지 이미지 검색") + "：" + json.optString("acupoint_url") + "\n" +
+            t("穴道按摩影片搜尋", "Acupoint massage videos", "経穴マッサージ動画検索", "혈자리 마사지 영상 검색") + "：" +
+            json.optString("acupoint_video_url").ifBlank { googleVideoSearchFromWeb(json.optString("acupoint_url")) } + "\n" +
             "分數：" + shownScores + "\n" +
             "證型：" + healthyPatterns(shownScores, shownPatterns)
     }

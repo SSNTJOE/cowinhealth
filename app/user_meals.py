@@ -130,7 +130,11 @@ def add_meal(
     meal_slot: str | None = None,
     servings: float | str = 1,
     lang: str = "zh",
+    replace_slot: bool = True,
 ) -> dict:
+    """Log a meal. By default replaces any existing row for the same user/date/slot
+    so changing that slot's recipe redraws accumulated day totals cleanly.
+    """
     day = _parse_day(meal_date)
     slot = _normalize_slot(meal_slot)
     amount = _parse_servings(servings)
@@ -146,6 +150,14 @@ def add_meal(
     conn = connect()
     try:
         with conn.cursor() as cur:
+            if replace_slot:
+                cur.execute(
+                    """
+                    DELETE FROM user_meals
+                    WHERE user_id = %s AND meal_date = %s AND meal_slot = %s
+                    """,
+                    (user_id, day, slot),
+                )
             cur.execute(
                 """
                 INSERT INTO user_meals
@@ -261,11 +273,13 @@ def month_overview(user_id: str, user: dict, year: int, month: int) -> dict:
         )
         by_day.setdefault(day_key, []).append(_loads_nutrients(row.get("nutrients_json")))
 
+    targets = targets_payload["targets"]
     days = []
     for day_num in range(1, last_day + 1):
         day_key = f"{year:04d}-{month:02d}-{day_num:02d}"
         parts = by_day.get(day_key) or []
         totals = sum_nutrient_maps(parts)
+        surplus = surplus_map(totals, targets)
         kcal = float(totals.get(kcal_key) or 0.0)
         pct = round(100.0 * kcal / kcal_target, 1) if kcal_target > 0 else None
         days.append(
@@ -275,6 +289,8 @@ def month_overview(user_id: str, user: dict, year: int, month: int) -> dict:
                 "kcal": kcal,
                 "kcal_pct": pct,
                 "has_meals": bool(parts),
+                "totals": totals,
+                "surplus": surplus,
             }
         )
     return {
@@ -282,6 +298,9 @@ def month_overview(user_id: str, user: dict, year: int, month: int) -> dict:
         "month": month,
         "days": days,
         "kcal_target": kcal_target,
+        "targets": dict(targets),
+        "nutrient_keys": list(NUTRIENT_KEYS),
+        "chart_labels": chart_labels(),
         "age_band": targets_payload["age_band"],
         "gender": targets_payload["gender"],
         "disclaimer": targets_payload["disclaimer"],

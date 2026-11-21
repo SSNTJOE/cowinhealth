@@ -81,11 +81,36 @@ function syncUterusNotes() {
 let trendChart = null;
 let mealIntakeChart = null;
 let mealSurplusChart = null;
+let mealNutrientTrendChart = null;
 let mealSelectedDate = "";
 let mealViewYear = 0;
 let mealViewMonth = 0;
 let mealMonthData = null;
 let mealDayData = null;
+
+const MEAL_TREND_COLORS = [
+  "#2a6f97", "#c45a3c", "#2e8b57", "#8b5a2b", "#6a5acd",
+  "#d2691e", "#20b2aa", "#b22222", "#708090", "#daa520",
+  "#4169e1", "#cd5c5c", "#556b2f", "#9932cc",
+];
+
+/** Distinct marker shapes for each nutrient series on the surplus scatter trend. */
+const MEAL_TREND_POINT_STYLES = [
+  "circle", "triangle", "rect", "rectRot", "cross", "crossRot", "star",
+  "dash", "line", "rectRounded", "circle", "triangle", "rect", "cross",
+];
+
+const MEAL_CHART_WHITE_BG = {
+  id: "mealChartWhiteBg",
+  beforeDraw(chart) {
+    const { ctx, width, height } = chart;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  },
+};
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -820,7 +845,16 @@ function renderResult(result) {
     document.getElementById("color-chip").style.background = result.dominant_color;
     document.getElementById("color-hex").textContent = result.dominant_color;
   }
-  document.getElementById("color-label").textContent = " " + (result.color_label || "");
+  const cct = result.color_temperature_k;
+  const brightGain = result.brightness_gain;
+  const lightBits = [];
+  if (cct != null && cct !== "") lightBits.push(`色溫約 ${cct}K`);
+  if (brightGain != null && brightGain !== "") {
+    const g = Number(brightGain);
+    if (Number.isFinite(g)) lightBits.push(`明暗校正 ×${g.toFixed(2)}`);
+  }
+  const lightNote = lightBits.length ? `（自動${lightBits.join("，")}）` : "";
+  document.getElementById("color-label").textContent = " " + (result.color_label || "") + lightNote;
   document.getElementById("disclaimer").textContent = result.disclaimer || "";
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
@@ -836,11 +870,41 @@ function renderResult(result) {
   document.getElementById("advice").textContent = advice ? "食療整理：" + advice : "";
   const links = document.getElementById("links");
   links.innerHTML = "";
-  if (result.diet_url) {
-    links.innerHTML += `<a href="${result.diet_url}" target="_blank" rel="noreferrer">食療搜尋</a>　`;
+  const dietArticle = result.diet_url || "";
+  const dietVideo = result.diet_video_url || (() => {
+    try {
+      if (!dietArticle) return "";
+      const u = new URL(dietArticle, window.location.origin);
+      const q = u.searchParams.get("q");
+      if (!q) return "";
+      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+    } catch (_err) {
+      return "";
+    }
+  })();
+  if (dietArticle) {
+    links.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
   }
-  if (result.acupoint_url) {
-    links.innerHTML += `<a href="${result.acupoint_url}" target="_blank" rel="noreferrer">穴道按摩搜尋</a>`;
+  if (dietVideo) {
+    links.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
+  }
+  const acuImages = result.acupoint_url || "";
+  const acuVideo = result.acupoint_video_url || (() => {
+    try {
+      if (!acuImages) return "";
+      const u = new URL(acuImages, window.location.origin);
+      const q = u.searchParams.get("q");
+      if (!q) return "";
+      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+    } catch (_err) {
+      return "";
+    }
+  })();
+  if (acuImages) {
+    links.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
+  }
+  if (acuVideo) {
+    links.innerHTML += `<a href="${acuVideo}" target="_blank" rel="noreferrer">${uiText("acupointLinkVideos")}</a>`;
   }
   renderScoreCards(result);
   drawOrgans(result);
@@ -944,14 +1008,40 @@ function renderCombo(input, list, labels, onPick, mode, emptyText, options) {
   return matched;
 }
 
+function recipeLabelWithCountry(row) {
+  const base = recipeLabel(row);
+  const country = (row && row.country) || "";
+  const countryInput = document.getElementById("recipe-country");
+  const selectedCountry = countryInput ? countryInput.value.trim() : "";
+  if (!country || (selectedCountry && selectedCountry === country)) return base;
+  return `${recipeNamePlain(base)}（${country}）`;
+}
+
+function applyRecipeCountry(row) {
+  if (!row || !row.country) return;
+  const countryInput = document.getElementById("recipe-country");
+  if (!countryInput) return;
+  const country = String(row.country).trim();
+  if (!country) return;
+  countryInput.value = country;
+  if (!countryNames.includes(country)) countryNames = countryNames.concat([country]);
+}
+
 function rememberRecipeChoice(label) {
-  const row = recipeRows.find((item) => recipeLabel(item) === label);
+  const row = recipeRows.find((item) => recipeLabelWithCountry(item) === label)
+    || recipeRows.find((item) => recipeLabel(item) === label)
+    || findRecipeByTypedName(label);
   selectedRecipeId = row ? row.id : null;
+  if (row) applyRecipeCountry(row);
   return row || null;
 }
 
 function recipeNamePlain(label) {
-  return String(label || "").replace(/\s*★\s*$/, "").trim();
+  return String(label || "")
+    .replace(/\s*★\s*$/, "")
+    .replace(/（[^）]+）\s*$/, "")
+    .replace(/\s*\([^)]+\)\s*$/, "")
+    .trim();
 }
 
 function findRecipeByTypedName(typed) {
@@ -959,7 +1049,8 @@ function findRecipeByTypedName(typed) {
   const plain = recipeNamePlain(label).toLowerCase();
   if (!plain) return null;
   return (
-    recipeRows.find((item) => recipeLabel(item) === label)
+    recipeRows.find((item) => recipeLabelWithCountry(item) === label)
+    || recipeRows.find((item) => recipeLabel(item) === label)
     || recipeRows.find((item) => recipeNamePlain(recipeLabel(item)).toLowerCase() === plain)
     || recipeRows.find((item) => String(item.name || "").trim().toLowerCase() === plain)
     || null
@@ -1037,18 +1128,29 @@ async function ensureRecipeFromInput(options) {
   const detail = document.getElementById("recipe-detail");
   const list = document.getElementById("recipe-name-list");
   if (!countryInput || !pick || !detail) return null;
-  const country = countryInput.value.trim();
+  let country = countryInput.value.trim();
+  if (country && !countryNames.includes(country)) country = "";
   const typed = (options && options.name) || pick.value.trim();
   const plain = recipeNamePlain(typed);
-  if (!countryNames.includes(country) || !plain) return null;
+  if (!plain) return null;
   const existing = findRecipeByTypedName(typed);
-  if (existing) {
+  const needsFill = Boolean(
+    existing
+    && (
+      !(existing.recipe && String(existing.recipe).trim())
+      || !(existing.method && String(existing.method).trim())
+      || !(existing.benefit && String(existing.benefit).trim())
+      || !(existing.nutrient && String(existing.nutrient).trim())
+    )
+  );
+  if (existing && !needsFill) {
     selectedRecipeId = existing.id;
+    applyRecipeCountry(existing);
     pick.value = recipeLabel(existing);
     showSelectedRecipe();
     return existing;
   }
-  if (recipeHasSubstringMatch(typed) && !(options && options.forceCreate)) {
+  if (!needsFill && recipeHasSubstringMatch(typed) && !(options && options.forceCreate)) {
     // Substring hits exist — wait for an exact pick; do not auto-create.
     showSelectedRecipe();
     return null;
@@ -1065,7 +1167,13 @@ async function ensureRecipeFromInput(options) {
     if (seq !== recipeEnsureSeq) return null;
     const created = data && data.recipe;
     if (created && created.id != null) selectedRecipeId = created.id;
-    await loadRecipesForCountry({ keepSelection: true });
+    if (created) applyRecipeCountry(created);
+    const resolvedCountry = (created && created.country) || countryInput.value.trim();
+    if (resolvedCountry && countryNames.includes(resolvedCountry)) {
+      await loadRecipesForCountry({ keepSelection: true });
+    } else if (created) {
+      recipeRows = [created].concat(recipeRows.filter((item) => String(item.id) !== String(created.id)));
+    }
     if (seq !== recipeEnsureSeq) return null;
     let row =
       (created && recipeRows.find((item) => String(item.id) === String(created.id)))
@@ -1079,6 +1187,7 @@ async function ensureRecipeFromInput(options) {
     }
     if (row && row.id != null) {
       selectedRecipeId = row.id;
+      applyRecipeCountry(row);
       pick.value = row.name ? recipeLabel(row) : plain;
       const note = data.partial
         ? (data.note || uiText("recipeEnsurePartial"))
@@ -1148,8 +1257,42 @@ async function refreshRecipeChoices(options) {
   const keepSelection = Boolean(options && options.keepSelection);
   await loadRecipeCountries();
   const countryInput = document.getElementById("recipe-country");
-  if (!countryInput || !countryNames.includes(countryInput.value.trim())) return;
-  await loadRecipesForCountry({ keepSelection });
+  if (countryInput && countryNames.includes(countryInput.value.trim())) {
+    await loadRecipesForCountry({ keepSelection });
+    return;
+  }
+  const pick = document.getElementById("recipe-name");
+  const typed = pick ? recipeNamePlain(pick.value) : "";
+  if (typed) await loadRecipesByName(typed, { keepSelection });
+}
+
+async function loadRecipesByName(name, options) {
+  const keepSelection = Boolean(options && options.keepSelection);
+  const keepId = keepSelection ? selectedRecipeId : null;
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  const list = document.getElementById("recipe-name-list");
+  if (!pick || !detail) return;
+  const plain = recipeNamePlain(name || pick.value);
+  closeCombo(pick, list);
+  if (!plain) {
+    recipeRows = [];
+    return;
+  }
+  const params = recipeFilterParams();
+  params.set("name", plain);
+  const data = await api("/api/recipes?" + params.toString());
+  recipeRows = data.recipes || [];
+  if (keepId != null) {
+    const row = recipeRows.find((item) => String(item.id) === String(keepId));
+    if (row) {
+      selectedRecipeId = row.id;
+      applyRecipeCountry(row);
+      pick.value = recipeLabel(row);
+      showSelectedRecipe();
+      return;
+    }
+  }
 }
 
 async function loadRecipesForCountry(options) {
@@ -1169,7 +1312,13 @@ async function loadRecipesForCountry(options) {
     detail.textContent = "";
   }
   if (!countryNames.includes(country)) {
-    clearRecipeSelection();
+    // Country optional: keep typed dish name and search across Recipe.xls.
+    const typed = recipeNamePlain(pick.value);
+    if (typed) {
+      await loadRecipesByName(typed, { keepSelection: true });
+      return;
+    }
+    recipeRows = [];
     return;
   }
   const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
@@ -1190,8 +1339,13 @@ async function loadRecipesForCountry(options) {
 
 async function reloadRecipesForLanguage() {
   const countryInput = document.getElementById("recipe-country");
-  if (!countryInput || !countryInput.value.trim()) return;
-  await loadRecipesForCountry({ keepSelection: true });
+  if (countryInput && countryNames.includes(countryInput.value.trim())) {
+    await loadRecipesForCountry({ keepSelection: true });
+    return;
+  }
+  const pick = document.getElementById("recipe-name");
+  const typed = pick ? recipeNamePlain(pick.value) : "";
+  if (typed) await loadRecipesByName(typed, { keepSelection: true });
 }
 
 function bindRecipePickers() {
@@ -1221,21 +1375,27 @@ function bindRecipePickers() {
       if (detail) detail.textContent = formatApiError(err);
     });
   }, "prefix");
+  const hasCountry = () => countryNames.includes(country.value.trim());
   const usableRecipeLabels = () => {
-    if (!countryNames.includes(country.value.trim())) return null;
-    return recipeRows.map(recipeLabel);
+    if (hasCountry()) return recipeRows.map(recipeLabel);
+    // No country: show cross-country hits with country tags.
+    return recipeRows.map(recipeLabelWithCountry);
   };
   const showAllRecipes = () => {
     const labels = usableRecipeLabels();
-    if (!labels) {
+    if (!hasCountry() && !labels.length) {
+      // Allow typing a dish with no country selected.
       closeCombo(pick, pickList);
-      showCountries();
+      return;
+    }
+    if (!labels.length && hasCountry()) {
+      closeCombo(pick, pickList);
       return;
     }
     renderCombo(pick, pickList, labels, (label) => {
       rememberRecipeChoice(label);
       showSelectedRecipe();
-    }, "all");
+    }, hasCountry() ? "all" : "contains");
   };
   const startCreateRecipe = (typedName) => {
     ensureRecipeFromInput({ name: typedName, forceCreate: true }).catch((err) => {
@@ -1243,18 +1403,36 @@ function bindRecipePickers() {
       if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
     });
   };
+  let recipeNameSearchTimer = 0;
   const filterRecipes = () => {
     const labels = usableRecipeLabels();
-    if (!labels) {
-      closeCombo(pick, pickList);
-      return;
-    }
     renderCombo(pick, pickList, labels, (label) => {
       rememberRecipeChoice(label);
       showSelectedRecipe();
     }, "contains", uiText("searchEmpty"), {
       onEmptyCreate: startCreateRecipe,
     });
+  };
+  const searchRecipesWithoutCountry = () => {
+    if (hasCountry()) return;
+    const typed = recipeNamePlain(pick.value);
+    window.clearTimeout(recipeNameSearchTimer);
+    if (!typed) {
+      recipeRows = [];
+      filterRecipes();
+      return;
+    }
+    recipeNameSearchTimer = window.setTimeout(() => {
+      loadRecipesByName(typed, { keepSelection: true })
+        .then(() => {
+          filterRecipes();
+          showRecipeSearchStatus(pick.value);
+        })
+        .catch((err) => {
+          const box = document.getElementById("recipe-detail");
+          if (box) box.textContent = formatApiError(err);
+        });
+    }, 220);
   };
   country.addEventListener("focus", showCountries);
   country.addEventListener("click", showCountries);
@@ -1280,12 +1458,13 @@ function bindRecipePickers() {
         if (detail) detail.textContent = formatApiError(err);
       });
     } else {
-      recipeRows = [];
+      // Keep dish text; search across countries when the user types a recipe name.
       selectedRecipeId = null;
-      pick.value = "";
+      recipeRows = [];
       closeCombo(pick, pickList);
       const detail = document.getElementById("recipe-detail");
-      if (detail) detail.textContent = "";
+      if (detail && !recipeNamePlain(pick.value)) detail.textContent = "";
+      searchRecipesWithoutCountry();
     }
   });
   country.addEventListener("blur", () => closeCombo(country, countryList));
@@ -1300,9 +1479,9 @@ function bindRecipePickers() {
     const exactBtn = optionButtons.find((btn) => btn.textContent === typed);
     const button = exactBtn || (optionButtons.length === 1 ? optionButtons[0] : null);
     if (button && findRecipeByTypedName(button.textContent)) {
-      pick.value = button.textContent;
+      rememberRecipeChoice(button.textContent);
+      pick.value = recipeLabel(findRecipeByTypedName(button.textContent) || { name: recipeNamePlain(button.textContent) });
       closeCombo(pick, pickList);
-      rememberRecipeChoice(pick.value);
       showSelectedRecipe();
       return;
     }
@@ -1314,8 +1493,11 @@ function bindRecipePickers() {
     showRecipeSearchStatus(typed);
   });
   pick.addEventListener("input", () => {
-    filterRecipes();
-    showRecipeSearchStatus(pick.value);
+    if (!hasCountry()) searchRecipesWithoutCountry();
+    else {
+      filterRecipes();
+      showRecipeSearchStatus(pick.value);
+    }
   });
   pick.addEventListener("blur", () => {
     closeCombo(pick, pickList);
@@ -1350,7 +1532,9 @@ async function loadRecords() {
     findings: [latest.symptoms, latest.discomfort].filter(Boolean),
     diet_advice: latest.diet_advice,
     diet_url: latest.diet_url,
+    diet_video_url: latest.diet_video_url,
     acupoint_url: latest.acupoint_url,
+    acupoint_video_url: latest.acupoint_video_url,
     color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
     face_grid: latest.face_grid,
     tongue_grid: latest.tongue_grid,
@@ -1414,6 +1598,7 @@ function bindMealCalendarControls() {
       }
       await loadMealMonth();
       renderMealCalendarGrid();
+      renderMealNutrientTrend(mealMonthData);
     });
   }
   if (next && !next.dataset.bound) {
@@ -1426,6 +1611,7 @@ function bindMealCalendarControls() {
       }
       await loadMealMonth();
       renderMealCalendarGrid();
+      renderMealNutrientTrend(mealMonthData);
     });
   }
   if (addBtn && !addBtn.dataset.bound) {
@@ -1564,35 +1750,55 @@ function renderMealDay() {
     list.replaceChildren(frag);
   }
   if (empty) {
-    empty.classList.toggle("hidden", meals.length > 0);
-    empty.textContent = uiText("mealChartEmpty");
+    const hasTargets = mealDayData && mealDayData.targets && Object.keys(mealDayData.targets).length;
+    empty.classList.toggle("hidden", Boolean(hasTargets) || meals.length > 0);
+    empty.textContent = typeof Chart === "undefined"
+      ? uiText("mealChartMissingLib")
+      : uiText("mealChartEmpty");
   }
   renderMealCharts(mealDayData);
+  renderMealNutrientTrend(mealMonthData);
+}
+
+function destroyMealChart(kind) {
+  if (kind === "intake" && mealIntakeChart) {
+    mealIntakeChart.destroy();
+    mealIntakeChart = null;
+  } else if (kind === "surplus" && mealSurplusChart) {
+    mealSurplusChart.destroy();
+    mealSurplusChart = null;
+  } else if (kind === "trend" && mealNutrientTrendChart) {
+    mealNutrientTrendChart.destroy();
+    mealNutrientTrendChart = null;
+  }
 }
 
 function renderMealCharts(day) {
   const intakeCanvas = document.getElementById("meal-intake-chart");
-  const surplusCanvas = document.getElementById("meal-surplus-chart");
-  if (typeof Chart === "undefined" || !intakeCanvas || !surplusCanvas) return;
-  if (mealIntakeChart) {
-    mealIntakeChart.destroy();
-    mealIntakeChart = null;
-  }
-  if (mealSurplusChart) {
-    mealSurplusChart.destroy();
-    mealSurplusChart = null;
-  }
+  destroyMealChart("intake");
+  destroyMealChart("surplus");
+  if (typeof Chart === "undefined") return;
+  if (!intakeCanvas) return;
   const keys = (day && day.nutrient_keys) || [];
   if (!keys.length) return;
-  const labels = (day.chart_labels && day.chart_labels.length === keys.length)
+  const allLabels = (day.chart_labels && day.chart_labels.length === keys.length)
     ? day.chart_labels
     : keys.map(shortNutrientLabel);
-  const totals = day.totals || {};
-  const targets = day.targets || {};
-  const surplus = day.surplus || {};
-  const intakeValues = keys.map((k) => Number(totals[k] || 0));
-  const targetValues = keys.map((k) => Number(targets[k] || 0));
-  const surplusValues = keys.map((k) => Number(surplus[k] || 0));
+  const totals = (day && day.totals) || {};
+  const targets = (day && day.targets) || {};
+  // Daily bar chart: intake vs age/gender targets (% keeps mixed units readable).
+  const labels = [];
+  const intakePct = [];
+  const targetPct = [];
+  keys.forEach((key, index) => {
+    const target = Number(targets[key] || 0);
+    if (!(target > 0)) return;
+    const total = Number(totals[key] || 0);
+    labels.push(allLabels[index]);
+    intakePct.push(Math.round((1000 * total) / target) / 10);
+    targetPct.push(100);
+  });
+  if (!labels.length) return;
   mealIntakeChart = new Chart(intakeCanvas, {
     type: "bar",
     data: {
@@ -1600,12 +1806,12 @@ function renderMealCharts(day) {
       datasets: [
         {
           label: uiText("mealIntakeSeries"),
-          data: intakeValues,
+          data: intakePct,
           backgroundColor: "rgba(42, 111, 151, 0.65)",
         },
         {
           label: uiText("mealTargetSeries"),
-          data: targetValues,
+          data: targetPct,
           backgroundColor: "rgba(120, 120, 120, 0.35)",
         },
       ],
@@ -1613,40 +1819,172 @@ function renderMealCharts(day) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      color: "#000000",
       plugins: {
-        title: { display: true, text: uiText("mealIntakeTitle") },
-        legend: { display: true },
+        title: {
+          display: true,
+          text: uiText("mealIntakeTitle"),
+          color: "#000000",
+        },
+        legend: {
+          display: true,
+          labels: { color: "#000000" },
+        },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const value = ctx.parsed && ctx.parsed.y != null ? ctx.parsed.y : ctx.raw;
+              return `${ctx.dataset.label}: ${value}%`;
+            },
+          },
+        },
       },
       scales: {
-        x: { ticks: { maxRotation: 60, minRotation: 30, font: { size: 10 } } },
-        y: { beginAtZero: true },
+        x: {
+          ticks: {
+            color: "#000000",
+            maxRotation: 60,
+            minRotation: 30,
+            font: { size: 10 },
+          },
+          grid: { color: "rgba(0, 0, 0, 0.08)" },
+          border: { color: "#000000" },
+        },
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: "%", color: "#000000" },
+          ticks: {
+            color: "#000000",
+            callback: (value) => `${value}%`,
+          },
+          grid: { color: "rgba(0, 0, 0, 0.08)" },
+          border: { color: "#000000" },
+        },
       },
     },
+    plugins: [MEAL_CHART_WHITE_BG],
   });
-  mealSurplusChart = new Chart(surplusCanvas, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: uiText("mealSurplusSeries"),
-          data: surplusValues,
-          backgroundColor: surplusValues.map((v) => (v >= 0 ? "rgba(196, 90, 60, 0.7)" : "rgba(46, 139, 87, 0.7)")),
-        },
-      ],
-    },
+}
+
+function renderMealNutrientTrend(month) {
+  // Prefer dedicated canvas; fall back to former surplus canvas.
+  const canvas = document.getElementById("meal-nutrient-trend-chart")
+    || document.getElementById("meal-surplus-chart");
+  destroyMealChart("trend");
+  destroyMealChart("surplus");
+  if (typeof Chart === "undefined" || !canvas) return;
+  const keys = (month && month.nutrient_keys) || (mealDayData && mealDayData.nutrient_keys) || [];
+  const targets = (month && month.targets) || (mealDayData && mealDayData.targets) || {};
+  const allLabels = (month && month.chart_labels && month.chart_labels.length === keys.length)
+    ? month.chart_labels
+    : keys.map(shortNutrientLabel);
+  const daysWithMeals = ((month && month.days) || []).filter((d) => d && d.has_meals);
+  if (!keys.length || !daysWithMeals.length) return;
+  const labels = daysWithMeals.map((d) => {
+    const iso = String(d.date || "");
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[2]}/${m[3]}`;
+    return iso || d.date;
+  });
+  const datasets = [];
+  let maxAbs = 0;
+  keys.forEach((key, index) => {
+    const target = Number(targets[key] || 0);
+    if (!(target > 0)) return;
+    const color = MEAL_TREND_COLORS[index % MEAL_TREND_COLORS.length];
+    const pointStyle = MEAL_TREND_POINT_STYLES[index % MEAL_TREND_POINT_STYLES.length];
+    // % of target keeps mixed units comparable; 0 = meeting daily standard.
+    const data = daysWithMeals.map((d) => {
+      const surplus = d.surplus && d.surplus[key];
+      const delta = (surplus != null && surplus !== "")
+        ? Number(surplus)
+        : Number((d.totals && d.totals[key]) || 0) - target;
+      const pct = Math.round((1000 * delta) / target) / 10;
+      if (Number.isFinite(pct)) maxAbs = Math.max(maxAbs, Math.abs(pct));
+      return pct;
+    });
+    datasets.push({
+      label: allLabels[index] || shortNutrientLabel(key),
+      data,
+      showLine: true,
+      tension: 0.35,
+      pointStyle,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBorderWidth: 1.5,
+      borderWidth: 2,
+      borderColor: color,
+      backgroundColor: color,
+      spanGaps: true,
+    });
+  });
+  if (!datasets.length) return;
+  const axisBound = Math.max(20, Math.ceil(maxAbs / 10) * 10);
+  mealNutrientTrendChart = new Chart(canvas, {
+    type: "line",
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      color: "#000000",
       plugins: {
-        title: { display: true, text: uiText("mealSurplusTitle") },
-        legend: { display: false },
+        title: {
+          display: true,
+          text: uiText("mealNutrientTrendTitle"),
+          color: "#000000",
+        },
+        legend: {
+          display: true,
+          position: "bottom",
+          labels: {
+            color: "#000000",
+            usePointStyle: true,
+            boxWidth: 10,
+            font: { size: 10 },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const value = ctx.parsed && ctx.parsed.y != null ? ctx.parsed.y : ctx.raw;
+              const sign = value > 0 ? "+" : "";
+              return `${ctx.dataset.label}: ${sign}${value}%`;
+            },
+          },
+        },
       },
       scales: {
-        x: { ticks: { maxRotation: 60, minRotation: 30, font: { size: 10 } } },
-        y: { beginAtZero: false },
+        x: {
+          title: {
+            display: true,
+            text: uiText("mealNutrientTrendX"),
+            color: "#000000",
+          },
+          ticks: { color: "#000000" },
+          grid: { color: "rgba(0, 0, 0, 0.08)" },
+          border: { color: "#000000" },
+        },
+        y: {
+          min: -axisBound,
+          max: axisBound,
+          title: {
+            display: true,
+            text: uiText("mealNutrientTrendY"),
+            color: "#000000",
+          },
+          ticks: {
+            color: "#000000",
+            callback: (value) => `${value}%`,
+          },
+          grid: {
+            color: (ctx) => (ctx.tick.value === 0 ? "#000000" : "rgba(0, 0, 0, 0.08)"),
+            lineWidth: (ctx) => (ctx.tick.value === 0 ? 2 : 1),
+          },
+          border: { color: "#000000" },
+        },
       },
     },
+    plugins: [MEAL_CHART_WHITE_BG],
   });
 }
 
@@ -1657,7 +1995,7 @@ async function addSelectedRecipeMeal() {
   const row = recipeRows.find((item) => String(item.id) === String(selectedRecipeId) && recipeLabel(item) === label)
     || recipeRows.find((item) => recipeLabel(item) === label)
     || findRecipeByTypedName(label);
-  if (!row) {
+  if (!row || row.id == null || row.id === "") {
     if (mealMsg) {
       mealMsg.textContent = uiText("mealPickRecipeFirst");
       mealMsg.className = "status err";
@@ -1672,10 +2010,11 @@ async function addSelectedRecipeMeal() {
     const data = await api("/api/meals", {
       method: "POST",
       body: formBody({
-        recipe_id: row.id,
+        recipe_id: String(row.id),
         meal_date: mealDate,
         meal_slot: slot,
-        servings,
+        servings: String(servings),
+        replace_slot: "1",
         lang: getUiLang(),
       }),
     });
@@ -1725,35 +2064,45 @@ function renderTrend(trend) {
         pointRadius: 6,
         pointHoverRadius: 8,
         borderWidth: 2,
-        tension: 0.15,
+        tension: 0.35,
         spanGaps: true,
       })),
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      color: "#000000",
       plugins: {
-        legend: { display: true, position: "bottom", labels: { usePointStyle: true, boxWidth: 10 } },
-        title: { display: true, text: trend.y_label || "分數趨勢" },
+        legend: {
+          display: true,
+          position: "bottom",
+          labels: { color: "#000000", usePointStyle: true, boxWidth: 10 },
+        },
+        title: {
+          display: true,
+          text: trend.y_label || "分數趨勢",
+          color: "#000000",
+        },
       },
       scales: {
-        x: { title: { display: true, text: "時間" } },
+        x: {
+          title: { display: true, text: "時間", color: "#000000" },
+          ticks: { color: "#000000" },
+          grid: { color: "rgba(0, 0, 0, 0.08)" },
+          border: { color: "#000000" },
+        },
         y: {
           min: trend.y_min || 1,
           max: trend.y_max || 10,
-          ticks: { stepSize: 1 },
-          title: { display: true, text: "分數" },
+          ticks: { stepSize: 1, color: "#000000" },
+          title: { display: true, text: "分數", color: "#000000" },
+          grid: { color: "rgba(0, 0, 0, 0.08)" },
+          border: { color: "#000000" },
         },
       },
     },
+    plugins: [MEAL_CHART_WHITE_BG],
   });
-}
-
-function selectedColorTemperatureK() {
-  const picked = document.querySelector('input[name="color_temperature_k"]:checked');
-  const value = picked ? String(picked.value) : "4200";
-  if (value === "2700" || value === "4200" || value === "6500") return value;
-  return "4200";
 }
 
 async function sendRecord(extraShot) {
@@ -1761,7 +2110,7 @@ async function sendRecord(extraShot) {
   const body = new FormData();
   body.append("symptoms", document.getElementById("symptoms").value);
   body.append("discomfort", document.getElementById("discomfort").value);
-  body.append("color_temperature_k", selectedColorTemperatureK());
+  body.append("color_temperature_k", "auto");
   if (extraShot) {
     const blob = await captureFrame(extraShot);
     if (!blob) throw new Error("無法擷取畫面");

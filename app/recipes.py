@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 from .config import ROOT
@@ -8,6 +9,21 @@ from .nutrient_targets import RECIPE_NUTRIENT_HEADERS, RECIPE_TO_TARGET, empty_t
 from .syndrome import ORGAN_META
 
 RECIPE_PATH = ROOT / "Recipe.xls"
+
+
+def active_recipe_path():
+    """Prefer Recipe.xls.new when it is newer (Windows lock fallback from writers)."""
+    primary = RECIPE_PATH
+    fallback = ROOT / "Recipe.xls.new"
+    try:
+        if fallback.exists():
+            if (not primary.exists()) or fallback.stat().st_mtime_ns >= primary.stat().st_mtime_ns:
+                return fallback
+    except OSError:
+        pass
+    return primary
+
+
 SPLIT_MARKS = ("、", ",", ";", "/", "，")
 LANGS = ("zh", "en", "ja", "ko")
 NAME_FIELDS = {"zh": "name_zh", "en": "name_en", "ja": "name_ja", "ko": "name_ko"}
@@ -112,9 +128,10 @@ def _open_sheet():
         import xlrd
     except ImportError as exc:
         raise RuntimeError("讀取 Recipe.xls 需要 xlrd==1.2.0") from exc
-    if not RECIPE_PATH.exists():
+    path = active_recipe_path()
+    if not path.exists():
         raise FileNotFoundError(str(RECIPE_PATH))
-    return xlrd.open_workbook(str(RECIPE_PATH)).sheet_by_index(0)
+    return xlrd.open_workbook(str(path)).sheet_by_index(0)
 
 
 def _cell_number(raw) -> float | None:
@@ -171,8 +188,9 @@ def _rows_cached(mtime_ns: int) -> tuple[dict, ...]:
 
 
 def recipe_rows() -> tuple[dict, ...]:
-    path = RECIPE_PATH
+    path = active_recipe_path()
     mtime = path.stat().st_mtime_ns if path.exists() else 0
+    # Include which file we read so cache busts when .new appears/disappears.
     return _rows_cached(mtime)
 
 
@@ -306,13 +324,15 @@ def recipe_excluded(
     allergy_tokens: list[str],
     condition_tokens: list[str],
     organ_tags: list[str],
+    foods: dict[str, dict[str, str]] | None = None,
 ) -> bool:
     if recipe_contains_allergen(row.get("allergens") or "", allergy_tokens):
         return True
     ban = row.get("ban") or ""
     if _text_has_any(ban, condition_tokens):
         return True
-    return ban_has_pattern(ban, organ_tags)
+    # Organ-pattern filters use Foods.xls tags for top ingredients (plain 益處／禁忌 are for UI).
+    return ban_has_pattern(recipe_filter_ban_blob(row, foods), organ_tags)
 
 
 def _filter_context(
@@ -343,6 +363,7 @@ def usable_countries(
     organ_tags, condition_tokens, allergy_tokens = _filter_context(
         patterns, allergies, conditions, scores, female, by_body
     )
+    foods = foods_index()
     seen: set[str] = set()
     ordered: list[str] = []
     for row in recipe_rows():
@@ -351,7 +372,7 @@ def usable_countries(
             continue
         if needle and not name.casefold().startswith(needle):
             continue
-        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags):
+        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags, foods):
             continue
         seen.add(name)
         ordered.append(name)
@@ -560,6 +581,323 @@ def benefit_score(benefit: str, organ_tags: list[str]) -> int:
     return sum(1 for tag in organ_tags if tag != "濕" and tag in benefit)
 
 
+_INGREDIENT_GRAM_RE = re.compile(r"^(.+?)\s+(\d+(?:\.\d+)?)\s*克$")
+_ORGAN_DISPLAY_ORDER = (
+    "心",
+    "肝",
+    "脾",
+    "肺",
+    "腎",
+    "胃",
+    "膽",
+    "小腸",
+    "大腸",
+    "膀胱",
+    "子宮",
+)
+_PATTERN_SUFFIXES = ("實熱", "虛熱", "實寒", "虛寒")
+# Common kitchen foods often framed as helping clear dampness in teaching copy.
+_DAMP_CLEARING_FOODS = frozenset(
+    {
+        "薏仁",
+        "薏苡仁",
+        "赤小豆",
+        "紅豆",
+        "綠豆",
+        "冬瓜",
+        "荷葉",
+        "茯苓",
+        "玉米鬚",
+        "黃瓜",
+        "小黃瓜",
+        "西瓜",
+        "芹菜",
+    }
+)
+
+
+def _parse_ingredient_grams(recipe: str) -> list[tuple[str, float]]:
+    pairs: list[tuple[str, float]] = []
+    for part in (recipe or "").replace(",", "、").split("、"):
+        piece = part.strip()
+        if not piece:
+            continue
+        match = _INGREDIENT_GRAM_RE.match(piece)
+        if not match:
+            continue
+        try:
+            gram = float(match.group(2))
+        except ValueError:
+            continue
+        name = match.group(1).strip()
+        if name and gram > 0:
+            pairs.append((name, gram))
+    return pairs
+
+
+def top_ingredient_names(recipe: str, limit: int = 4) -> list[str]:
+    """Largest gram ingredients first (teaching UI focuses on these)."""
+    ranked = sorted(_parse_ingredient_grams(recipe), key=lambda item: (-item[1], item[0]))
+    names: list[str] = []
+    seen: set[str] = set()
+    for name, _gram in ranked:
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+        if len(names) >= max(1, limit):
+            break
+    return names
+
+
+def _effect_tags_by_ingredient(blob: str) -> dict[str, list[str]]:
+    """Parse `食材:證型,證型;食材:證型` (also bare comma lists)."""
+    out: dict[str, list[str]] = {}
+    for part in (blob or "").split(";"):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        if ":" in chunk:
+            name, rest = chunk.split(":", 1)
+            name = name.strip()
+        else:
+            name, rest = "", chunk
+        tags = split_tokens(rest)
+        if not tags:
+            continue
+        key = name or "_"
+        bucket = out.setdefault(key, [])
+        for tag in tags:
+            if tag not in bucket:
+                bucket.append(tag)
+    return out
+
+
+def _split_organ_pattern(tag: str) -> tuple[str, str] | None:
+    text = (tag or "").strip()
+    if not text:
+        return None
+    if text in {"濕", "濕熱", "寒濕"} or text.endswith("濕"):
+        return "", "濕"
+    for suffix in _PATTERN_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return text[: -len(suffix)], suffix
+    return None
+
+
+def _ordered_organs(names: set[str]) -> list[str]:
+    ordered = [name for name in _ORGAN_DISPLAY_ORDER if name in names]
+    extras = sorted(name for name in names if name not in _ORGAN_DISPLAY_ORDER)
+    return ordered + extras
+
+
+def foods_index() -> dict[str, dict[str, str]]:
+    """Cached Foods.xls index; invalidated when the file mtime changes."""
+    path = ROOT / "Foods.xls"
+    try:
+        mtime = path.stat().st_mtime if path.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+    return _foods_index_cached(mtime)
+
+
+@lru_cache(maxsize=4)
+def _foods_index_cached(_mtime: float) -> dict[str, dict[str, str]]:
+    from .recipe_ensure import load_food_name_index
+
+    try:
+        return load_food_name_index()
+    except FileNotFoundError:
+        return {}
+
+
+def invalidate_foods_cache() -> None:
+    _foods_index_cached.cache_clear()
+
+
+def food_effect_tag_maps(
+    recipe: str,
+    foods: dict[str, dict[str, str]] | None = None,
+    *,
+    limit: int = 4,
+) -> tuple[dict[str, list[str]], dict[str, list[str]], list[str]]:
+    """Top ingredients → Foods.xls 益處／禁忌證型 maps."""
+    top = top_ingredient_names(recipe or "", limit=limit)
+    index = foods if foods is not None else foods_index()
+    benefit_map: dict[str, list[str]] = {}
+    ban_map: dict[str, list[str]] = {}
+    for name in top:
+        item = (index or {}).get(name) or {}
+        benefit_tags = split_tokens(item.get("benefit") or "")
+        ban_tags = split_tokens(item.get("ban") or "")
+        if benefit_tags:
+            benefit_map[name] = benefit_tags
+        if ban_tags:
+            ban_map[name] = ban_tags
+    return benefit_map, ban_map, top
+
+
+def machine_effect_blob(tag_map: dict[str, list[str]]) -> str:
+    """Serialize ingredient→tags for organ-pattern filters."""
+    parts: list[str] = []
+    for name, tags in tag_map.items():
+        clean = [tag for tag in tags if tag]
+        if name and clean:
+            parts.append(f"{name}:{','.join(clean)}")
+    return ";".join(parts)
+
+
+def recipe_filter_benefit_blob(row: dict, foods: dict[str, dict[str, str]] | None = None) -> str:
+    benefit_map, _ban_map, _top = food_effect_tag_maps(row.get("recipe") or "", foods)
+    blob = machine_effect_blob(benefit_map)
+    if blob:
+        return blob
+    # Legacy rows may still store machine tags in 益處.
+    raw = row.get("benefit") or ""
+    if raw.startswith("依主要食材"):
+        return ""
+    return raw
+
+
+def recipe_filter_ban_blob(row: dict, foods: dict[str, dict[str, str]] | None = None) -> str:
+    _benefit_map, ban_map, _top = food_effect_tag_maps(row.get("recipe") or "", foods)
+    blob = machine_effect_blob(ban_map)
+    if blob:
+        return blob
+    raw = row.get("ban") or ""
+    if raw.startswith("依主要食材"):
+        return ""
+    return raw
+
+
+def simplify_organ_effects(
+    row: dict,
+    *,
+    foods: dict[str, dict[str, str]] | None = None,
+    limit: int = 4,
+) -> tuple[str, str]:
+    """Plain organ / heat-cold / damp copy from Foods.xls via top ingredients by weight."""
+    benefit_map, ban_map, top = food_effect_tag_maps(row.get("recipe") or "", foods, limit=limit)
+    if not benefit_map and not ban_map:
+        # Fallback: parse legacy Recipe.xls machine tags if present.
+        benefit_map = _effect_tags_by_ingredient(row.get("benefit") or "")
+        ban_map = _effect_tags_by_ingredient(row.get("ban") or "")
+        if not top:
+            listed = [name for name in benefit_map if name != "_"] + [
+                name for name in ban_map if name != "_"
+            ]
+            seen: set[str] = set()
+            top = []
+            for name in listed:
+                if name in seen:
+                    continue
+                seen.add(name)
+                top.append(name)
+                if len(top) >= max(1, limit):
+                    break
+        # Drop already-plain columns from the fallback maps.
+        if (row.get("benefit") or "").startswith("依主要食材"):
+            benefit_map = {}
+        if (row.get("ban") or "").startswith("依主要食材"):
+            ban_map = {}
+
+    def collect(mapping: dict[str, list[str]]) -> list[str]:
+        tags: list[str] = []
+        if not top:
+            for values in mapping.values():
+                tags.extend(values)
+            return tags
+        for name in top:
+            tags.extend(mapping.get(name) or [])
+        tags.extend(mapping.get("_") or [])
+        return tags
+
+    benefit_tags = collect(benefit_map)
+    ban_tags = collect(ban_map)
+    if not benefit_tags and not ban_tags and not top:
+        return "", ""
+
+    help_organs: set[str] = set()
+    care_organs: set[str] = set()
+    benefit_heat = benefit_cold = 0
+    ban_heat = ban_cold = 0
+    damp = False
+
+    for tag in benefit_tags:
+        split = _split_organ_pattern(tag)
+        if not split:
+            continue
+        organ, kind = split
+        if kind == "濕":
+            damp = True
+            continue
+        if organ:
+            help_organs.add(organ)
+        if "熱" in kind:
+            benefit_heat += 1
+        if "寒" in kind:
+            benefit_cold += 1
+
+    for tag in ban_tags:
+        split = _split_organ_pattern(tag)
+        if not split:
+            continue
+        organ, kind = split
+        if kind == "濕":
+            damp = True
+            continue
+        if organ:
+            care_organs.add(organ)
+        if "熱" in kind:
+            ban_heat += 1
+        if "寒" in kind:
+            ban_cold += 1
+
+    if any(name in _DAMP_CLEARING_FOODS for name in top):
+        damp = True
+
+    food_bit = "、".join(top) if top else "主要食材"
+    help_bit = "、".join(_ordered_organs(help_organs)) if help_organs else ""
+    care_bit = "、".join(_ordered_organs(care_organs)) if care_organs else ""
+
+    if benefit_heat > benefit_cold * 1.2:
+        nature = "性質偏清涼，較有助於緩解偏熱、想降火的情況"
+    elif benefit_cold > benefit_heat * 1.2:
+        nature = "性質偏溫暖，較有助於緩解怕冷、偏寒的情況"
+    elif benefit_heat or benefit_cold:
+        nature = "性質較平和，溫涼效果都有一些"
+    else:
+        nature = "性質資料不足，僅供教學參考"
+
+    if ban_heat > ban_cold * 1.2:
+        caution = "偏熱、容易上火時宜少吃"
+    elif ban_cold > ban_heat * 1.2:
+        caution = "很怕冷、偏寒時宜少吃"
+    elif ban_heat or ban_cold:
+        caution = "寒熱偏盛時都宜斟酌份量"
+    else:
+        caution = "無明顯寒熱禁忌資料"
+
+    benefit_parts = [f"依主要食材（{food_bit}）"]
+    if help_bit:
+        benefit_parts.append(f"較有助於：{help_bit}")
+    else:
+        benefit_parts.append("對五臟六腑的幫助標示不多")
+    benefit_parts.append(nature)
+    if damp:
+        benefit_parts.append("部分食材有助去濕氣")
+    benefit_text = "。".join(benefit_parts) + "。"
+
+    ban_parts = [f"依主要食材（{food_bit}）"]
+    if care_bit:
+        ban_parts.append(f"需特別留意：{care_bit}")
+    else:
+        ban_parts.append("沒有列出明確的臟腑禁忌")
+    ban_parts.append(caution)
+    ban_text = "。".join(ban_parts) + "。"
+    return benefit_text, ban_text
+
+
 def nutrient_line(row: dict | None) -> str:
     nutrients = recipe_nutrient_map(row)
     parts: list[str] = []
@@ -578,14 +916,23 @@ def nutrient_line(row: dict | None) -> str:
 def public_recipe(row: dict, lang: str, score: int) -> dict:
     mapped = recipe_nutrient_map(row)
     line = nutrient_line(row)
+    stored_benefit = row.get("benefit") or ""
+    stored_ban = row.get("ban") or ""
+    # Prefer columns already rewritten to plain teaching copy; else derive from Foods.xls.
+    if stored_benefit.startswith("依主要食材") and stored_ban.startswith("依主要食材"):
+        benefit, ban = stored_benefit, stored_ban
+    else:
+        plain_benefit, plain_ban = simplify_organ_effects(row)
+        benefit = plain_benefit or stored_benefit
+        ban = plain_ban or stored_ban
     payload = {
         "id": int(row["id"]),
         "country": row.get("country") or "",
         "name": localized_name(row, lang),
         "recipe": row.get("recipe") or "",
         "method": row.get("method") or "",
-        "benefit": row.get("benefit") or "",
-        "ban": row.get("ban") or "",
+        "benefit": benefit,
+        "ban": ban,
         "nutrient": row.get("nutrient") or "",
         "allergens": row.get("allergens") or "",
         "nutrients": mapped,
@@ -594,6 +941,7 @@ def public_recipe(row: dict, lang: str, score: int) -> dict:
         "benefit_match": score > 0,
         "benefit_score": score,
     }
+    del lang  # plain summary is Traditional Chinese teaching copy for all UI langs
     for field, _header in NUTRIENT_FIELDS:
         payload[field] = row.get(field)
     return payload
@@ -620,14 +968,15 @@ def filter_recipes(
     organ_tags, condition_tokens, allergy_tokens = _filter_context(
         patterns, allergies, conditions, scores, female, by_body
     )
+    foods = foods_index()
     matched: list[tuple[int, dict[str, str]]] = []
     safe: list[tuple[int, dict[str, str]]] = []
     for row in recipe_rows():
         if (row.get("country") or "") != wanted:
             continue
-        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags):
+        if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags, foods):
             continue
-        score = benefit_score(row.get("benefit") or "", organ_tags)
+        score = benefit_score(recipe_filter_benefit_blob(row, foods), organ_tags)
         item = (score, row)
         if score > 0:
             matched.append(item)
@@ -646,6 +995,75 @@ def filter_recipes(
         "patterns": organ_tags,
         "count": len(recipes),
         "benefit_matches": len(matched),
+        "recipes": recipes,
+        "disclaimer": TEACHING_DISCLAIMER,
+    }
+
+
+def _name_match_rank(row: dict, needle: str, lang: str) -> int:
+    """Higher is better. Exact localized/zh/en/ja/ko match beats substring."""
+    if not needle:
+        return 0
+    fields = (
+        localized_name(row, lang),
+        row.get("name_zh") or "",
+        row.get("name_en") or "",
+        row.get("name_ja") or "",
+        row.get("name_ko") or "",
+    )
+    best = 0
+    for label in fields:
+        text = (label or "").strip()
+        if not text:
+            continue
+        folded = text.casefold()
+        if folded == needle:
+            best = max(best, 100)
+        elif needle in folded or folded in needle:
+            best = max(best, 40)
+    return best
+
+
+def find_recipes_by_name(
+    name: str,
+    lang: str = "zh",
+    patterns: dict[str, str] | None = None,
+    allergies: list[str] | None = None,
+    conditions: list[str] | None = None,
+    scores: dict | None = None,
+    female: bool = False,
+    by_body: bool = False,
+    limit: int = 40,
+) -> dict:
+    """Search Recipe.xls across all countries by dish name (exact preferred)."""
+    needle = (name or "").strip().casefold()
+    lang = normalize_lang(lang)
+    organ_tags, condition_tokens, allergy_tokens = _filter_context(
+        patterns, allergies, conditions, scores, female, by_body
+    )
+    foods = foods_index()
+    ranked: list[tuple[int, int, dict]] = []
+    if needle:
+        for row in recipe_rows():
+            rank = _name_match_rank(row, needle, lang)
+            if rank <= 0:
+                continue
+            if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags, foods):
+                continue
+            benefit = benefit_score(recipe_filter_benefit_blob(row, foods), organ_tags)
+            ranked.append((rank, benefit, row))
+        ranked.sort(
+            key=lambda item: (-item[0], -item[1], localized_name(item[2], lang), item[2].get("country") or "")
+        )
+        if limit is not None:
+            ranked = ranked[: max(1, int(limit))]
+    recipes = [public_recipe(row, lang, benefit) for _rank, benefit, row in ranked]
+    return {
+        "name": (name or "").strip(),
+        "lang": lang,
+        "by_body": bool(by_body),
+        "patterns": organ_tags,
+        "count": len(recipes),
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
     }

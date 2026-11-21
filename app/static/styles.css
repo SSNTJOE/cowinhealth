@@ -64,29 +64,6 @@ input, select, textarea {
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-.cct-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  margin: 8px 0 10px;
-}
-.cct-picker .cct-label {
-  font-size: 14px;
-  font-weight: 700;
-  margin: 0;
-}
-.cct-picker label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  width: auto;
-}
-.cct-picker input {
-  width: auto;
-  padding: 0;
-}
 button {
   border: 0;
   border-radius: 999px;
@@ -381,6 +358,14 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   position: relative;
   height: 360px;
   margin: 8px 0 16px;
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 6px 4px;
+}
+.trend-wrap canvas {
+  background: #ffffff;
 }
 .meal-add-row {
   align-items: center;
@@ -474,6 +459,14 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
 }
 .meal-chart-wrap {
   height: 280px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 6px 4px;
+  color: #000000;
+}
+.meal-chart-wrap canvas {
+  background: #ffffff;
 }
 @media (min-width: 900px) {
   .meal-charts {

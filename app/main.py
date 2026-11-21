@@ -37,7 +37,7 @@ from .health_flags import (
 )
 from .nutrient_targets import lookup_targets
 from .recipe_ensure import ensure_recipe
-from .recipes import TEACHING_DISCLAIMER, filter_recipes, split_csv, usable_countries
+from .recipes import TEACHING_DISCLAIMER, filter_recipes, find_recipes_by_name, split_csv, usable_countries
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
 from . import user_meals
@@ -395,19 +395,27 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
     return record_id
 
 
+def _html_page(name: str) -> FileResponse:
+    """Serve HTML without caching so ?v= cache-bust on linked assets takes effect."""
+    return FileResponse(
+        STATIC_DIR / name,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return _html_page("index.html")
 
 
 @app.get("/register")
 def register_page():
-    return FileResponse(STATIC_DIR / "register.html")
+    return _html_page("register.html")
 
 
 @app.get("/profile")
 def profile_page():
-    return FileResponse(STATIC_DIR / "profile.html")
+    return _html_page("profile.html")
 
 
 @app.get("/media/{name}")
@@ -470,6 +478,92 @@ def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]
             continue
     patterns = {key: (row.get(key) or "") for key in PATTERN_KEYS}
     return scores, patterns
+
+
+def fetch_week_records_for_advice(user_id: str) -> list[dict]:
+    """Last 7 days of symptoms/discomfort + color fields for search keyword aggregation."""
+    columns = [
+        "symptoms",
+        "discomfort",
+        "face_color",
+        "lip_color",
+        "tongue_body_color",
+        "tongue_coat_color",
+        "complexion_label",
+        *PATTERN_KEYS,
+    ]
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(columns)}
+                FROM health_records
+                WHERE user_id = %s
+                  AND record_date >= (NOW() - INTERVAL 7 DAY)
+                ORDER BY record_date DESC
+                LIMIT 21
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall() or []
+    finally:
+        conn.close()
+    return list(rows)
+
+
+def fetch_prior_session_context(user_id: str) -> dict | None:
+    """Previous record scores + lighting (from organ_composite_json) for day-to-day stabilize."""
+    columns = [*ORGAN_KEYS, "organ_composite_json", "record_date"]
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {", ".join(columns)}
+                FROM health_records
+                WHERE user_id = %s
+                ORDER BY record_date DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    scores: dict[str, int] = {}
+    for key in ORGAN_KEYS:
+        raw = row.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            scores[key] = int(raw)
+        except (TypeError, ValueError):
+            continue
+    lighting = None
+    raw_composite = row.get("organ_composite_json")
+    if raw_composite:
+        try:
+            composite = json.loads(raw_composite) if isinstance(raw_composite, str) else raw_composite
+            if isinstance(composite, dict):
+                lighting = composite.get("lighting")
+                if not scores and isinstance(composite.get("scores"), dict):
+                    for key, value in composite["scores"].items():
+                        try:
+                            scores[key] = int(value)
+                        except (TypeError, ValueError):
+                            continue
+        except (TypeError, ValueError, json.JSONDecodeError):
+            lighting = None
+    if not scores and not lighting:
+        return None
+    return {
+        "scores": scores,
+        "lighting": lighting,
+        "record_date": row.get("record_date"),
+    }
 
 
 def _json_object(raw: str | None, label: str) -> dict | None:
@@ -557,7 +651,8 @@ def api_recipe_countries(
 @app.get("/api/recipes")
 def api_recipes(
     request: Request,
-    country: str,
+    country: str = "",
+    name: str | None = None,
     lang: str = "zh",
     patterns: str | None = None,
     scores: str | None = None,
@@ -570,12 +665,21 @@ def api_recipes(
     allergy_list = args["allergies"]
     condition_list = args["conditions"]
     try:
-        payload = filter_recipes(
-            country=country,
-            lang=lang,
-            by_body=by_body,
-            **args,
-        )
+        if (country or "").strip():
+            payload = filter_recipes(
+                country=country,
+                lang=lang,
+                by_body=by_body,
+                **args,
+            )
+        else:
+            # No country: search dish name across all countries in Recipe.xls.
+            payload = find_recipes_by_name(
+                name=name or "",
+                lang=lang,
+                by_body=by_body,
+                **args,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -588,9 +692,9 @@ def api_recipes(
 
 
 def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
-    """Find or create a recipe row for country + name; research fills columns when possible."""
+    """Find or create a recipe row; country may be blank (lookup / infer / Global)."""
     try:
-        return ensure_recipe(country=country, name=name, lang=lang)
+        return ensure_recipe(country=country or "", name=name, lang=lang)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -605,7 +709,7 @@ def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
 
 @app.post("/api/recipes/ensure")
 def api_recipes_ensure(
-    country: str = Form(...),
+    country: str = Form(""),
     name: str = Form(...),
     lang: str = Form("zh"),
 ):
@@ -614,11 +718,11 @@ def api_recipes_ensure(
 
 @app.post("/api/recipes/create")
 def api_recipes_create(
-    country: str = Form(...),
+    country: str = Form(""),
     name: str = Form(...),
     lang: str = Form("zh"),
 ):
-    """Alias of /api/recipes/ensure — create when country+name is missing."""
+    """Alias of /api/recipes/ensure — country optional; missing rows are researched."""
     return _api_recipes_create_or_ensure(country, name, lang)
 
 
@@ -651,8 +755,8 @@ def api_meals_day(request: Request, date: str | None = None):
         return user_meals.day_summary(user_id, user, date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="找不到 daily_nutrient.xlsx")
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -668,22 +772,44 @@ def api_meals_month(request: Request, year: int | None = None, month: int | None
         return user_meals.month_overview(user_id, user, use_year, use_month)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="找不到 daily_nutrient.xlsx")
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/meals")
-def api_meals_add(
-    request: Request,
-    recipe_id: int = Form(...),
-    meal_date: str | None = Form(default=None),
-    meal_slot: str | None = Form(default=None),
-    servings: float = Form(default=1),
-    lang: str = Form(default="zh"),
-):
+async def api_meals_add(request: Request):
+    """Add or replace a meal for a slot. Accepts multipart/form or JSON body."""
     user_id = require_user(request)
+    content_type = (request.headers.get("content-type") or "").lower()
+    payload: dict = {}
+    if "application/json" in content_type:
+        body = await request.json()
+        if isinstance(body, dict):
+            payload = body
+    else:
+        form = await request.form()
+        payload = {key: form.get(key) for key in form.keys()}
+
+    recipe_id = payload.get("recipe_id")
+    if recipe_id is None or str(recipe_id).strip() == "":
+        raise HTTPException(status_code=400, detail="缺少 recipe_id")
+    meal_date = payload.get("meal_date")
+    meal_slot = payload.get("meal_slot") or payload.get("meal_type") or payload.get("slot")
+    servings_raw = payload.get("servings", 1)
+    lang = str(payload.get("lang") or "zh")
+    replace_raw = payload.get("replace_slot", True)
+    if isinstance(replace_raw, str):
+        replace_slot = replace_raw.strip().lower() not in {"0", "false", "no", "off"}
+    else:
+        replace_slot = bool(replace_raw)
+
+    try:
+        servings = float(servings_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="份量不正確") from exc
+
     try:
         meal = user_meals.add_meal(
             user_id,
@@ -692,11 +818,15 @@ def api_meals_add(
             meal_slot=meal_slot,
             servings=servings,
             lang=lang,
+            replace_slot=replace_slot,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc) or "找不到食譜"
+        if "Recipe.xls" in detail or "daily_nutrient" in detail:
+            detail = "找不到食譜或營養建議資料檔"
+        raise HTTPException(status_code=404, detail=detail) from exc
     user = fetch_user(user_id) or {}
     summary = user_meals.day_summary(user_id, user, meal["meal_date"])
     return {"ok": True, "meal": meal, "day": summary}
@@ -965,6 +1095,7 @@ async def analyze(
         except json.JSONDecodeError:
             personal_lab = None
     confirm_with_pulse = str(include_pulse or "").strip().lower() in {"1", "true", "yes", "android"}
+    prior_session = fetch_prior_session_context(user_id)
     result = analyze_session(
         images,
         symptoms or "",
@@ -974,14 +1105,22 @@ async def analyze(
         confirm_with_pulse=confirm_with_pulse,
         female=(profile or {}).get("gender") == "female",
         color_temperature_k=color_temperature_k,
+        prior_session=prior_session,
     )
+    week_records = fetch_week_records_for_advice(user_id)
     advice = build_advice(
         result["findings"],
         symptoms or "",
         discomfort or "",
         conditions=user_conditions(profile),
         allergies=user_allergies(profile),
+        result=result,
+        week_records=week_records,
     )
+    result["diet_query"] = advice.get("diet_query")
+    result["diet_video_url"] = advice.get("diet_video_url")
+    result["acupoint_query"] = advice.get("acupoint_query")
+    result["acupoint_video_url"] = advice.get("acupoint_video_url")
     extra = {
         "symptoms": symptoms,
         "discomfort": discomfort,
