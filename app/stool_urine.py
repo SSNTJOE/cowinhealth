@@ -45,7 +45,7 @@ STEATORRHEA_W_SPECULAR = 0.35
 STEATORRHEA_W_WATER = 0.20
 STEATORRHEA_W_PALE_LAB = 0.30
 STEATORRHEA_W_FLOAT = 0.15
-STEATORRHEA_SCORE_THRESHOLD = 0.50
+STEATORRHEA_SCORE_THRESHOLD = 0.48
 
 STEATORRHEA_TEACHING = (
     "胰臟、膽囊、小腸；脂肪消化不良／膽汁不足可能；酸臭易浮水面；"
@@ -378,18 +378,25 @@ def _specular_oil_metrics(image: Image.Image) -> dict[str, Any]:
     total = work.size[0] * work.size[1]
     if total <= 0:
         return {"specular_ratio": 0.0, "specular_score": 0.0, "highlight_count": 0}
-    highlights = 0
+    hard = 0
+    soft = 0
     for _h, s, v in hsv.getdata():
-        # V>0.9 (~230/255), S<0.12 (~30/255)
+        # Hard specular: V>0.9 (~230/255), S<0.12 (~30/255)
         if v >= 230 and s <= 30:
-            highlights += 1
+            hard += 1
+        # Soft oil sheen (half weight): still bright / low-sat
+        elif v >= 217 and s <= 46:
+            soft += 1
+    highlights = hard + 0.5 * soft
     ratio = highlights / float(total)
-    # ~6% ROI highlights → near-full specular weight; denser → higher oily cue
-    score = max(0.0, min(1.0, ratio / 0.06))
+    # ~5% effective highlight area → near-full specular weight
+    score = max(0.0, min(1.0, ratio / 0.05))
     return {
         "specular_ratio": round(ratio, 4),
         "specular_score": round(score, 4),
-        "highlight_count": highlights,
+        "highlight_count": int(round(highlights)),
+        "hard_count": hard,
+        "soft_count": soft,
     }
 
 
@@ -413,6 +420,7 @@ def _water_oil_texture_metrics(image: Image.Image) -> dict[str, Any]:
 
     ring_edge: list[float] = []
     ring_hf: list[float] = []
+    ring_lum: list[float] = []
     core_lum: list[float] = []
     for y in range(h):
         for x in range(w):
@@ -423,6 +431,7 @@ def _water_oil_texture_metrics(image: Image.Image) -> dict[str, Any]:
             elif dist <= ring_outer:
                 ring_edge.append(edge_vals[i] / 255.0)
                 ring_hf.append(abs(lum[i] - blur_vals[i]) / 255.0)
+                ring_lum.append(lum[i] / 255.0)
 
     if len(ring_edge) < 30:
         return {
@@ -435,19 +444,9 @@ def _water_oil_texture_metrics(image: Image.Image) -> dict[str, Any]:
     edge_mean = sum(ring_edge) / len(ring_edge)
     hf_mean = sum(ring_hf) / len(ring_hf)
     core_mean = (sum(core_lum) / len(core_lum)) if core_lum else 0.0
-    # Oil film on water → modest high-frequency / edge energy in brighter surround
-    surround_brighter = 1.0 if edge_mean > 0 else 0.0
-    if core_lum and (sum(ring_edge) / max(1, len(ring_edge))):
-        # Prefer cases where surround is not much darker than core (water visible)
-        ring_lum = []
-        for y in range(h):
-            for x in range(w):
-                i = y * w + x
-                dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
-                if core_r < dist <= ring_outer:
-                    ring_lum.append(lum[i] / 255.0)
-        ring_L = sum(ring_lum) / max(1, len(ring_lum))
-        surround_brighter = 1.0 if ring_L + 0.02 >= core_mean * 0.85 else 0.55
+    ring_L = sum(ring_lum) / len(ring_lum)
+    # Prefer visible water surround (not much darker than core)
+    surround_brighter = 1.0 if ring_L + 0.02 >= core_mean * 0.85 else 0.55
 
     # Typical toilet-water oil film: edge_mean ~0.04–0.14, hf ~0.02–0.08
     raw = 0.55 * min(1.0, edge_mean / 0.10) + 0.45 * min(1.0, hf_mean / 0.055)
@@ -508,7 +507,7 @@ def steatorrhea_score_v1(
     """Lightweight oily/pale stool teaching score from circle ROI (PIL only, no ML).
 
     Score = 0.35*specular + 0.20*water_texture + 0.30*pale_lab + 0.15*float_split
-    Trigger when Score >= 0.50 (v1 threshold).
+    Trigger when Score >= 0.48 (v1 threshold).
     """
     specular = _specular_oil_metrics(image)
     water = _water_oil_texture_metrics(image)
@@ -540,7 +539,7 @@ def steatorrhea_score_v1(
         },
         "formula": (
             "Score = 0.35*specular + 0.20*water_texture + 0.30*pale_lab_match "
-            "+ 0.15*float_split; trigger ≥ 0.50"
+            "+ 0.15*float_split; trigger ≥ 0.48"
         ),
     }
 
@@ -911,12 +910,17 @@ def analyze_stool_image(
     L, a, b, lab_meta = _lab_from_roi(work)
     hit = classify_stool_lab(L, a, b)
     steat = steatorrhea_score_v1(work, L, a, b)
-    # Multi-cue oily override: only when color is normal / pale / soft yellow — keep danger classes intact
+    # Multi-cue oily override for pale/yellow-ish color classes only.
+    # black / red / green stay intact. clay_gray may flip only when oil specular is clear
+    # (teaching: chalky acholic vs fat-pale oily sheen).
     color_id = hit.get("id") or ""
-    if steat["triggered"] and color_id in {
-        "normal_yellow_brown",
-        "pale_oily",
-    }:
+    spec_score = float(
+        ((steat.get("components") or {}).get("specular") or {}).get("specular_score") or 0.0
+    )
+    overridable = color_id in {"normal_yellow_brown", "pale_oily"} or (
+        color_id == "clay_gray" and spec_score >= 0.25
+    )
+    if steat["triggered"] and overridable:
         if color_id != "pale_oily":
             hit = _stool_pale_oily_class(approx=True)
             hit["via"] = "steatorrhea_score_v1"
@@ -934,9 +938,7 @@ def analyze_stool_image(
             f"{hit['hint']}；飲食／藥物混淆：{hit['confounders']}（{TEACHING_TAG}）"
         )
     ]
-    if hit.get("id") == "pale_oily" or (
-        steat["triggered"] and color_id in {"normal_yellow_brown", "pale_oily"}
-    ):
+    if hit.get("id") == "pale_oily" or (steat["triggered"] and overridable):
         findings.append(
             f"帶油光教學（Steatorrhea Score v1≈{steat['score']:.2f}，門檻{steat['threshold']}）："
             f"{STEATORRHEA_TEACHING}"
