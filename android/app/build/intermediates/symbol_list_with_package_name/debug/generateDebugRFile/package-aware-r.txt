@@ -7,9 +7,12 @@ dimen title_text
 dimen trend_chart_height
 id acupointLink
 id allergiesGroup
+id allergiesHeading
 id anon
+id appSub
 id birthYear
 id bmiLive
+id bodyHeading
 id bodyImage
 id bodyMap
 id captchaAnswer
@@ -20,7 +23,9 @@ id cct4200
 id cct6500
 id cctGroup
 id circleGuide
+id circleNote
 id conditionsGroup
+id conditionsHeading
 id confounderFood
 id count
 id diagram
@@ -34,12 +39,14 @@ id genderMale
 id genderOther
 id guide
 id height
+id langLabel
 id langSelect
 id login
 id nickname
 id openPulse
 id password
 id preview
+id profileHeading
 id recipeBodyAdvice
 id recipeCountry
 id recipeDetail
@@ -60,6 +67,7 @@ id start
 id symptoms
 id tongueGuide
 id trendChart
+id trendHeading
 id websiteUrl
 id weight
 layout activity_main

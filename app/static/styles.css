@@ -43,6 +43,13 @@ body {
 .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
 h1 { margin: 0 0 8px; font-size: 28px; }
 .sub { color: var(--muted); margin-bottom: 20px; }
+.lang-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.lang-row label { margin: 0; }
+.js-ui-lang, #ui-lang, #ui-lang-app {
+  max-width: 220px;
+  font-size: 16px;
+  font-weight: 600;
+}
 .card {
   background: var(--card);
   border: 1px solid var(--line);

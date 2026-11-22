@@ -111,6 +111,7 @@ EXTRA_COLUMNS = [
     ("users", "allergies_json", "TEXT NULL"),
     ("users", "complexion_lab_json", "TEXT NULL"),
     ("users", "lighting_calib_json", "TEXT NULL"),
+    ("users", "preferred_lang", "VARCHAR(8) NULL"),
     ("health_records", "symptoms", "TEXT NULL"),
     ("health_records", "discomfort", "TEXT NULL"),
     ("health_records", "face_color", "VARCHAR(255) NULL"),

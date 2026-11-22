@@ -8,6 +8,7 @@ async function loadProfile() {
     return;
   }
   const user = data.user;
+  applyPreferredLangFromUser(user);
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("email").value = user.email || "";
   document.getElementById("nickname").value = user.nickname || "";
@@ -17,6 +18,7 @@ async function loadProfile() {
   document.getElementById("weight").value = user.weight ?? "";
   fillHealthFlags(document, user);
   if (typeof updateProfileBmi === "function") updateProfileBmi();
+  applyUiLangChrome();
 }
 
 document.getElementById("profile-form").addEventListener("submit", async (event) => {
@@ -31,10 +33,11 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
         gender: document.getElementById("gender").value,
         height: document.getElementById("height").value,
         weight: document.getElementById("weight").value,
+        preferred_lang: getUiLang(),
         ...selectedHealthFlags(document),
       }),
     });
-    profileMsg.textContent = "已儲存";
+    profileMsg.textContent = uiText("saved");
     profileMsg.className = "status ok";
     window.location.href = "/";
   } catch (err) {
@@ -49,6 +52,7 @@ const updateProfileBmi = bindBmiInputs(
   document.getElementById("bmi-live"),
 );
 
+bindUiLang();
 loadHealthFlagOptions()
   .then(() => fillHealthFlags(document, {}))
   .then(() => loadProfile())

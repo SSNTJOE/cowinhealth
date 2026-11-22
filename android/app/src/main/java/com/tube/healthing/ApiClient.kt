@@ -104,7 +104,8 @@ class ApiClient(
         height: String,
         weight: String,
         conditionsJson: String,
-        allergiesJson: String
+        allergiesJson: String,
+        preferredLang: String = "",
     ): JSONObject {
         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("conditions_json", conditionsJson)
@@ -114,10 +115,23 @@ class ApiClient(
         if (gender.isNotBlank()) builder.addFormDataPart("gender", gender)
         if (height.isNotBlank()) builder.addFormDataPart("height", height)
         if (weight.isNotBlank()) builder.addFormDataPart("weight", weight)
+        if (preferredLang.isNotBlank()) builder.addFormDataPart("preferred_lang", preferredLang)
         val req = Request.Builder().url("$baseUrl/api/profile").auth().post(builder.build()).build()
         client.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "儲存基本資料失敗"))
+            return json
+        }
+    }
+
+    fun updatePreferredLang(lang: String): JSONObject {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("preferred_lang", lang)
+            .build()
+        val req = Request.Builder().url("$baseUrl/api/profile").auth().post(body).build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "儲存語言偏好失敗"))
             return json
         }
     }

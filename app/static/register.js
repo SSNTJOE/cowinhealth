@@ -5,10 +5,10 @@ const captcha = bindCaptchaControls();
 async function checkMysql() {
   try {
     const data = await api("/api/health");
-    mysqlStatus.textContent = data.mysql ? "MySQL 連線成功" : "MySQL 回應異常";
+    mysqlStatus.textContent = data.mysql ? uiText("mysqlOk") : uiText("mysqlBad");
     mysqlStatus.className = data.mysql ? "status ok" : "status err";
   } catch (err) {
-    mysqlStatus.textContent = "MySQL 尚未連上：" + formatApiError(err);
+    mysqlStatus.textContent = uiText("mysqlOffline") + formatApiError(err);
     mysqlStatus.className = "status err";
   }
 }
@@ -20,7 +20,7 @@ document.getElementById("register-form").addEventListener("submit", async (event
   const password = document.getElementById("password").value;
   const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
   if (!validEmail || password.length < 6) {
-    authMsg.textContent = "請填寫 E-mail 和至少 6 字密碼";
+    authMsg.textContent = uiText("registerNeedFields");
     authMsg.className = "status err";
     return;
   }
@@ -33,7 +33,13 @@ document.getElementById("register-form").addEventListener("submit", async (event
         ...authCaptchaFields(),
       }),
     });
-    authMsg.textContent = "已建立匿名 ID：" + data.user_id;
+    try {
+      await api("/api/profile", {
+        method: "POST",
+        body: formBody({ preferred_lang: getUiLang() }),
+      });
+    } catch (_err) { /* profile may be incomplete; lang still local */ }
+    authMsg.textContent = uiText("registerOkPrefix") + data.user_id;
     authMsg.className = "status ok";
     sessionStorage.removeItem("daily-asked");
     window.location.href = "/profile";
@@ -44,4 +50,5 @@ document.getElementById("register-form").addEventListener("submit", async (event
   }
 });
 
+bindUiLang(() => checkMysql());
 checkMysql();

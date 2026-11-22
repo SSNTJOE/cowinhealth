@@ -1,82 +1,78 @@
 [
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxhdpi_ic_launcher_foreground.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxhdpi\\ic_launcher_foreground.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xhdpi/ic_launcher_foreground.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-anydpi-v26_ic_launcher_round.xml.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-anydpi-v26\\ic_launcher_round.xml"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxhdpi/ic_launcher_foreground.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-hdpi_ic_launcher_round.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-hdpi\\ic_launcher_round.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-hdpi/ic_launcher.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxxhdpi\\ic_launcher_foreground.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxhdpi/ic_launcher.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxhdpi_ic_launcher.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxhdpi\\ic_launcher.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xhdpi/ic_launcher.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-hdpi_ic_launcher.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-hdpi\\ic_launcher.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxhdpi/ic_launcher_round.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxhdpi_ic_launcher_round.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxhdpi\\ic_launcher_round.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-mdpi/ic_launcher.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\layout_activity_main.xml.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\layout\\activity_main.xml"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-mdpi_ic_launcher_foreground.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-mdpi/ic_launcher_foreground.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\layout_activity_pulse.xml.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\layout\\activity_pulse.xml"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-hdpi/ic_launcher_round.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xhdpi_ic_launcher_foreground.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xhdpi\\ic_launcher_foreground.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xhdpi/ic_launcher_round.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-mdpi_ic_launcher_foreground.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-mdpi\\ic_launcher_foreground.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxxhdpi/ic_launcher_foreground.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxxhdpi_ic_launcher_round.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxxhdpi\\ic_launcher_round.png"
-    },
-    {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xxxhdpi_ic_launcher.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xxxhdpi\\ic_launcher.png"
-    },
-    {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-hdpi_ic_launcher_foreground.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-hdpi\\ic_launcher_foreground.png"
-    },
-    {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-mdpi_ic_launcher_round.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-mdpi\\ic_launcher_round.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-anydpi-v26/ic_launcher.xml"
     },
     {
         "merged": "com.tube.healthing.app-debug-3:/layout_activity_main.xml.flat",
         "source": "com.tube.healthing.app-main-5:/layout/activity_main.xml"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xhdpi_ic_launcher.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xhdpi\\ic_launcher.png"
+        "merged": "com.tube.healthing.app-debug-3:/layout_activity_pulse.xml.flat",
+        "source": "com.tube.healthing.app-main-5:/layout/activity_pulse.xml"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-mdpi_ic_launcher.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-mdpi\\ic_launcher.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-anydpi-v26/ic_launcher_round.xml"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-xhdpi_ic_launcher_round.png.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-xhdpi\\ic_launcher_round.png"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-mdpi/ic_launcher_round.png"
     },
     {
-        "merged": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-debug-3:\\mipmap-anydpi-v26_ic_launcher.xml.flat",
-        "source": "C:\\Users\\Joe\\.gradle\\daemon\\9.6.0\\com.tube.healthing.app-main-5:\\mipmap-anydpi-v26\\ic_launcher.xml"
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-hdpi_ic_launcher_foreground.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-hdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.tube.healthing.app-debug-3:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.tube.healthing.app-main-5:/mipmap-xxxhdpi/ic_launcher_round.png"
     }
 ]

@@ -185,7 +185,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             runOnUiThread {
-                Toast.makeText(this, e.message ?: "驗證碼載入失敗", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, e.message ?: t("toastCaptchaFail"), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -205,7 +205,7 @@ class MainActivity : AppCompatActivity() {
             val answer = binding.captchaAnswer.text.toString().trim()
             val honeypot = binding.websiteUrl.text?.toString().orEmpty()
             if (captchaToken.isBlank() || answer.isBlank()) {
-                runOnUiThread { Toast.makeText(this, "請輸入驗證碼", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this, t("toastNeedCaptcha"), Toast.LENGTH_SHORT).show() }
                 return
             }
             api.login(
@@ -215,12 +215,13 @@ class MainActivity : AppCompatActivity() {
                 answer,
                 honeypot,
             )
+            runCatching { api.updatePreferredLang(currentLang()) }
             val me = api.me()
             val flags = flagsOrNull()
             runOnUiThread {
                 applyFlagOptions(flags)
                 applyUser(me.optJSONObject("user"), flags)
-                Toast.makeText(this, "已登入，資料來自 MySQL", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, t("toastLoggedIn"), Toast.LENGTH_SHORT).show()
                 refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
@@ -238,7 +239,7 @@ class MainActivity : AppCompatActivity() {
             val answer = binding.captchaAnswer.text.toString().trim()
             val honeypot = binding.websiteUrl.text?.toString().orEmpty()
             if (captchaToken.isBlank() || answer.isBlank()) {
-                runOnUiThread { Toast.makeText(this, "請輸入驗證碼", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { Toast.makeText(this, t("toastNeedCaptcha"), Toast.LENGTH_SHORT).show() }
                 return
             }
             val json = api.register(
@@ -248,6 +249,7 @@ class MainActivity : AppCompatActivity() {
                 answer,
                 honeypot,
             )
+            runCatching { api.updatePreferredLang(currentLang()) }
             val me = api.me()
             val flags = flagsOrNull()
             runOnUiThread {
@@ -256,7 +258,7 @@ class MainActivity : AppCompatActivity() {
                     me.optJSONObject("user") ?: JSONObject().put("user_id", json.optString("user_id")),
                     flags
                 )
-                Toast.makeText(this, "已在 MySQL 建立帳號，請補齊基本資料後儲存", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, t("toastRegistered"), Toast.LENGTH_LONG).show()
                 refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
@@ -289,7 +291,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyUser(user: JSONObject?, flags: JSONObject? = null) {
         if (user == null) return
-        binding.anon.text = "匿名 ID：" + user.optString("user_id")
+        val preferred = jsonText(user, "preferred_lang")
+        if (preferred in langCodes && preferred != currentLang()) {
+            prefs.edit().putString("ui_lang", preferred).apply()
+            val index = langCodes.indexOf(preferred).coerceAtLeast(0)
+            binding.langSelect.setSelection(index)
+        }
+        binding.anon.text = t("anonPrefix") + user.optString("user_id")
         binding.nickname.setText(jsonText(user, "nickname"))
         binding.birthYear.setText(jsonText(user, "birth_year"))
         binding.height.setText(jsonText(user, "height"))
@@ -300,6 +308,7 @@ class MainActivity : AppCompatActivity() {
             "other" -> binding.genderOther.isChecked = true
             else -> binding.genderGroup.clearCheck()
         }
+        applyLangChrome()
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
         val allergyOptions = HealthFlags.consolidateAllergyOptions(
             HealthFlags.jsonLabelsFrom(user, "allergy_options").ifEmpty {
@@ -471,7 +480,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             faceFile = file
                             runOnUiThread {
-                                Toast.makeText(this@MainActivity, "已拍臉／唇", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, t("toastFaceShot"), Toast.LENGTH_SHORT).show()
                             }
                         }
                         CameraFacing.TONGUE -> {
@@ -481,7 +490,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             tongueFile = file
                             runOnUiThread {
-                                Toast.makeText(this@MainActivity, "已拍舌頭", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, t("toastTongueShot"), Toast.LENGTH_SHORT).show()
                             }
                         }
                         CameraFacing.STOOL, CameraFacing.URINE -> {
@@ -509,13 +518,22 @@ class MainActivity : AppCompatActivity() {
     ) {
         try {
             rememberServer()
-            api.updateProfile(nickname, birthYear, gender, height, weight, conditionsJson, allergiesJson)
+            api.updateProfile(
+                nickname,
+                birthYear,
+                gender,
+                height,
+                weight,
+                conditionsJson,
+                allergiesJson,
+                preferredLang = currentLang(),
+            )
             val me = api.me()
             val flags = flagsOrNull()
             runOnUiThread {
                 applyFlagOptions(flags)
                 applyUser(me.optJSONObject("user"), flags)
-                Toast.makeText(this, "已寫入 MySQL，網站與 App 會看到同一份資料", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, t("toastSavedProfile"), Toast.LENGTH_SHORT).show()
                 refreshRecipeChoices(keepSelection = true)
             }
         } catch (e: Exception) {
@@ -563,7 +581,7 @@ class MainActivity : AppCompatActivity() {
         try {
             rememberServer()
             runOnUiThread {
-                Toast.makeText(this, "傳送文字判斷中…", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, t("toastCircleBusy"), Toast.LENGTH_SHORT).show()
             }
             val json = api.submit(
                 symptoms = binding.symptoms.text.toString(),
@@ -586,7 +604,7 @@ class MainActivity : AppCompatActivity() {
                 bindAdvice(json)
                 refreshTrend()
                 refreshRecipeChoices(keepSelection = true)
-                Toast.makeText(this, "已寫入 MySQL（文字判斷，未存照片）", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, t("toastCircleSaved"), Toast.LENGTH_SHORT).show()
                 binding.bodyImage.post {
                     Thread {
                         applyBodyOverlays(
@@ -702,6 +720,8 @@ class MainActivity : AppCompatActivity() {
         return if (stored in langCodes) stored else "zh"
     }
 
+    private fun t(key: String): String = UiLang.t(currentLang(), key)
+
     private fun t(zh: String, en: String, ja: String, ko: String): String {
         return when (currentLang()) {
             "en" -> en
@@ -712,22 +732,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyLangChrome() {
-        binding.recipeHeading.text = t(
-            "今日食譜（教學示範）",
-            "Today’s recipes (teaching demo)",
-            "本日のレシピ（教材デモ）",
-            "오늘의 레시피（교육 시연）"
-        )
-        binding.recipeNote.text = t(
-            "國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。",
-            "Countries listed still have a usable recipe. With “依身體狀況建議” off, only allergens are excluded. With it on, today’s reading also filters contraindications.",
-            "表示する国は、絞り込み後にレシピが残っている国だけです。「依身體狀況建議」を選んでいないときはアレルゲンだけを除きます。選んだときだけ、今日の検出で禁忌を除きます。",
-            "나라는 걸러낸 뒤 레시피가 남은 곳만 나옵니다. 「依身體狀況建議」를 끄면 알레르기만 제외하고, 켰을 때만 오늘 검사로 금기를 제외합니다."
-        )
-        binding.recipeBodyAdvice.textOn = "依身體狀況建議"
-        binding.recipeBodyAdvice.textOff = "依身體狀況建議"
-        binding.recipeCountry.hint = t("輸入國家開頭", "Type a country prefix", "国名の先頭を入力", "국가 앞글자 입력")
-        binding.recipePick.hint = t("點開列出食譜，或輸入縮小", "Open to list recipes, or type to narrow", "開くと一覧、入力で絞り込み", "열면 목록, 입력하면 좁힘")
+        val lang = currentLang()
+        binding.appSub.text = t("appSub")
+        binding.langLabel.text = t("langLabel")
+        binding.server.hint = t("serverHint")
+        binding.password.hint = t("password")
+        binding.captchaImage.contentDescription = t("captcha")
+        binding.captchaRefresh.text = t("captchaRefresh")
+        binding.captchaAnswer.hint = t("captcha")
+        binding.login.text = t("login")
+        binding.register.text = t("register")
+        if (!binding.anon.text.toString().startsWith(t("anonPrefix")) &&
+            binding.anon.text.toString().let { it == "尚未登入" || it == "Not signed in" || it == "未ログイン" || it == "로그인 안 됨" || it.isBlank() }
+        ) {
+            binding.anon.text = t("notLoggedIn")
+        } else {
+            val id = binding.anon.text.toString().substringAfter("：").substringAfter(": ").trim()
+            if (id.isNotBlank() && id != t("notLoggedIn")) {
+                binding.anon.text = t("anonPrefix") + id
+            }
+        }
+        binding.profileHeading.text = t("profileHeading")
+        binding.nickname.hint = t("nickname")
+        binding.birthYear.hint = t("birthYear")
+        binding.genderFemale.text = t("female")
+        binding.genderMale.text = t("male")
+        binding.genderOther.text = t("other")
+        binding.height.hint = t("height")
+        binding.weight.hint = t("weight")
+        binding.conditionsHeading.text = t("conditions")
+        binding.allergiesHeading.text = t("allergies")
+        binding.saveProfile.text = t("saveProfile")
+        binding.symptoms.hint = t("symptoms")
+        binding.discomfort.hint = t("discomfort")
+        binding.cct2700.text = t("cct2700")
+        binding.cct4200.text = t("cct4200")
+        binding.cct6500.text = t("cct6500")
+        binding.shotFace.text = t("shotFace")
+        binding.shotTongue.text = t("shotTongue")
+        binding.shotStool.text = t("shotStool")
+        binding.shotUrine.text = t("shotUrine")
+        binding.circleNote.text = t("circleNote")
+        binding.confounderFood.text = t("confounder")
+        binding.openPulse.text = t("openPulse")
+        binding.save.text = t("save")
+        binding.trendHeading.text = t("trendHeading")
+        binding.bodyHeading.text = t("bodyHeading")
+        binding.recipeHeading.text = t("recipeHeading")
+        binding.recipeNote.text = t("recipeNote")
+        val advice = t("recipeBodyAdvice")
+        binding.recipeBodyAdvice.textOn = advice
+        binding.recipeBodyAdvice.textOff = advice
+        binding.recipeCountry.hint = t("countryHint")
+        binding.recipePick.hint = t("recipeHint")
+        binding.recipeEnsure.text = t("recipeEnsure")
+        // silence unused warning for lang in case of future locale config
+        @Suppress("UNUSED_EXPRESSION")
+        lang
     }
 
     private fun setupLanguageSpinner() {
@@ -744,8 +805,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 prefs.edit().putString("ui_lang", code).apply()
                 applyLangChrome()
+                Thread {
+                    runCatching { api.updatePreferredLang(code) }
+                }.start()
                 val country = selectedCountry()
                 if (country.isNotBlank()) requestRecipes(country, keepSelection = true)
+                else refreshRecipeChoices(keepSelection = true)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }

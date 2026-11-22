@@ -6,9 +6,12 @@ int dimen title_text 0x0
 int dimen trend_chart_height 0x0
 int id acupointLink 0x0
 int id allergiesGroup 0x0
+int id allergiesHeading 0x0
 int id anon 0x0
+int id appSub 0x0
 int id birthYear 0x0
 int id bmiLive 0x0
+int id bodyHeading 0x0
 int id bodyImage 0x0
 int id bodyMap 0x0
 int id captchaAnswer 0x0
@@ -19,7 +22,9 @@ int id cct4200 0x0
 int id cct6500 0x0
 int id cctGroup 0x0
 int id circleGuide 0x0
+int id circleNote 0x0
 int id conditionsGroup 0x0
+int id conditionsHeading 0x0
 int id confounderFood 0x0
 int id count 0x0
 int id diagram 0x0
@@ -33,12 +38,14 @@ int id genderMale 0x0
 int id genderOther 0x0
 int id guide 0x0
 int id height 0x0
+int id langLabel 0x0
 int id langSelect 0x0
 int id login 0x0
 int id nickname 0x0
 int id openPulse 0x0
 int id password 0x0
 int id preview 0x0
+int id profileHeading 0x0
 int id recipeBodyAdvice 0x0
 int id recipeCountry 0x0
 int id recipeDetail 0x0
@@ -59,6 +66,7 @@ int id start 0x0
 int id symptoms 0x0
 int id tongueGuide 0x0
 int id trendChart 0x0
+int id trendHeading 0x0
 int id websiteUrl 0x0
 int id weight 0x0
 int layout activity_main 0x0

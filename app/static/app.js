@@ -154,11 +154,11 @@ async function checkMysql() {
       cat.catalog_deviations != null ? `檢測差異 ${cat.catalog_deviations}` : null,
     ].filter(Boolean);
     mysqlStatus.textContent = data.mysql
-      ? "MySQL 連線成功" + (parts.length ? `（${parts.join("／")}）` : "")
-      : "MySQL 回應異常";
+      ? uiText("mysqlOk") + (parts.length ? `（${parts.join("／")}）` : "")
+      : uiText("mysqlBad");
     mysqlStatus.className = data.mysql ? "status ok" : "status err";
   } catch (err) {
-    mysqlStatus.textContent = "MySQL 尚未連上：" + formatApiError(err);
+    mysqlStatus.textContent = uiText("mysqlOffline") + formatApiError(err);
     mysqlStatus.className = "status err";
   }
 }
@@ -211,6 +211,7 @@ async function loadMe() {
   if (!data.logged_in) {
     authCard.classList.remove("hidden");
     appCard.classList.add("hidden");
+    applyUiLangChrome();
     return;
   }
   if (!data.profile_complete) {
@@ -219,6 +220,7 @@ async function loadMe() {
   }
   authCard.classList.add("hidden");
   appCard.classList.remove("hidden");
+  applyPreferredLangFromUser(data.user);
   fillProfile(data.user);
   applyUiLangChrome();
   bindRecipePickers();
@@ -2321,6 +2323,12 @@ document.getElementById("auth-form").addEventListener("submit", async (e) => {
         ...authCaptchaFields(),
       }),
     });
+    try {
+      await api("/api/profile", {
+        method: "POST",
+        body: formBody({ preferred_lang: getUiLang() }),
+      });
+    } catch (_err) { /* ignore if profile incomplete */ }
     sessionStorage.removeItem("daily-asked");
     if (data.profile_complete === false) {
       window.location.href = "/profile";
@@ -2455,24 +2463,16 @@ const updateHomeBmi = bindBmiInputs(
   document.getElementById("bmi-live"),
 );
 
-function bindUiLang() {
-  const select = document.getElementById("ui-lang");
-  if (!select || select.dataset.bound) return;
-  select.dataset.bound = "1";
-  select.addEventListener("change", () => {
-    setUiLang(select.value);
-    applyUiLangChrome();
+bindUiLang(() => {
+  if (appCard && !appCard.classList.contains("hidden")) {
     reloadRecipesForLanguage().catch((err) => {
       const detail = document.getElementById("recipe-detail");
       if (detail) detail.textContent = formatApiError(err);
     });
     if (mealDayData) renderMealDay();
     if (mealMonthData) renderMealCalendarGrid();
-  });
-}
-
-applyUiLangChrome();
-bindUiLang();
+  }
+});
 
 checkMysql()
   .then(() => loadHealthFlagOptions())

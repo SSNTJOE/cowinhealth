@@ -228,6 +228,7 @@ def serialize_user(user: dict, include_email: bool = False) -> dict:
         "conditions": user_conditions(user),
         "allergies": user_allergies(user),
         "allergy_options": list(allergy_options()),
+        "preferred_lang": (user.get("preferred_lang") or "").strip().lower() or None,
         "profile_complete": is_profile_complete(user),
     }
     if include_email:
@@ -277,7 +278,7 @@ def fetch_user(user_id: str) -> dict | None:
                 """
                 SELECT user_id, email, nickname, birth_year, height, weight, age, gender,
                        medical_history, conditions_json, allergies_json, complexion_lab_json,
-                       lighting_calib_json
+                       lighting_calib_json, preferred_lang
                 FROM users WHERE user_id = %s
                 """,
                 (user_id,),
@@ -1088,6 +1089,21 @@ def me(request: Request, include_email: bool = False):
     }
 
 
+def normalize_preferred_lang(value: str | None) -> str | None:
+    raw = str(value or "").strip().lower()
+    if raw in {"zh", "en", "ja", "ko"}:
+        return raw
+    if raw in {"zh-hant", "zh-tw", "zh-cn", "chinese"}:
+        return "zh"
+    if raw in {"english"}:
+        return "en"
+    if raw in {"jp", "japanese"}:
+        return "ja"
+    if raw in {"kr", "korean"}:
+        return "ko"
+    return None
+
+
 @app.post("/api/profile")
 def update_profile(
     request: Request,
@@ -1099,6 +1115,7 @@ def update_profile(
     medical_history: str | None = Form(default=None),
     conditions_json: str | None = Form(default=None),
     allergies_json: str | None = Form(default=None),
+    preferred_lang: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     current = fetch_user(user_id)
@@ -1115,6 +1132,12 @@ def update_profile(
     next_age = age_from_birth_year(next_birth) if next_birth else current.get("age")
     next_height = height if height is not None else current.get("height")
     next_weight = weight if weight is not None else current.get("weight")
+    if preferred_lang is not None and str(preferred_lang).strip():
+        next_lang = normalize_preferred_lang(preferred_lang)
+        if next_lang is None:
+            raise HTTPException(status_code=400, detail="preferred_lang 必須是 zh/en/ja/ko")
+    else:
+        next_lang = normalize_preferred_lang(current.get("preferred_lang")) or current.get("preferred_lang")
     if conditions_json is not None:
         next_conditions = parse_label_list(
             conditions_json, CONDITION_SET, CONDITION_OPTIONS, "conditions_json"
@@ -1146,7 +1169,7 @@ def update_profile(
                 UPDATE users
                 SET nickname = %s, birth_year = %s, height = %s, weight = %s,
                     age = %s, gender = %s, medical_history = %s,
-                    conditions_json = %s, allergies_json = %s
+                    conditions_json = %s, allergies_json = %s, preferred_lang = %s
                 WHERE user_id = %s
                 """,
                 (
@@ -1159,6 +1182,7 @@ def update_profile(
                     next_history,
                     dumps_labels(next_conditions),
                     dumps_labels(next_allergies),
+                    next_lang,
                     user_id,
                 ),
             )
