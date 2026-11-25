@@ -1,16 +1,151 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
-    android:padding="16dp"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <TextView android:id="@+id/guide" android:textSize="16sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <ImageView android:id="@+id/diagram" android:layout_width="match_parent" android:layout_height="96dp" android:contentDescription="寸關尺：腕橫紋上寸、關、尺，後置鏡頭貼膚"/>
-    <androidx.camera.view.PreviewView
-        android:id="@+id/preview"
+    android:layout_height="match_parent"
+    android:background="#121212">
+
+    <!-- Top pure-green fill-light for front-camera fingertip PPG -->
+    <View
+        android:id="@+id/greenFillLight"
+        android:layout_width="match_parent"
+        android:layout_height="140dp"
+        android:background="#00FF00"/>
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:padding="12dp"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"/>
-    <TextView android:id="@+id/count" android:text="0 次" android:textSize="28sp" android:gravity="center" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-    <Button android:id="@+id/start" android:text="開始 15 秒（先輕按，再重按）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/guide"
+            android:textSize="15sp"
+            android:textColor="#EEEEEE"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
+        <!-- Placement guides: finger-on-front-cam + 寸關尺 Hand.png demos -->
+        <LinearLayout
+            android:id="@+id/guideImages"
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:visibility="visible">
+
+            <ImageView
+                android:id="@+id/guideFinger"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="前置鏡頭指腹蓋法"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ppg_finger_guide"
+                android:background="#1A1A1A"/>
+
+            <ImageView
+                android:id="@+id/guideHand"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="寸關尺手勢導引"
+                android:scaleType="fitCenter"
+                android:src="@drawable/pulse_hand"
+                android:background="#1A1A1A"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/guideCaption"
+            android:text="左：指腹同時蓋住上方綠光區與前置鏡頭｜右：寸關尺參考"
+            android:textSize="12sp"
+            android:textColor="#9E9E9E"
+            android:gravity="center"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"/>
+
+        <FrameLayout
+            android:id="@+id/previewFrame"
+            android:layout_width="180dp"
+            android:layout_height="180dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp">
+
+            <androidx.camera.view.PreviewView
+                android:id="@+id/preview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"/>
+
+            <com.tube.healthing.PpgRingView
+                android:id="@+id/ring"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"/>
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/bpm"
+            android:text="— BPM"
+            android:textSize="36sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:gravity="center"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/status"
+            android:text="等待開始"
+            android:textSize="14sp"
+            android:textColor="#BDBDBD"
+            android:gravity="center"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"/>
+
+        <com.tube.healthing.PpgWaveformView
+            android:id="@+id/waveform"
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginBottom="8dp"
+            android:background="#1E1E1E"/>
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <Button
+                android:id="@+id/start"
+                android:text="開始偵測"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/remeasure"
+                android:text="重測"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:enabled="false"/>
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/done"
+            android:text="完成並回傳"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:enabled="false"/>
+    </LinearLayout>
 </LinearLayout>

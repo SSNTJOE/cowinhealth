@@ -3,67 +3,86 @@ package com.tube.healthing
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Outline
 import android.os.Bundle
-import android.os.CountDownTimer
+import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.Camera
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
 import com.tube.healthing.databinding.ActivityPulseBinding
-import org.json.JSONObject
-import java.util.concurrent.Executors
-import kotlin.math.abs
 
-class PulseActivity : AppCompatActivity() {
+/**
+ * Front-camera green fill-light PPG pulse entry (Canvas UI).
+ * Wired from MainActivity「寸關尺／脈搏」. Does not replace login MainActivity.
+ */
+class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener {
     private lateinit var binding: ActivityPulseBinding
-    private val executor = Executors.newSingleThreadExecutor()
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var camera: Camera? = null
-    private val results = JSONObject()
-    private var beats = 0
-    private var lastLuma = 0.0
-    private var lastBeatAt = 0L
-    private var measuring = false
-    private var step = 0
+    private var monitor: FrontCameraHeartRateMonitor? = null
+    private var lastBpm: Int? = null
+    private var lastBeats15: Int? = null
+    private var savedBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
 
     private val permission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startCamera() else {
-            Toast.makeText(this, "脈診需要相機權限（後置鏡頭）", Toast.LENGTH_LONG).show()
+        if (granted) {
+            applyMaxBrightness()
+            ensureMonitor().start()
+        } else {
+            Toast.makeText(this, "脈診需要相機權限（前置鏡頭）", Toast.LENGTH_LONG).show()
             finish()
         }
     }
-
-    private val steps = listOf(
-        Triple("left_cun_light", "左手寸、輕按（小腸）", "請把後置鏡頭與 LED 貼在左手寸部，先輕放。"),
-        Triple("left_cun_heavy", "左手寸、重按（心）", "同一位置稍微用力下壓。"),
-        Triple("left_guan_light", "左手關、輕按（膽）", "移到左手關部，先輕放。"),
-        Triple("left_guan_heavy", "左手關、重按（肝）", "關部加重。"),
-        Triple("left_chi_light", "左手尺、輕按（膀胱）", "左手尺部輕放。"),
-        Triple("left_chi_heavy", "左手尺、重按（腎）", "尺部加重。"),
-        Triple("right_cun_light", "右手寸、輕按（大腸）", "換成右手寸部輕放。"),
-        Triple("right_cun_heavy", "右手寸、重按（肺）", "右手寸部加重。"),
-        Triple("right_guan_light", "右手關、輕按（胃）", "右手關部輕放。"),
-        Triple("right_guan_heavy", "右手關、重按（脾）", "右手關部加重。"),
-        Triple("right_chi_light", "右手尺、輕按（三焦）", "右手尺部輕放。"),
-        Triple("right_chi_heavy", "右手尺、重按（心包）", "右手尺部加重。"),
-    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityPulseBinding.inflate(layoutInflater)
         setContentView(binding.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        showStep()
-        binding.start.setOnClickListener { startMeasure() }
+        applyMaxBrightness()
+
+        binding.guide.text =
+            "前置鏡頭綠光補光 PPG\n" +
+                "請用指腹同時蓋住上方前置鏡頭與純綠補光區（不開手電筒）。\n" +
+                "螢幕亮度已調至最大；等待 → 自動量測 15 秒 → 完成（中位 BPM）。\n" +
+                "15 秒次數＝BPM×15/60；>23 偏熱實，<14 偏寒虛。（教學示範，非診斷）"
+
+        // Show placement guides while waiting / measuring (寸關尺 demos + finger PPG).
+        showGuideImages(true)
+        binding.guideHand.setOnClickListener { cycleHandGuide() }
+
+        binding.previewFrame.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
+        }
+        binding.previewFrame.clipToOutline = true
+
+        binding.start.setOnClickListener {
+            lastBpm = null
+            lastBeats15 = null
+            binding.bpm.text = "— BPM"
+            binding.done.isEnabled = false
+            binding.waveform.clear()
+            binding.ring.setProgress(0f)
+            applyMaxBrightness()
+            ensureMonitor().remeasure()
+        }
+        binding.remeasure.setOnClickListener {
+            lastBpm = null
+            lastBeats15 = null
+            binding.bpm.text = "— BPM"
+            binding.done.isEnabled = false
+            binding.waveform.clear()
+            binding.ring.setProgress(0f)
+            applyMaxBrightness()
+            ensureMonitor().remeasure()
+        }
+        binding.done.setOnClickListener { finishWithResult() }
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -73,134 +92,156 @@ class PulseActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyMaxBrightness()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED
         ) {
-            startCamera()
+            val m = ensureMonitor()
+            if (m.lastState !is FrontCameraHeartRateMonitor.MeasurementState.Completed) {
+                m.start()
+            }
         }
     }
 
     override fun onPause() {
-        try {
-            camera?.cameraControl?.enableTorch(false)
-        } catch (_: Exception) {
-        }
-        cameraProvider?.unbindAll()
-        camera = null
+        monitor?.pause()
         super.onPause()
     }
 
-    private fun showStep() {
-        val item = steps[step]
-        binding.guide.text = "步驟 ${step + 1}/12\n${item.second}\n${item.third}\n" +
-            "只用後置鏡頭（不要用自拍鏡）。有閃光會打開，像指尖 PPG 一樣把鏡頭與燈蓋住。" +
-            "把後置鏡頭貼在該側手腕的寸、關或尺上。15 秒超過 23 次為熱/實，少於 14 次為寒/虛。"
-        binding.count.text = "0 次"
-    }
-
-    private fun startCamera() {
-        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@addListener
-            binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            try {
-                val provider = future.get()
-                cameraProvider = provider
-                var bound: Camera? = null
-                for (size in CameraBind.trySizes()) {
-                    val rs = CameraBind.resolution(size)
-                    val preview = Preview.Builder()
-                        .setResolutionSelector(rs)
-                        .build()
-                        .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
-                    val analysis = ImageAnalysis.Builder()
-                        .setResolutionSelector(rs)
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                        .build()
-                    analysis.setAnalyzer(executor) { image ->
-                        try {
-                            if (measuring) {
-                                val plane = image.planes[0]
-                                val buffer = plane.buffer
-                                val data = ByteArray(buffer.remaining())
-                                buffer.get(data)
-                                var sum = 0L
-                                for (b in data) sum += (b.toInt() and 0xFF)
-                                val luma = sum.toDouble() / data.size.coerceAtLeast(1)
-                                val now = System.currentTimeMillis()
-                                if (abs(luma - lastLuma) > 4 && now - lastBeatAt > 280) {
-                                    beats += 1
-                                    lastBeatAt = now
-                                    runOnUiThread { binding.count.text = "$beats 次" }
-                                }
-                                lastLuma = luma
-                            }
-                        } finally {
-                            image.close()
-                        }
-                    }
-                    bound = CameraBind.bindRearOnly(this, provider, preview, analysis)
-                    if (bound != null) break
-                }
-                camera = bound
-                if (bound == null) {
-                    Toast.makeText(
-                        this,
-                        "打不開後置鏡頭。模擬器請把 Back camera 設成 VirtualScene；實機請確認不是自拍鏡頭。",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    enableTorch(bound)
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this, e.message ?: "無法開啟後置鏡頭", Toast.LENGTH_LONG).show()
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun enableTorch(bound: Camera) {
-        if (!bound.cameraInfo.hasFlashUnit()) return
-        try {
-            bound.cameraControl.enableTorch(true)
-        } catch (_: Exception) {
-        }
-    }
-
     override fun onDestroy() {
-        try {
-            camera?.cameraControl?.enableTorch(false)
-        } catch (_: Exception) {
-        }
-        executor.shutdown()
+        monitor?.stop()
+        monitor = null
+        restoreBrightness()
         super.onDestroy()
     }
 
-    private fun startMeasure() {
-        if (measuring) return
-        camera?.let { enableTorch(it) }
-        beats = 0
-        measuring = true
-        binding.start.isEnabled = false
-        object : CountDownTimer(15_000, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                binding.start.text = "量測中… ${(millisUntilFinished / 1000)} 秒"
+    private fun applyMaxBrightness() {
+        val lp = window.attributes
+        if (savedBrightness == WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE ||
+            savedBrightness < 0f
+        ) {
+            // Keep first non-max value so we can restore later.
+            if (lp.screenBrightness in 0f..0.99f) {
+                savedBrightness = lp.screenBrightness
             }
-            override fun onFinish() {
-                measuring = false
-                results.put(steps[step].first, beats)
-                Toast.makeText(this@PulseActivity, "本段 $beats 次", Toast.LENGTH_SHORT).show()
-                step += 1
-                if (step >= steps.size) {
-                    setResult(RESULT_OK, Intent().putExtra("pulse_json", results.toString()))
-                    finish()
-                } else {
-                    binding.start.isEnabled = true
-                    binding.start.text = "開始 15 秒"
-                    showStep()
+        }
+        lp.screenBrightness = 1f
+        window.attributes = lp
+    }
+
+    private fun restoreBrightness() {
+        val lp = window.attributes
+        lp.screenBrightness = if (savedBrightness >= 0f) {
+            savedBrightness
+        } else {
+            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        }
+        window.attributes = lp
+    }
+
+    private fun ensureMonitor(): FrontCameraHeartRateMonitor {
+        val existing = monitor
+        if (existing != null) return existing
+        val created = FrontCameraHeartRateMonitor(this, this, binding.preview, this)
+        monitor = created
+        return created
+    }
+
+    private fun finishWithResult() {
+        val bpm = lastBpm
+        val beats = lastBeats15
+        if (bpm == null || beats == null) {
+            Toast.makeText(this, "尚無有效 BPM，請先完成量測", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val json = FrontCameraHeartRateMonitor.pulseJsonFromBpm(bpm, beats)
+        setResult(RESULT_OK, Intent().putExtra("pulse_json", json.toString()))
+        finish()
+    }
+
+    private val handGuideRes = intArrayOf(
+        R.drawable.pulse_hand,
+        R.drawable.pulse_left_cun,
+        R.drawable.pulse_left_guan,
+        R.drawable.pulse_left_chi,
+        R.drawable.pulse_right_cun,
+        R.drawable.pulse_right_guan,
+        R.drawable.pulse_right_chi,
+    )
+    private var handGuideIndex = 0
+
+    private fun showGuideImages(visible: Boolean) {
+        val v = if (visible) View.VISIBLE else View.GONE
+        binding.guideImages.visibility = v
+        binding.guideCaption.visibility = v
+        if (visible) {
+            binding.guideFinger.setImageResource(R.drawable.ppg_finger_guide)
+            binding.guideHand.setImageResource(handGuideRes[handGuideIndex])
+        }
+    }
+
+    private fun cycleHandGuide() {
+        handGuideIndex = (handGuideIndex + 1) % handGuideRes.size
+        binding.guideHand.setImageResource(handGuideRes[handGuideIndex])
+    }
+
+    override fun onState(state: FrontCameraHeartRateMonitor.MeasurementState) {
+        when (state) {
+            is FrontCameraHeartRateMonitor.MeasurementState.WaitingForFinger -> {
+                showGuideImages(true)
+                binding.status.text = state.hint
+                binding.start.isEnabled = true
+                binding.start.text = "開始偵測"
+                binding.remeasure.isEnabled = true
+                binding.done.isEnabled = lastBpm != null
+            }
+            is FrontCameraHeartRateMonitor.MeasurementState.Measuring -> {
+                showGuideImages(true)
+                binding.status.text =
+                    if (state.currentBpm > 0) {
+                        "量測中… ${state.remainingSeconds} 秒（約 ${state.currentBpm} BPM）"
+                    } else {
+                        "量測中… ${state.remainingSeconds} 秒"
+                    }
+                binding.ring.setProgress(state.progress)
+                binding.start.isEnabled = false
+                binding.start.text = "量測中… ${state.remainingSeconds} 秒"
+                binding.remeasure.isEnabled = false
+                binding.done.isEnabled = false
+                if (state.currentBpm > 0) {
+                    binding.bpm.text = "${state.currentBpm} BPM"
                 }
             }
-        }.start()
+            is FrontCameraHeartRateMonitor.MeasurementState.Completed -> {
+                showGuideImages(false)
+                binding.status.text = "完成"
+                binding.start.isEnabled = false
+                binding.remeasure.isEnabled = true
+                binding.done.isEnabled = lastBpm != null
+                binding.ring.setProgress(1f)
+            }
+        }
+    }
+
+    override fun onWaveUpdated(value: Float) {
+        // Normalize loosely for waveform display (bandpass centered near 0).
+        val norm = ((value / 8f) + 0.5f).coerceIn(0f, 1f)
+        binding.waveform.push(norm)
+    }
+
+    override fun onCompleted(medianBpm: Int, beats15s: Int) {
+        lastBpm = medianBpm
+        lastBeats15 = beats15s
+        binding.bpm.text = "$medianBpm BPM"
+        binding.status.text = "完成：中位 $medianBpm BPM（15 秒約 $beats15s 次）"
+        binding.done.isEnabled = true
+        binding.remeasure.isEnabled = true
+        Toast.makeText(this, "脈搏 $medianBpm BPM", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        binding.start.isEnabled = true
+        binding.remeasure.isEnabled = true
     }
 }
