@@ -1016,36 +1016,46 @@ function renderResult(result) {
   document.getElementById("advice").textContent = advice ? "食療整理：" + advice : "";
   const links = document.getElementById("links");
   links.innerHTML = "";
-  const dietArticle = result.diet_url || "";
-  const dietVideo = result.diet_video_url || (() => {
+  const dietArticleQ = (result.diet_query || "").trim() || (() => {
     try {
-      if (!dietArticle) return "";
-      const u = new URL(dietArticle, window.location.origin);
-      const q = u.searchParams.get("q");
-      if (!q) return "";
-      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+      const u = new URL(result.diet_url || "", window.location.origin);
+      return (u.searchParams.get("q") || "").trim();
     } catch (_err) {
       return "";
     }
   })();
+  const dietVideoQ = (result.diet_video_query || "").trim() || (
+    dietArticleQ ? `食譜 影片 ${dietArticleQ}` : ""
+  );
+  const dietArticle = result.diet_url || (dietArticleQ
+    ? `https://www.google.com/search?q=${encodeURIComponent(dietArticleQ)}`
+    : "");
+  const dietVideo = result.diet_video_url || (dietVideoQ
+    ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(dietVideoQ)}`
+    : "");
   if (dietArticle) {
     links.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
   }
   if (dietVideo) {
     links.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
   }
-  const acuImages = result.acupoint_url || "";
-  const acuVideo = result.acupoint_video_url || (() => {
+  const acuImageQ = (result.acupoint_query || "").trim() || (() => {
     try {
-      if (!acuImages) return "";
-      const u = new URL(acuImages, window.location.origin);
-      const q = u.searchParams.get("q");
-      if (!q) return "";
-      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+      const u = new URL(result.acupoint_url || "", window.location.origin);
+      return (u.searchParams.get("q") || "").trim();
     } catch (_err) {
       return "";
     }
   })();
+  const acuVideoQ = (result.acupoint_video_query || "").trim() || (
+    acuImageQ ? `穴道 影片 ${acuImageQ.replace(/^穴道\s+圖片\s+/, "")}` : ""
+  );
+  const acuImages = result.acupoint_url || (acuImageQ
+    ? `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(acuImageQ)}`
+    : "");
+  const acuVideo = result.acupoint_video_url || (acuVideoQ
+    ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(acuVideoQ)}`
+    : "");
   if (acuImages) {
     links.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
   }
@@ -1215,6 +1225,17 @@ function formatRecipeNutrients(nutrients) {
 }
 
 let recipeEnsureSeq = 0;
+let recipeListSeq = 0;
+let recipeEnsureBusy = false;
+let recipeEnsureFollowUp = null;
+
+function isRecipeStatusMessage(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return value === uiText("recipeSearching")
+    || value === uiText("recipeEnsuring")
+    || value === uiText("recipeEnsureFailed");
+}
 
 function showSelectedRecipe(extraNote) {
   const pick = document.getElementById("recipe-name");
@@ -1226,7 +1247,9 @@ function showSelectedRecipe(extraNote) {
     || findRecipeByTypedName(label);
   if (!row) {
     selectedRecipeId = null;
+    // Never keep another dish's ingredients/method under a different typed name.
     if (!label) detail.textContent = "";
+    else if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) detail.textContent = "";
     return;
   }
   selectedRecipeId = row.id;
@@ -1256,16 +1279,24 @@ function showRecipeSearchStatus(typed) {
   if (!detail) return;
   const plain = recipeNamePlain(typed);
   if (!plain) {
-    if (!selectedRecipeId) detail.textContent = "";
+    selectedRecipeId = null;
+    if (!recipeEnsureBusy) detail.textContent = "";
     return;
   }
   if (findRecipeByTypedName(typed)) {
     showSelectedRecipe();
     return;
   }
+  if (recipeEnsureBusy) {
+    detail.textContent = uiText("recipeEnsuring");
+    return;
+  }
   if (!recipeHasSubstringMatch(typed)) {
     detail.textContent = uiText("recipeSearching");
+    return;
   }
+  // Substring hits exist but exact dish not selected — drop stale detail from another dish.
+  if (!isRecipeStatusMessage(detail.textContent)) detail.textContent = "";
 }
 
 async function ensureRecipeFromInput(options) {
@@ -1302,13 +1333,17 @@ async function ensureRecipeFromInput(options) {
     return null;
   }
   const seq = ++recipeEnsureSeq;
+  recipeEnsureBusy = true;
   closeCombo(pick, list);
   pick.value = plain;
   detail.textContent = uiText("recipeEnsuring");
   try {
+    // Re-read country at request time so a late country fill is included.
+    let ensureCountry = countryInput.value.trim();
+    if (ensureCountry && !countryNames.includes(ensureCountry)) ensureCountry = "";
     const data = await api("/api/recipes/create", {
       method: "POST",
-      body: formBody({ country, name: plain, lang: getUiLang() }),
+      body: formBody({ country: ensureCountry, name: plain, lang: getUiLang() }),
     });
     if (seq !== recipeEnsureSeq) return null;
     const created = data && data.recipe;
@@ -1316,7 +1351,7 @@ async function ensureRecipeFromInput(options) {
     if (created) applyRecipeCountry(created);
     const resolvedCountry = (created && created.country) || countryInput.value.trim();
     if (resolvedCountry && countryNames.includes(resolvedCountry)) {
-      await loadRecipesForCountry({ keepSelection: true });
+      await loadRecipesForCountry({ keepSelection: true, preserveTyped: plain });
     } else if (created) {
       recipeRows = [created].concat(recipeRows.filter((item) => String(item.id) !== String(created.id)));
     }
@@ -1347,6 +1382,18 @@ async function ensureRecipeFromInput(options) {
     if (seq !== recipeEnsureSeq) return null;
     detail.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
     return null;
+  } finally {
+    if (seq === recipeEnsureSeq) {
+      recipeEnsureBusy = false;
+      const followUp = recipeEnsureFollowUp;
+      recipeEnsureFollowUp = null;
+      if (followUp && followUp.name) {
+        ensureRecipeFromInput(followUp).catch((err) => {
+          const box = document.getElementById("recipe-detail");
+          if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+        });
+      }
+    }
   }
 }
 
@@ -1420,6 +1467,7 @@ async function loadRecipesByName(name, options) {
   const list = document.getElementById("recipe-name-list");
   if (!pick || !detail) return;
   const plain = recipeNamePlain(name || pick.value);
+  const seq = ++recipeListSeq;
   closeCombo(pick, list);
   if (!plain) {
     recipeRows = [];
@@ -1428,6 +1476,7 @@ async function loadRecipesByName(name, options) {
   const params = recipeFilterParams();
   params.set("name", plain);
   const data = await api("/api/recipes?" + params.toString());
+  if (seq !== recipeListSeq) return;
   recipeRows = data.recipes || [];
   if (keepId != null) {
     const row = recipeRows.find((item) => String(item.id) === String(keepId));
@@ -1444,30 +1493,42 @@ async function loadRecipesByName(name, options) {
 async function loadRecipesForCountry(options) {
   const keepSelection = Boolean(options && options.keepSelection);
   const keepId = keepSelection ? selectedRecipeId : null;
+  const preserveTypedRaw = options && options.preserveTyped;
   const countryInput = document.getElementById("recipe-country");
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   const list = document.getElementById("recipe-name-list");
   if (!countryInput || !pick || !detail) return;
   const country = countryInput.value.trim();
+  const typedBefore = recipeNamePlain(
+    preserveTypedRaw != null && preserveTypedRaw !== true && preserveTypedRaw !== false
+      ? preserveTypedRaw
+      : pick.value
+  );
+  const preserveTyped = Boolean(preserveTypedRaw) || Boolean(typedBefore && (keepSelection || recipeEnsureBusy));
+  const seq = ++recipeListSeq;
   closeCombo(pick, list);
-  if (!keepSelection) {
+  if (!keepSelection && !preserveTyped) {
     selectedRecipeId = null;
     recipeRows = [];
     pick.value = "";
     detail.textContent = "";
+  } else if (preserveTyped && typedBefore) {
+    // Keep the pending dish name; do not flash another country's first recipe.
+    pick.value = typedBefore;
   }
   if (!countryNames.includes(country)) {
     // Country optional: keep typed dish name and search across Recipe.xls.
-    const typed = recipeNamePlain(pick.value);
+    const typed = typedBefore || recipeNamePlain(pick.value);
     if (typed) {
       await loadRecipesByName(typed, { keepSelection: true });
       return;
     }
-    recipeRows = [];
+    if (seq === recipeListSeq) recipeRows = [];
     return;
   }
   const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
+  if (seq !== recipeListSeq) return;
   recipeRows = data.recipes || [];
   if (keepId != null) {
     const row = recipeRows.find((item) => String(item.id) === String(keepId));
@@ -1478,9 +1539,62 @@ async function loadRecipesForCountry(options) {
       return;
     }
   }
+  if (preserveTyped && typedBefore) {
+    const matched = findRecipeByTypedName(typedBefore);
+    if (matched) {
+      selectedRecipeId = matched.id;
+      pick.value = recipeLabel(matched);
+      showSelectedRecipe();
+      return;
+    }
+    // Typed dish is not in this country list yet — keep name + status; caller may ensure.
+    selectedRecipeId = null;
+    pick.value = typedBefore;
+    if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+      detail.textContent = uiText("recipeSearching");
+    }
+    return;
+  }
   selectedRecipeId = null;
   pick.value = "";
   detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
+}
+
+/** Country just became valid: reload list without dropping a typed dish; ensure if missing. */
+function onRecipeCountryChosen() {
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  const pickList = document.getElementById("recipe-name-list");
+  const typed = pick ? recipeNamePlain(pick.value) : "";
+  loadRecipesForCountry({ preserveTyped: typed || true })
+    .then(() => {
+      if (!typed) {
+        // Open recipe dropdown after country so the filtered list is visible.
+        if (pick && pickList && recipeRows.length) {
+          renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
+            rememberRecipeChoice(label);
+            showSelectedRecipe();
+          }, "all");
+        }
+        return;
+      }
+      if (findRecipeByTypedName(typed)) {
+        showSelectedRecipe();
+        return;
+      }
+      // Country filled after name: ensure this dish under the chosen country.
+      // If an ensure is already running (often started before country was set),
+      // queue a follow-up with the new country instead of racing the write lock.
+      if (recipeEnsureBusy) {
+        recipeEnsureFollowUp = { name: typed, forceCreate: true };
+        if (detail) detail.textContent = uiText("recipeEnsuring");
+        return;
+      }
+      return ensureRecipeFromInput({ name: typed, forceCreate: true });
+    })
+    .catch((err) => {
+      if (detail) detail.textContent = formatApiError(err);
+    });
 }
 
 async function reloadRecipesForLanguage() {
@@ -1514,12 +1628,9 @@ function bindRecipePickers() {
       });
     });
   }
-  const showCountries = () => renderCombo(country, countryList, countryNames, (label) => {
-    rememberRecipeChoice("");
-    loadRecipesForCountry().catch((err) => {
-      const detail = document.getElementById("recipe-detail");
-      if (detail) detail.textContent = formatApiError(err);
-    });
+  const showCountries = () => renderCombo(country, countryList, countryNames, () => {
+    // Keep a typed pending dish; do not clear selection into the country's first recipe.
+    onRecipeCountryChosen();
   }, "prefix");
   const hasCountry = () => countryNames.includes(country.value.trim());
   const usableRecipeLabels = () => {
@@ -1590,26 +1701,23 @@ function bindRecipePickers() {
     if (!button) return;
     country.value = button.textContent;
     closeCombo(country, countryList);
-    loadRecipesForCountry().catch((err) => {
-      const detail = document.getElementById("recipe-detail");
-      if (detail) detail.textContent = formatApiError(err);
-    });
+    onRecipeCountryChosen();
   });
   country.addEventListener("input", () => {
     showCountries();
     const exact = countryNames.includes(country.value.trim());
     if (exact) {
-      loadRecipesForCountry().catch((err) => {
-        const detail = document.getElementById("recipe-detail");
-        if (detail) detail.textContent = formatApiError(err);
-      });
+      onRecipeCountryChosen();
     } else {
       // Keep dish text; search across countries when the user types a recipe name.
       selectedRecipeId = null;
       recipeRows = [];
       closeCombo(pick, pickList);
       const detail = document.getElementById("recipe-detail");
-      if (detail && !recipeNamePlain(pick.value)) detail.textContent = "";
+      if (detail && !recipeNamePlain(pick.value) && !recipeEnsureBusy) detail.textContent = "";
+      else if (detail && recipeNamePlain(pick.value) && !recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+        detail.textContent = "";
+      }
       searchRecipesWithoutCountry();
     }
   });
@@ -1647,15 +1755,23 @@ function bindRecipePickers() {
   });
   pick.addEventListener("blur", () => {
     closeCombo(pick, pickList);
-    // Create only via Enter or「建立此食譜」; keep「搜尋中」if still unmatched.
     const typed = pick.value.trim();
     if (!typed || findRecipeByTypedName(typed)) return;
     if (!recipeHasSubstringMatch(typed)) {
-      const detail = document.getElementById("recipe-detail");
-      if (detail && detail.textContent !== uiText("recipeEnsuring")) {
-        detail.textContent = uiText("recipeSearching");
+      // Blur with no list hit → ensure/search/fill (雞腿便當 flow).
+      if (recipeEnsureBusy) {
+        recipeEnsureFollowUp = { name: recipeNamePlain(typed), forceCreate: true };
+        const detail = document.getElementById("recipe-detail");
+        if (detail) detail.textContent = uiText("recipeEnsuring");
+        return;
       }
+      ensureRecipeFromInput({ name: typed, forceCreate: true }).catch((err) => {
+        const box = document.getElementById("recipe-detail");
+        if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+      });
+      return;
     }
+    showRecipeSearchStatus(typed);
   });
 }
 
@@ -1763,6 +1879,54 @@ function bindMealCalendarControls() {
   if (addBtn && !addBtn.dataset.bound) {
     addBtn.dataset.bound = "1";
     addBtn.addEventListener("click", () => addSelectedRecipeMeal());
+  }
+  const stepsSave = document.getElementById("meal-steps-save-btn");
+  if (stepsSave && !stepsSave.dataset.bound) {
+    stepsSave.dataset.bound = "1";
+    stepsSave.addEventListener("click", () => saveMealActualSteps());
+  }
+}
+
+async function saveMealActualSteps() {
+  const msg = document.getElementById("meal-steps-msg");
+  const input = document.getElementById("meal-steps-input");
+  if (!input) return;
+  if (typeof getToken === "function" && !getToken()) {
+    if (msg) {
+      msg.textContent = uiText("mealStepsNeedLogin");
+      msg.className = "status err";
+    }
+    return;
+  }
+  const raw = String(input.value || "").trim();
+  if (raw === "" || Number.isNaN(Number(raw))) {
+    if (msg) {
+      msg.textContent = uiText("mealStepsManualLabel");
+      msg.className = "status err";
+    }
+    return;
+  }
+  try {
+    const data = await api("/api/activity/today", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: mealSelectedDate,
+        steps: Math.round(Number(raw)),
+        source: "web_manual",
+      }),
+    });
+    if (data.day) mealDayData = data.day;
+    if (msg) {
+      msg.textContent = uiText("mealStepsSaved");
+      msg.className = "status ok";
+    }
+    renderMealDay();
+  } catch (err) {
+    if (msg) {
+      msg.textContent = formatApiError(err);
+      msg.className = "status err";
+    }
   }
 }
 
@@ -1902,8 +2066,178 @@ function renderMealDay() {
       ? uiText("mealChartMissingLib")
       : uiText("mealChartEmpty");
   }
+  renderMealSteps(mealDayData);
   renderMealCharts(mealDayData);
   renderMealNutrientTrend(mealMonthData);
+}
+
+function formatStepsSource(source) {
+  const key = String(source || "").toLowerCase();
+  if (key === "android_health_connect") return uiText("mealStepsSourceHc");
+  if (key === "android_sensor") return uiText("mealStepsSourceSensor");
+  if (key === "web_manual" || key === "manual") return uiText("mealStepsSourceManual");
+  return source || uiText("mealStepsSourceManual");
+}
+
+function renderMealSteps(day) {
+  const kcalEl = document.getElementById("meal-steps-kcal");
+  const summaryEl = document.getElementById("meal-steps-summary");
+  const remainingEl = document.getElementById("meal-steps-remaining");
+  const burnedEl = document.getElementById("meal-steps-burned");
+  const formulaEl = document.getElementById("meal-steps-formula");
+  const intakeBar = document.getElementById("meal-kcal-intake-bar");
+  const burnBar = document.getElementById("meal-kcal-burn-bar");
+  const needMark = document.getElementById("meal-kcal-need-mark");
+  const needLabel = document.getElementById("meal-kcal-ruler-need");
+  const netEl = document.getElementById("meal-kcal-net");
+  const input = document.getElementById("meal-steps-input");
+  if (!summaryEl) return;
+
+  const intake = Number(
+    day && day.calories_intake != null
+      ? day.calories_intake
+      : (day && day.totals && day.totals["每日熱量(大卡)"]) || 0
+  );
+  const recommended = Number(day && day.recommended_steps != null ? day.recommended_steps : 0);
+  const k = Number(day && day.kcal_per_step != null ? day.kcal_per_step : 0.04);
+  const minS = Number(day && day.steps_min != null ? day.steps_min : 3000);
+  const maxS = Number(day && day.steps_max != null ? day.steps_max : 15000);
+  const actual = day && day.actual_steps != null ? Number(day.actual_steps) : null;
+  const burned = day && day.burned_kcal != null ? Number(day.burned_kcal) : null;
+  const burnedSafe = burned != null && !Number.isNaN(burned) ? Math.max(0, burned) : 0;
+  const gap = actual == null
+    ? null
+    : (day.steps_gap != null ? Number(day.steps_gap) : actual - recommended);
+  const targetRaw = day && day.calories_target != null
+    ? Number(day.calories_target)
+    : (day && day.targets && day.targets["每日熱量(大卡)"] != null
+      ? Number(day.targets["每日熱量(大卡)"])
+      : null);
+  const targetNum = targetRaw != null && !Number.isNaN(targetRaw) && targetRaw > 0
+    ? targetRaw
+    : null;
+  const target = targetNum != null ? Math.round(targetNum) : "—";
+  const surplusRaw = day && day.calories_surplus != null
+    ? Number(day.calories_surplus)
+    : (targetNum != null ? Math.round(intake - targetNum) : null);
+  const surplus = surplusRaw == null || Number.isNaN(surplusRaw)
+    ? "—"
+    : (surplusRaw > 0 ? `+${Math.round(surplusRaw)}` : String(Math.round(surplusRaw)));
+  const net = Math.round((intake - burnedSafe) * 10) / 10;
+
+  if (kcalEl) {
+    if (intake > 0) {
+      kcalEl.textContent = uiText("mealStepsKcal")
+        .replace("{intake}", String(Math.round(intake)))
+        .replace("{target}", String(target))
+        .replace("{surplus}", surplus)
+        .replace("{recommended}", String(recommended));
+    } else {
+      kcalEl.textContent = uiText("mealStepsKcalEmpty");
+    }
+  }
+
+  // Horizontal scale = daily calorie need. Yellow = intake L→R.
+  // Green burn starts at yellow's right tip and draws R→L as overlay.
+  const scale = targetNum != null ? targetNum : Math.max(intake, burnedSafe, 1);
+  const intakePct = Math.max(0, (100 * intake) / scale);
+  const burnPct = Math.max(0, (100 * burnedSafe) / scale);
+  const burnLeftPct = Math.max(0, intakePct - burnPct);
+  if (intakeBar) intakeBar.style.width = `${intakePct}%`;
+  if (burnBar) {
+    burnBar.style.left = `${burnLeftPct}%`;
+    burnBar.style.width = `${Math.min(burnPct, intakePct)}%`;
+  }
+  if (needMark) {
+    // Mark sits at daily-need (100% of scale when scale === target).
+    needMark.style.left = targetNum != null ? `${(100 * targetNum) / scale}%` : "100%";
+    needMark.style.display = targetNum != null ? "" : "none";
+  }
+  if (needLabel) {
+    needLabel.textContent = targetNum != null
+      ? uiText("mealKcalRulerNeed").replace("{target}", String(target))
+      : "— kcal";
+  }
+
+  if (netEl) {
+    netEl.classList.remove("is-over", "is-under", "is-equal");
+    if (!(intake > 0 || burnedSafe > 0)) {
+      netEl.textContent = uiText("mealKcalNetEmpty");
+    } else if (targetNum == null) {
+      netEl.textContent = uiText("mealKcalNetNoTarget").replace("{net}", String(net));
+    } else {
+      const diff = Math.round((net - targetNum) * 10) / 10;
+      if (diff > 0) {
+        netEl.classList.add("is-over");
+        netEl.textContent = uiText("mealKcalNetOver")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target))
+          .replace("{over}", String(diff));
+      } else if (diff < 0) {
+        netEl.classList.add("is-under");
+        netEl.textContent = uiText("mealKcalNetUnder")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target))
+          .replace("{under}", String(Math.abs(diff)));
+      } else {
+        netEl.classList.add("is-equal");
+        netEl.textContent = uiText("mealKcalNetEqual")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target));
+      }
+    }
+  }
+
+  if (actual == null) {
+    summaryEl.textContent = uiText("mealStepsNoActual")
+      .replace("{recommended}", String(recommended));
+  } else {
+    const gapText = gap > 0 ? `+${gap}` : String(gap);
+    summaryEl.textContent = uiText("mealStepsSummary")
+      .replace("{actual}", String(actual))
+      .replace("{recommended}", String(recommended))
+      .replace("{gap}", gapText);
+  }
+
+  if (remainingEl) {
+    if (actual == null) {
+      remainingEl.textContent = uiText("mealStepsRemainingUnknown")
+        .replace("{recommended}", String(recommended));
+    } else {
+      const remain = recommended - actual;
+      if (remain > 0) {
+        remainingEl.textContent = uiText("mealStepsRemainingNeed").replace("{n}", String(remain));
+      } else if (remain < 0) {
+        remainingEl.textContent = uiText("mealStepsRemainingDone").replace("{n}", String(-remain));
+      } else {
+        remainingEl.textContent = uiText("mealStepsRemainingExact");
+      }
+    }
+  }
+
+  if (burnedEl) {
+    if (burned == null) {
+      burnedEl.textContent = uiText("mealStepsBurnedNone");
+    } else {
+      const delta = Math.round((burned - intake) * 10) / 10;
+      const deltaText = delta > 0 ? `+${delta}` : String(delta);
+      burnedEl.textContent = uiText("mealStepsBurned")
+        .replace("{burned}", String(burned))
+        .replace("{source}", formatStepsSource(day && day.steps_source))
+        .replace("{delta}", deltaText);
+    }
+  }
+
+  if (formulaEl) {
+    formulaEl.textContent = uiText("mealStepsFormula")
+      .replace("{k}", String(k))
+      .replace("{min}", String(minS))
+      .replace("{max}", String(maxS));
+  }
+
+  if (input && document.activeElement !== input) {
+    input.value = actual != null ? String(actual) : "";
+  }
 }
 
 function destroyMealChart(kind) {

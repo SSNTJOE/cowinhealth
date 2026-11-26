@@ -531,6 +531,102 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
 .meal-item-main {
   flex: 1 1 200px;
 }
+.meal-steps-panel {
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(165deg, #f7fbf8 0%, #eef6f1 55%, #f5f7f4 100%);
+}
+.meal-steps-panel h4 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+.meal-steps-summary {
+  margin: 6px 0;
+  font-size: 1.05rem;
+}
+.meal-kcal-ruler {
+  margin: 8px 0 6px;
+}
+.meal-kcal-ruler-scale {
+  position: relative;
+  height: 18px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.07);
+  overflow: visible;
+}
+.meal-kcal-intake-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 8px 0 0 8px;
+  background: rgba(240, 192, 32, 0.6);
+  transition: width 0.35s ease;
+  z-index: 1;
+  pointer-events: none;
+}
+.meal-kcal-burn-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 0;
+  background: rgba(46, 160, 90, 0.6);
+  transition: left 0.35s ease, width 0.35s ease;
+  z-index: 2;
+  pointer-events: none;
+}
+.meal-kcal-need-mark {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 100%;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(40, 40, 40, 0.75);
+  z-index: 3;
+  pointer-events: none;
+}
+.meal-kcal-ruler-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.meal-kcal-net {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+}
+.meal-kcal-net.is-over {
+  color: #a33b2a;
+}
+.meal-kcal-net.is-under,
+.meal-kcal-net.is-equal {
+  color: #2f6f4e;
+}
+.meal-steps-remaining {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+}
+.meal-steps-formula {
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.meal-steps-manual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.meal-steps-manual input {
+  width: 120px;
+  max-width: 40vw;
+}
 .meal-charts {
   display: grid;
   gap: 8px;

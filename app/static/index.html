@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=auth-secure1" />
+  <link rel="stylesheet" href="/static/styles.css?v=lang-login1" />
 </head>
 <body>
   <div class="wrap">
@@ -29,13 +29,13 @@
         <label class="hp-field" aria-hidden="true">網站網址
           <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off" />
         </label>
-        <label for="captcha_answer" data-i18n="captcha">驗證碼</label>
+        <label for="captcha_answer" data-i18n="captcha">圖片驗證碼（非郵件）</label>
         <div class="captcha-row">
-          <img id="captcha-img" data-i18n-alt="captchaAlt" alt="驗證碼" width="160" height="56" />
-          <button type="button" id="captcha-refresh" class="ghost" data-i18n="captchaRefresh">換一張</button>
+          <img id="captcha-img" data-i18n-alt="captchaAlt" alt="圖片驗證碼" width="160" height="56" />
+          <button type="button" id="captcha-refresh" class="ghost" data-i18n="captchaRefresh">換一張圖</button>
         </div>
         <input type="hidden" id="captcha_token" value="" />
-        <input type="text" id="captcha_answer" required maxlength="8" autocomplete="off" data-i18n-placeholder="captchaPlaceholder" placeholder="輸入圖片中的字元" />
+        <input type="text" id="captcha_answer" required maxlength="8" autocomplete="off" data-i18n-placeholder="captchaPlaceholder" placeholder="請輸入上方圖片字元（不會寄到信箱）" />
         <div class="actions">
           <button type="submit" data-i18n="loginBtn">登入</button>
           <a href="/register"><button type="button" id="register-btn" class="secondary" data-i18n="goRegister">前往註冊</button></a>
@@ -200,7 +200,7 @@
       <p id="links"></p>
 
       <h3 id="recipe-heading">今日食譜（教學示範）</h3>
-      <p id="recipe-note" class="note">國家欄只列出過濾後仍有食譜的國家，輸入開頭文字並選定（拉丁字母不分大小寫）。食譜欄點開即列出該國全部可用食譜，打字可再縮小。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。</p>
+      <p id="recipe-note" class="note hidden"></p>
       <button type="button" id="recipe-body-advice" class="recipe-body-toggle" aria-pressed="false">依身體狀況建議</button>
       <label id="recipe-country-label" for="recipe-country">國家</label>
       <div class="combo">
@@ -248,6 +248,32 @@
         </div>
       </div>
       <p id="meal-chart-empty" class="note hidden">尚無當日飲食紀錄可畫圖。</p>
+      <div id="meal-steps-panel" class="meal-steps-panel" aria-live="polite">
+        <h4 id="meal-steps-heading">今日步數建議（教學示範）</h4>
+        <p id="meal-steps-kcal" class="note"></p>
+        <div id="meal-kcal-ruler" class="meal-kcal-ruler" aria-hidden="true">
+          <div class="meal-kcal-ruler-scale">
+            <div id="meal-kcal-intake-bar" class="meal-kcal-intake-bar"></div>
+            <div id="meal-kcal-burn-bar" class="meal-kcal-burn-bar"></div>
+            <div id="meal-kcal-need-mark" class="meal-kcal-need-mark" title="每日建議熱量"></div>
+          </div>
+          <div class="meal-kcal-ruler-labels">
+            <span>0</span>
+            <span id="meal-kcal-ruler-need">— kcal</span>
+          </div>
+        </div>
+        <p id="meal-kcal-net" class="meal-kcal-net"></p>
+        <p id="meal-steps-summary" class="meal-steps-summary"></p>
+        <p id="meal-steps-remaining" class="meal-steps-remaining"></p>
+        <p id="meal-steps-burned" class="note"></p>
+        <p id="meal-steps-formula" class="note meal-steps-formula"></p>
+        <div class="meal-steps-manual">
+          <label id="meal-steps-manual-label" for="meal-steps-input">實際步數（可手動）</label>
+          <input type="number" id="meal-steps-input" min="0" max="500000" step="1" placeholder="0" />
+          <button type="button" id="meal-steps-save-btn">儲存步數</button>
+        </div>
+        <p id="meal-steps-msg" class="status"></p>
+      </div>
 
       <h3 data-i18n="organMapHeading">臟腑圖（虛／實／熱／寒）</h3>
       <p class="note" data-i18n="organMapNote">依基本資料的性別顯示男生或女生身體圖。只有判定出證型的臟腑才會放上貼圖；沒有症狀則不擺。</p>
