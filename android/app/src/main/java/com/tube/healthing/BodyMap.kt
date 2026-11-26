@@ -376,7 +376,10 @@ fun buildSessionSummary(
         lines.add("主要證型：" + flagged.joinToString("、"))
     }
 
-    // Tongue: only final 舌質／舌苔 — hide regional 上中下左右 statements.
+    // Face / tongue: short color conclusions only — no cell / Lab / zone prose.
+    for (line in faceFinalConclusions(json)) {
+        lines.add(line)
+    }
     for (line in tongueFinalConclusions(json)) {
         lines.add(line)
     }
@@ -394,27 +397,76 @@ fun buildSessionSummary(
             var text = findings.optString(i).trim()
             if (text.isBlank()) continue
             if (!female && text.contains("子宮")) continue
-            // Hide face color-teaching blocks under 食療整理 / findings.
-            if (text.startsWith("教學正常值") || text.contains("臉色分數") ||
-                text.contains("ΔE*/20") || text.contains("8–10 健康") ||
-                text.contains("8-10 健康")
-            ) {
-                continue
-            }
-            // Hide tongue regional zone statements (中／脾胃／舌中 etc.).
-            if (isTongueRegionalFinding(text)) continue
-            // Overall 舌質／舌苔 lines already emitted via tongueFinalConclusions.
-            if (text.startsWith("舌質") || text.startsWith("舌苔") ||
-                (text.contains("舌質") && !text.contains("（"))
-            ) {
-                continue
-            }
+            // Between 教學示範非診斷 and 臟腑分數趨勢: hide face/tongue color-judgment detail.
+            if (isFaceOrTongueColorDetail(text)) continue
+            // Stool / urine already emitted as brief conclusions above.
+            if (text.startsWith("大便") || text.startsWith("尿尿")) continue
             if (text.length > 80) text = text.take(80) + "…"
             lines.add("・$text")
             shown++
         }
     }
     return lines.joinToString("\n")
+}
+
+/** Drop Lab / YCrCb measurement asides; keep TCM conclusion words. */
+fun stripColorMeasurementProse(text: String): String {
+    var s = text.trim()
+    s = s.replace(Regex("""（[^）]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb|教學|色澤|健康分)[^）]*）"""), "")
+    s = s.replace(Regex("""\([^)]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb)[^)]*\)"""), "")
+    s = s.replace(Regex("""#[0-9A-Fa-f]{6}"""), "")
+    s = s.replace(Regex("""\s*[Δ]?Cr\s*[-+]?\d+(\.\d+)?"""), "")
+    s = s.replace(Regex("""\s*[Δ]?Cb\s*[-+]?\d+(\.\d+)?"""), "")
+    s = s.replace(Regex("""\s{2,}"""), " ").trim()
+    return s.trim('，', ',', '／', '/', ' ', '→', '-')
+}
+
+/**
+ * Face / tongue color-judgment *statements* (cells, Lab, zones, teaching blobs).
+ * Short conclusions are emitted separately via faceFinalConclusions / tongueFinalConclusions.
+ */
+fun isFaceOrTongueColorDetail(text: String): Boolean {
+    if (text.isBlank()) return false
+    if (text.startsWith("教學正常值") || text.contains("臉色分數") ||
+        text.contains("ΔE*/20") || text.contains("8–10 健康") || text.contains("8-10 健康")
+    ) {
+        return true
+    }
+    if (Regex("""第\d+格""").containsMatchIn(text)) return true
+    if (text.contains("ΔCr") || text.contains("ΔCb") || text.contains("L*") ||
+        text.contains("a*") || text.contains("b*") || text.contains("YCrCb")
+    ) {
+        return true
+    }
+    if (Regex("""\bCr\s*[-+]?\d""").containsMatchIn(text) ||
+        Regex("""\bCb\s*[-+]?\d""").containsMatchIn(text)
+    ) {
+        return true
+    }
+    if (text.startsWith("面色") || text.startsWith("臉色") || text.startsWith("唇") ||
+        text.startsWith("額頭") || text.contains("滿面") || text.contains("兩頰") ||
+        text.contains("下頜") || text.contains("白睛") || text.contains("眼眥") ||
+        text.contains("眼瞼") || text.contains("瞼內")
+    ) {
+        return true
+    }
+    if (text.contains("未見明顯偏色") || text.contains("未見全臉色偏") ||
+        text.contains("未見明顯色差")
+    ) {
+        return true
+    }
+    if (isTongueRegionalFinding(text)) return true
+    if (text.startsWith("舌質") || text.startsWith("舌苔") || text.startsWith("舌苔（") ||
+        text.startsWith("黃苔") || text.startsWith("白苔") || text.startsWith("剝苔")
+    ) {
+        return true
+    }
+    if (text.contains("舌質") || text.contains("舌苔") ||
+        (text.contains("舌") && text.contains("→"))
+    ) {
+        return true
+    }
+    return false
 }
 
 /** Regional tongue zone lines like 中（脾胃／舌中）… — hide on App UX. */
@@ -432,12 +484,47 @@ fun isTongueRegionalFinding(text: String): Boolean {
     return false
 }
 
+/** Short face color conclusion only (bias / lip), no cell or Lab teaching prose. */
+fun faceFinalConclusions(json: JSONObject): List<String> {
+    val out = mutableListOf<String>()
+    val faceGrid = json.optJSONObject("face_grid")
+    val complexion = faceGrid?.optJSONObject("complexion")
+        ?: json.optJSONObject("complexion")
+    val bias = complexion?.optString("bias")?.trim().orEmpty()
+    if (bias.isNotBlank() && bias != "基本色" && bias != "色差基準") {
+        out.add("臉色：${stripColorMeasurementProse(bias)}")
+    } else {
+        val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
+            ?: json.optJSONObject("day_modalities")
+        val label = dm?.optJSONObject("face")?.optString("color_label")?.trim().orEmpty()
+        when {
+            label.isBlank() -> Unit
+            label == "臉色已測" || label == "已測" -> out.add("臉色：已測")
+            !isFaceOrTongueColorDetail(label) && label.length <= 24 -> {
+                out.add(if (label.startsWith("臉")) label else "臉色：$label")
+            }
+            else -> {
+                // Pull a short TCM bias token from a long teaching label when possible.
+                val token = listOf("實熱", "實寒", "虛熱", "虛寒", "濕氣", "血瘀")
+                    .firstOrNull { label.contains(it) }
+                if (token != null) out.add("臉色：$token")
+            }
+        }
+    }
+    val lip = json.optJSONObject("region_colors")?.optString("lip_color")?.trim().orEmpty()
+    if (lip.isNotBlank()) {
+        val short = stripColorMeasurementProse(lip.removePrefix("唇").trim())
+        if (short.isNotBlank()) out.add("唇：$short")
+    }
+    return out
+}
+
 /** Final tongue conclusions only (舌質 + 舌苔), from region_colors / day_modalities. */
 fun tongueFinalConclusions(json: JSONObject): List<String> {
     val out = mutableListOf<String>()
     val colors = json.optJSONObject("region_colors")
-    val body = colors?.optString("tongue_body_color")?.trim().orEmpty()
-    val coat = colors?.optString("tongue_coat_color")?.trim().orEmpty()
+    val body = stripColorMeasurementProse(colors?.optString("tongue_body_color").orEmpty())
+    val coat = stripColorMeasurementProse(colors?.optString("tongue_coat_color").orEmpty())
     if (body.isNotBlank()) out.add("舌質：$body")
     if (coat.isNotBlank()) out.add("舌苔：$coat")
     if (out.isNotEmpty()) return out
@@ -451,14 +538,15 @@ fun tongueFinalConclusions(json: JSONObject): List<String> {
         // Split composite "舌質…；苔…" into two lines when possible.
         val parts = label.split("；", ";", "／").map { it.trim() }.filter { it.isNotBlank() }
         if (parts.size >= 2) {
-            val bodyPart = parts.firstOrNull { it.contains("舌質") } ?: parts[0]
-            val coatPart = parts.firstOrNull { it.contains("苔") } ?: parts[1]
+            val bodyPart = stripColorMeasurementProse(parts.firstOrNull { it.contains("舌質") } ?: parts[0])
+            val coatPart = stripColorMeasurementProse(parts.firstOrNull { it.contains("苔") } ?: parts[1])
             out.add(if (bodyPart.startsWith("舌質")) bodyPart else "舌質：$bodyPart")
             out.add(if (coatPart.startsWith("舌苔") || coatPart.startsWith("苔")) {
                 if (coatPart.startsWith("舌苔")) coatPart else "舌苔：$coatPart"
             } else "舌苔：$coatPart")
         } else {
-            out.add(if (label.startsWith("舌")) label else "舌：$label")
+            val short = stripColorMeasurementProse(label)
+            out.add(if (short.startsWith("舌")) short else "舌：$short")
         }
     }
     return out
