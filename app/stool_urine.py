@@ -1617,6 +1617,9 @@ def _downscale_circle(image: Image.Image, max_side: int = 720) -> Image.Image:
 def _preprocess_circle_image(
     image: Image.Image,
     color_temperature_k: int | float | str | None = "auto",
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     from .analysis import (
         adapt_brightness_image,
@@ -1624,27 +1627,42 @@ def _preprocess_circle_image(
         brightness_gain_to_target,
         estimate_color_temperature_k,
         estimate_relative_brightness,
+        normalize_color_temperature_k,
     )
+    from .color_calib_online import apply_lighting_compensation
+    from .lighting_calib import compensate_lighting
 
     rgb = _downscale_circle(image.convert("RGB"), max_side=720)
     if color_temperature_k is None or str(color_temperature_k).strip().lower() in {"", "auto"}:
-        cct = estimate_color_temperature_k(rgb)
+        raw_cct = float(estimate_color_temperature_k(rgb))
         auto = True
     else:
         try:
-            cct = int(round(float(str(color_temperature_k).strip())))
+            raw_cct = float(normalize_color_temperature_k(color_temperature_k))
         except (TypeError, ValueError):
-            cct = estimate_color_temperature_k(rgb)
+            raw_cct = float(estimate_color_temperature_k(rgb))
         auto = False
+    raw_brightness = float(estimate_relative_brightness(rgb))
+    raw_gain = float(brightness_gain_to_target(raw_brightness))
+    cct, blended, gain, device_meta = compensate_lighting(
+        raw_cct, raw_brightness, raw_gain, lighting_calib, device_key
+    )
+    cct, blended, gain, online_meta = apply_lighting_compensation(
+        cct, blended, float(gain), online_calib
+    )
+    cct = int(round(normalize_color_temperature_k(cct)))
     adapted = adapt_rgb_image(rgb, cct)
     brightness = estimate_relative_brightness(adapted)
-    gain = brightness_gain_to_target(brightness)
-    adapted = adapt_brightness_image(adapted, gain)
+    adapted = adapt_brightness_image(adapted, float(gain))
     return adapted, {
         "color_temperature_k": cct,
         "color_temperature_auto": auto,
         "brightness": round(float(brightness), 4),
+        "brightness_raw": round(float(raw_brightness), 4),
         "brightness_gain": round(float(gain), 4),
+        "cct_raw": round(float(raw_cct), 1),
+        "lighting_calib": {**(device_meta or {}), "online": online_meta},
+        "online_calib": online_calib,
     }
 
 
@@ -1653,8 +1671,17 @@ def analyze_stool_image(
     color_temperature_k: int | float | str | None = "auto",
     confounders: str | None = None,
     severe_gate: bool = False,
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    work, lighting = _preprocess_circle_image(image, color_temperature_k)
+    work, lighting = _preprocess_circle_image(
+        image,
+        color_temperature_k,
+        lighting_calib=lighting_calib,
+        device_key=device_key,
+        online_calib=online_calib,
+    )
     # Prefer dark stool cluster so porcelain/water does not dilute black → 黃褐色.
     L, a, b, lab_meta = _lab_from_roi(work, prefer_dark_cluster=True)
     hit = classify_stool_lab(L, a, b)
@@ -1774,8 +1801,17 @@ def analyze_urine_image(
     confounders: str | None = None,
     severe_gate: bool = False,
     prior_foam_frames: list[Image.Image] | None = None,
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    work, lighting = _preprocess_circle_image(image, color_temperature_k)
+    work, lighting = _preprocess_circle_image(
+        image,
+        color_temperature_k,
+        lighting_calib=lighting_calib,
+        device_key=device_key,
+        online_calib=online_calib,
+    )
     L, a, b, H, S, V, lab_meta = _urine_lab_hsv_from_roi(work)
     turbidity = _turbidity_heuristic(work)
     foam = _foam_metrics(work, prior_frames=prior_foam_frames)

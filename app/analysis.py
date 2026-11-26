@@ -1573,9 +1573,10 @@ def classify_face_lab(
     base: dict[str, float],
     kind: str,
     uneven: float = 0.0,
+    thresholds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """CIELAB vs teaching normal L*65 a*12 b*20; eyes still vs personal/intra baseline."""
-    t = FACE_LAB_THRESHOLDS
+    t = thresholds or FACE_LAB_THRESHOLDS
     ref = FACE_NORMAL_LAB if kind != "eye" else base
     d = _lab_delta(stats, ref)
     dL, da, db, dS = d["dL"], d["da"], d["db"], d["dS"]
@@ -2042,7 +2043,13 @@ def analyze_face_grid(
     personal_lab: dict[str, Any] | None = None,
     female: bool = False,
     severe_gate: bool = False,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+    from .color_calib_online import apply_threshold_adjustments
+
+    face_thresh = apply_threshold_adjustments(
+        FACE_LAB_THRESHOLDS, online_calib, modality="face"
+    )
     findings: list[str] = []
     cells: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
@@ -2090,7 +2097,9 @@ def analyze_face_grid(
         ycrcb_kind = "face" if kind == "nose" else kind
         ycrcb_base = cheek_base if ycrcb_kind == "cheek" else complexion_stats
         reading = classify_face_color(stats, ycrcb_base, ycrcb_kind)
-        lab = classify_face_lab(stats, base, kind, lab_uneven_score(crop))
+        lab = classify_face_lab(
+            stats, base, kind, lab_uneven_score(crop), thresholds=face_thresh
+        )
         reading["dL"] = lab.get("dL")
         reading["da"] = lab.get("da")
         reading["db"] = lab.get("db")
@@ -2491,10 +2500,14 @@ def analyze_face_grid(
                 {"id": spec["id"], "label": spec["label"], "hex": spec["hex"], "centroid": spec["centroid"]}
                 for spec in FACE_COLOR_CLASSES
             ]},
-            "thresholds": FACE_LAB_THRESHOLDS,
+            "thresholds": face_thresh,
         },
         "color_health": color_health,
         "disclaimer": TEACHING_NOTE,
+        "online_calib": {
+            "thresh_applied": bool(face_thresh.get("_online_applied")),
+            "n": int((online_calib or {}).get("n") or 0),
+        },
     }
     return face_grid, findings, colors
 
@@ -3099,11 +3112,16 @@ def analyze_tongue_grid(
     image: Image.Image,
     female: bool = False,
     severe_gate: bool = False,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+    from .color_calib_online import apply_threshold_adjustments
+
     findings: list[str] = []
     marks: list[dict[str, Any]] = []
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
-    thresh = TONGUE_LAB_THRESHOLDS
+    thresh = apply_threshold_adjustments(
+        TONGUE_LAB_THRESHOLDS, online_calib, modality="tongue"
+    )
     seg = segment_tongue_body_coat(image)
     baseline = _lab_baseline(seg["all_stats"])
     coating_ratio = float(seg.get("coating_ratio") or tongue_coating_ratio(seg))
@@ -4071,7 +4089,9 @@ def inspect_image(
     confounders: str | None = None,
     lighting_calib: dict[str, Any] | None = None,
     device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from .color_calib_online import apply_lighting_compensation
     from .lighting_calib import compensate_lighting
 
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -4085,12 +4105,18 @@ def inspect_image(
                 color_temperature_k=color_temperature_k,
                 confounders=confounders,
                 severe_gate=severe_gate,
+                lighting_calib=lighting_calib,
+                device_key=device_key,
+                online_calib=online_calib,
             )
         return analyze_urine_image(
             raw_image,
             color_temperature_k=color_temperature_k,
             confounders=confounders,
             severe_gate=severe_gate,
+            lighting_calib=lighting_calib,
+            device_key=device_key,
+            online_calib=online_calib,
         )
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
@@ -4116,6 +4142,10 @@ def inspect_image(
         lighting_calib,
         device_key,
     )
+    cct, _blended_bright, brightness_gain, online_meta = apply_lighting_compensation(
+        cct, _blended_bright, float(brightness_gain), online_calib
+    )
+    calib_meta = {**(calib_meta or {}), "online": online_meta}
     cct = int(round(normalize_color_temperature_k(cct)))
     image = adapt_rgb_image(image, cct)
     brightness = estimate_relative_brightness(image)
@@ -4138,12 +4168,19 @@ def inspect_image(
     tongue_grid = None
     if shot_type == "tongue":
         tongue_grid, grid_findings, colors = analyze_tongue_grid(
-            image, female=female, severe_gate=severe_gate
+            image,
+            female=female,
+            severe_gate=severe_gate,
+            online_calib=online_calib,
         )
         findings.extend(grid_findings)
     else:
         face_grid, grid_findings, colors = analyze_face_grid(
-            image, personal_lab=personal_lab, female=female, severe_gate=severe_gate
+            image,
+            personal_lab=personal_lab,
+            female=female,
+            severe_gate=severe_gate,
+            online_calib=online_calib,
         )
         findings.extend(grid_findings)
 
@@ -4183,6 +4220,7 @@ def inspect_image(
         "brightness_gain": round(float(brightness_gain), 4),
         "brightness_after": round(float(brightness_after), 4),
         "lighting_calib": calib_meta,
+        "online_calib": online_calib,
         "cct_raw": round(float(raw_cct), 1),
     }
 
@@ -4198,10 +4236,13 @@ def analyze_session(
     color_temperature_k: int | float | str | None = None,
     prior_session: dict[str, Any] | None = None,
     conditions: list[str] | tuple[str, ...] | None = None,
+    allergies: list[str] | tuple[str, ...] | None = None,
     confounders: str | None = None,
     lighting_calib: dict[str, Any] | None = None,
     device_hint: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
+    from .color_calib_online import load_compensation
     from .lighting_calib import device_key_from_hint, learn_from_session, parse_calib_blob
 
     # Prefer camera auto-CCT per shot; ignore legacy discrete UI presets.
@@ -4217,6 +4258,25 @@ def analyze_session(
     gate = severe_health_gate(conditions, symptoms, discomfort)
     device_key = device_key_from_hint(device_hint)
     calib_state = parse_calib_blob(lighting_calib)
+    online_by_mod: dict[str, Any] = {}
+    try:
+        from .db import connect
+
+        conn = connect()
+        try:
+            for mod in {shot for shot, _raw in images} | {"face", "tongue", "stool", "urine"}:
+                online_by_mod[mod] = load_compensation(
+                    conn,
+                    modality=mod,
+                    user_id=user_id,
+                    device_key=device_key,
+                    conditions=conditions,
+                    allergies=allergies,
+                )
+        finally:
+            conn.close()
+    except Exception:
+        online_by_mod = {}
     color_reports = [
         inspect_image(
             raw,
@@ -4228,6 +4288,7 @@ def analyze_session(
             confounders=confounders if shot_type in ("stool", "urine") else None,
             lighting_calib=calib_state,
             device_key=device_key,
+            online_calib=online_by_mod.get(shot_type),
         )
         for shot_type, raw in images
     ]
@@ -4721,6 +4782,11 @@ def analyze_session(
         "score_stabilize": stabilize_meta,
         "device_key": device_key,
         "lighting_calib_json": updated_calib,
+        "calib_reports": [
+            {k: v for k, v in report.items() if k != "preview"}
+            for report in color_reports
+        ],
+        "online_calib": online_by_mod,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }
     if not female:

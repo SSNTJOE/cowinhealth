@@ -19,6 +19,13 @@ _schema_ready = False
 _schema_lock = threading.Lock()
 _retry_started = False
 
+
+def _color_calib_schema_sql() -> list[str]:
+    from .color_calib_online import CALIB_SCHEMA_SQL
+
+    return list(CALIB_SCHEMA_SQL)
+
+
 SCHEMA_SQL = [
     """
     CREATE TABLE IF NOT EXISTS users (
@@ -200,7 +207,7 @@ def init_schema(timeout_seconds: int = 8) -> bool:
         try:
             conn = connect(with_db=True, ensure=False)
             with conn.cursor() as cur:
-                for statement in SCHEMA_SQL + _catalog_schema_sql():
+                for statement in SCHEMA_SQL + _catalog_schema_sql() + _color_calib_schema_sql():
                     cur.execute(statement)
                 for table, column, ddl in EXTRA_COLUMNS:
                     cur.execute(

@@ -1474,6 +1474,8 @@ async def analyze(
         carried_pulse = True
         if not pulse_json:
             pulse_json = json.dumps(pulse, ensure_ascii=False)
+    condition_list = user_conditions(profile)
+    allergy_list = user_allergies(profile)
     result = analyze_session(
         images,
         symptoms or "",
@@ -1484,10 +1486,12 @@ async def analyze(
         female=(profile or {}).get("gender") == "female",
         color_temperature_k=color_temperature_k,
         prior_session=prior_session,
-        conditions=user_conditions(profile),
+        conditions=condition_list,
+        allergies=allergy_list,
         confounders=confounders,
         lighting_calib=lighting_calib,
         device_hint=hint,
+        user_id=user_id,
     )
     # Persist learned lighting compensation for this user+device.
     updated_calib = result.get("lighting_calib_json")
@@ -1511,8 +1515,8 @@ async def analyze(
         result["findings"],
         symptoms or "",
         discomfort or "",
-        conditions=user_conditions(profile),
-        allergies=user_allergies(profile),
+        conditions=condition_list,
+        allergies=allergy_list,
         result=result,
         week_records=week_records,
     )
@@ -1537,6 +1541,28 @@ async def analyze(
         "pulse_json": pulse_json,
     }
     insert_record(user_id, result, extra)
+    # Online MySQL color calibration: persist features + EWMA state (disease/allergen cross-check).
+    try:
+        from .analysis import severe_health_gate
+        from .color_calib_online import persist_session_calibration
+
+        quiet = not severe_health_gate(condition_list, symptoms or "", discomfort or "")
+        conn = connect()
+        try:
+            result["color_calib"] = persist_session_calibration(
+                conn,
+                reports=result.get("calib_reports") or [],
+                user_id=user_id,
+                record_id=result.get("record_id"),
+                device_key=result.get("device_key"),
+                conditions=condition_list,
+                allergies=allergy_list,
+                quiet=quiet,
+            )
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("online color calibration persist failed")
     try:
         record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
     except Exception:

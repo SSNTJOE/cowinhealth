@@ -67,3 +67,54 @@ CREATE TABLE IF NOT EXISTS health_records (
   organ_composite_json TEXT NULL,
   CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
+
+-- Online color calibration: per-shot features + EWMA running state (no GPU).
+CREATE TABLE IF NOT EXISTS color_calib_samples (
+  sample_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(32) NULL,
+  record_id INT NULL,
+  device_key VARCHAR(80) NULL,
+  modality VARCHAR(16) NOT NULL,
+  captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  cct_raw DOUBLE NULL,
+  cct_used DOUBLE NULL,
+  brightness_raw DOUBLE NULL,
+  brightness_gain DOUBLE NULL,
+  L DOUBLE NULL,
+  a_star DOUBLE NULL,
+  b_star DOUBLE NULL,
+  h DOUBLE NULL,
+  s DOUBLE NULL,
+  v DOUBLE NULL,
+  class_label VARCHAR(128) NULL,
+  delta_e DOUBLE NULL,
+  conditions_json TEXT NULL,
+  allergies_json TEXT NULL,
+  features_json TEXT NULL,
+  quiet TINYINT(1) NOT NULL DEFAULT 1,
+  INDEX idx_calib_samp_user_mod (user_id, modality, captured_at),
+  INDEX idx_calib_samp_mod_time (modality, captured_at),
+  INDEX idx_calib_samp_device (device_key, modality)
+);
+
+CREATE TABLE IF NOT EXISTS color_calib_state (
+  state_key VARCHAR(128) PRIMARY KEY,
+  scope VARCHAR(32) NOT NULL,
+  modality VARCHAR(16) NOT NULL,
+  tag VARCHAR(128) NULL,
+  n INT NOT NULL DEFAULT 0,
+  ewma_cct DOUBLE NULL,
+  ewma_brightness DOUBLE NULL,
+  ewma_L DOUBLE NULL,
+  ewma_a DOUBLE NULL,
+  ewma_b DOUBLE NULL,
+  cct_bias_k DOUBLE NOT NULL DEFAULT 0,
+  brightness_bias DOUBLE NOT NULL DEFAULT 0,
+  thresh_delta_e_adj DOUBLE NOT NULL DEFAULT 0,
+  thresh_a_heat_adj DOUBLE NOT NULL DEFAULT 0,
+  thresh_b_yellow_adj DOUBLE NOT NULL DEFAULT 0,
+  state_json TEXT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_calib_state_scope_mod (scope, modality),
+  INDEX idx_calib_state_tag (tag)
+);

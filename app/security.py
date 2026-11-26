@@ -34,6 +34,8 @@ ALLOWED_TABLES = frozenset(
         "catalog_foods",
         "catalog_daily_nutrient",
         "catalog_deviations",
+        "color_calib_samples",
+        "color_calib_state",
     }
 )
 
