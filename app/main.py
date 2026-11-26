@@ -1637,6 +1637,20 @@ def records(request: Request):
         health = row.get("organ_health")
         if isinstance(health, dict) and isinstance(health.get("pattern_scores"), dict):
             row["pattern_scores"] = health["pattern_scores"]
+        # Hoist stool/urine notes so App/Web bind like live /api/record (top-level keys).
+        if isinstance(health, dict):
+            su = health.get("stool_urine") if isinstance(health.get("stool_urine"), dict) else {}
+            dm = health.get("day_modalities") if isinstance(health.get("day_modalities"), dict) else {}
+            for kind in ("stool", "urine"):
+                if row.get(kind):
+                    continue
+                note = su.get(kind) if isinstance(su.get(kind), dict) else None
+                if not note:
+                    block = dm.get(kind) if isinstance(dm.get(kind), dict) else None
+                    nested = block.get("note") if isinstance(block, dict) else None
+                    note = nested if isinstance(nested, dict) else None
+                if isinstance(note, dict) and note:
+                    row[kind] = note
         if not female:
             omit_uterus_judgment(row)
         enrich_stored_advice(

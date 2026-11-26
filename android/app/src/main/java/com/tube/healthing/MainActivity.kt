@@ -848,7 +848,7 @@ class MainActivity : AppCompatActivity() {
         val zoom = when {
             face -> FaceFrame.PREVIEW_ZOOM
             tongue -> TongueFrame.PREVIEW_ZOOM
-            circle -> 2f
+            circle -> CircleFrame.PREVIEW_ZOOM
             else -> 1f
         }
         binding.preview.scaleX = zoom
@@ -909,6 +909,12 @@ class MainActivity : AppCompatActivity() {
                             Thread { submitModalityShot(CameraFacing.TONGUE, file) }.start()
                         }
                         CameraFacing.STOOL, CameraFacing.URINE -> {
+                            try {
+                                // Match web captureCircleFrame: Lab must see yellow-circle ROI,
+                                // not the full unzoomed JPEG (shadows lock class e.g. 黑色).
+                                CircleFrame.cropFileToYellowCircle(file, previewW, previewH)
+                            } catch (_: Exception) {
+                            }
                             if (mode == CameraFacing.STOOL) stoolFile = file else urineFile = file
                             // Same as website: analyze immediately; text only, no photo keep/display.
                             Thread { submitCircleShot(mode, file) }.start()
@@ -1078,11 +1084,23 @@ class MainActivity : AppCompatActivity() {
 
     /** Force-replace this modality line from live /api/record (like web lastDayLines). */
     private fun applyCircleShotResult(json: JSONObject, kind: String) {
-        showDayResult(json, focusKind = kind)
-        val forced = StoolUrineJudge.briefStatus(json, kind).ifBlank {
-            if (kind == CameraFacing.URINE || kind == "urine") "尿尿：尚無色調判斷"
-            else "大便：尚無色調判斷"
+        // Live /api/record wins (same as web lastDayLines after loadRecords skipResult).
+        val focus = when (kind) {
+            CameraFacing.URINE, "urine" -> "urine"
+            else -> "stool"
         }
+        val forced = StoolUrineJudge.briefStatus(json, focus).ifBlank {
+            if (focus == "urine") "尿尿：尚無色調判斷" else "大便：尚無色調判斷"
+        }
+        val hit = StoolUrineJudge.extractClass(StoolUrineJudge.noteForKind(json, focus))
+        android.util.Log.i(
+            "HealthingCircle",
+            "record ok kind=$focus class=${hit?.id}|${hit?.label} line=$forced " +
+                "dm=${json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
+                    ?.optJSONObject(focus)?.optString("color_label")}",
+        )
+        // Rebuild panel from JSON + forced live line; never keep prior modality string.
+        showDayResult(json, focusKind = focus)
         val panel = binding.circleResult.text?.toString().orEmpty()
         val merged = linkedMapOf<String, String>()
         panel.lineSequence().forEach { line ->
@@ -1090,28 +1108,27 @@ class MainActivity : AppCompatActivity() {
             when {
                 t.startsWith("舌質") -> merged["tongue_body"] = t
                 t.startsWith("舌苔") -> merged["tongue_coat"] = t
-                t.startsWith("大便") -> merged["stool"] = t
-                t.startsWith("尿尿") -> merged["urine"] = t
+                t.startsWith("大便") -> if (focus != "stool") merged["stool"] = t
+                t.startsWith("尿尿") -> if (focus != "urine") merged["urine"] = t
                 t.startsWith("脈") -> merged["pulse"] = t
             }
         }
-        // Live shot always wins for its modality (never keep prior panel string).
-        if (kind == CameraFacing.STOOL || kind == "stool") merged["stool"] = forced
-        if (kind == CameraFacing.URINE || kind == "urine") merged["urine"] = forced
+        merged[focus] = forced
         val text = listOfNotNull(
             merged["tongue_body"], merged["tongue_coat"],
             merged["stool"], merged["urine"], merged["pulse"],
         ).joinToString("\n")
         binding.circleResult.text = text
-        binding.circleResult.visibility = if (text.isNotBlank()) View.VISIBLE else View.GONE
-        binding.result.text = prettyCircle(json, kind)
+        binding.circleResult.visibility = View.VISIBLE
+        binding.circleResult.invalidate()
+        binding.result.text = prettyCircle(json, focus)
         bindAdvice(json)
         bindOrganSessionUi(json)
         refreshTrend()
         refreshRecipeChoices(keepSelection = true)
         Toast.makeText(
             this,
-            StoolUrineJudge.toastLine(json, kind),
+            StoolUrineJudge.toastLine(json, focus),
             Toast.LENGTH_LONG,
         ).show()
         binding.bodyImage.post {
