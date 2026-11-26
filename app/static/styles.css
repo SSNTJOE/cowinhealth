@@ -552,6 +552,27 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   width: 100%;
   overflow: hidden;
 }
+.meal-kcal-burn-above-wrap {
+  position: relative;
+  height: 1.15rem;
+  margin-bottom: 2px;
+}
+.meal-kcal-burn-label-above {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: #1f6b3f;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+}
+.meal-kcal-burn-label-above[hidden] {
+  display: none !important;
+}
 .meal-kcal-ruler-scale {
   position: relative;
   height: 26px;

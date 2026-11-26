@@ -2089,6 +2089,7 @@ function renderMealSteps(day) {
   const burnBar = document.getElementById("meal-kcal-burn-bar");
   const intakeLabelEl = document.getElementById("meal-kcal-intake-label");
   const burnLabelEl = document.getElementById("meal-kcal-burn-label");
+  const burnLabelAboveEl = document.getElementById("meal-kcal-burn-label-above");
   const needMark = document.getElementById("meal-kcal-need-mark");
   const needLabel = document.getElementById("meal-kcal-ruler-need");
   const netEl = document.getElementById("meal-kcal-net");
@@ -2161,12 +2162,39 @@ function renderMealSteps(day) {
       : "";
     intakeLabelEl.style.display = intake > 0 ? "" : "none";
   }
+  const burnText = burnedSafe > 0
+    ? uiText("mealKcalBarBurn").replace("{n}", String(Math.round(burnedSafe)))
+    : "";
   if (burnLabelEl) {
-    burnLabelEl.textContent = burnedSafe > 0
-      ? uiText("mealKcalBarBurn").replace("{n}", String(Math.round(burnedSafe)))
-      : "";
+    burnLabelEl.textContent = burnText;
+    // Measure after layout: if green bar is too narrow for the label, lift it above.
     burnLabelEl.style.display = burnedSafe > 0 ? "" : "none";
   }
+  if (burnLabelAboveEl) {
+    burnLabelAboveEl.textContent = burnText;
+    burnLabelAboveEl.hidden = true;
+  }
+  const placeBurnLabel = () => {
+    if (!burnedSafe || burnWidthPct <= 0) {
+      if (burnLabelEl) burnLabelEl.style.display = "none";
+      if (burnLabelAboveEl) burnLabelAboveEl.hidden = true;
+      return;
+    }
+    const pad = 8;
+    const barW = burnBar ? burnBar.clientWidth : 0;
+    const textW = burnLabelEl ? burnLabelEl.scrollWidth : 0;
+    const fitsInside = barW >= textW + pad && textW > 0;
+    if (burnLabelEl) burnLabelEl.style.display = fitsInside ? "" : "none";
+    if (burnLabelAboveEl) {
+      if (fitsInside) {
+        burnLabelAboveEl.hidden = true;
+      } else {
+        burnLabelAboveEl.hidden = false;
+        burnLabelAboveEl.style.left = `${burnLeftPct + burnWidthPct / 2}%`;
+      }
+    }
+  };
+  requestAnimationFrame(placeBurnLabel);
   if (needMark) {
     needMark.style.left = `${needPct}%`;
     needMark.style.display = targetNum != null ? "" : "none";
