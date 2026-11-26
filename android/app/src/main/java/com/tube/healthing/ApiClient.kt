@@ -1,5 +1,10 @@
 package com.tube.healthing
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.util.Log
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -9,29 +14,162 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
+import java.net.ConnectException
+import java.net.InetAddress
+import java.net.Socket
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
 
 class ApiClient(
     private var baseUrl: String,
-    private var token: String? = null
+    private var token: String? = null,
+    context: Context? = null,
 ) {
-    private val client = OkHttpClient.Builder()
-        .callTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val appContext = context?.applicationContext
+
+    private fun buildClient(
+        connectSec: Long,
+        readSec: Long,
+        writeSec: Long = readSec,
+        callSec: Long,
+    ): OkHttpClient {
+        val b = OkHttpClient.Builder()
+            .connectTimeout(connectSec, TimeUnit.SECONDS)
+            .readTimeout(readSec, TimeUnit.SECONDS)
+            .writeTimeout(writeSec, TimeUnit.SECONDS)
+            .callTimeout(callSec, TimeUnit.SECONDS)
+        // Dual Wi‑Fi+cellular phones often try LAN IPs via the cellular interface
+        // (e.g. src 10.x → 192.168.x fails). Prefer Wi‑Fi sockets for API calls.
+        val wifiFactory = appContext?.let { WifiPreferSocketFactory(it) }
+        if (wifiFactory != null) {
+            b.socketFactory(wifiFactory)
+        }
+        return b.build()
+    }
+
+    private val client = buildClient(connectSec = 12, readSec = 30, callSec = 60)
+
+    /**
+     * /api/record can run stool/urine Lab + day merge; phone uploads need headroom.
+     * Short read timeouts left circle UI stuck on the previous judgment line.
+     */
+    private val recordClient = buildClient(
+        connectSec = 20,
+        readSec = 90,
+        writeSec = 60,
+        callSec = 120,
+    )
+
+    /** Recipe research/create can take minutes; keep a longer client for ensure only. */
+    private val ensureClient = buildClient(
+        connectSec = 20,
+        readSec = 180,
+        writeSec = 60,
+        callSec = 240,
+    )
 
     fun setBaseUrl(url: String) {
         baseUrl = url.trimEnd('/')
     }
 
+    /**
+     * SocketFactory that opens sockets on the active Wi‑Fi [Network] when available.
+     * Falls back to the platform default (so emulator / Wi‑Fi-only still works).
+     */
+    private class WifiPreferSocketFactory(
+        private val app: Context,
+    ) : SocketFactory() {
+        private val fallback = getDefault()
+
+        private fun wifiSocketFactory(): SocketFactory {
+            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return fallback
+            var best: Network? = null
+            for (network in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(network) ?: continue
+                if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+                best = network
+                // Prefer validated Wi‑Fi when present.
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    return network.socketFactory
+                }
+            }
+            return best?.socketFactory ?: fallback
+        }
+
+        private fun factory(): SocketFactory = try {
+            wifiSocketFactory()
+        } catch (_: Exception) {
+            fallback
+        }
+
+        override fun createSocket(): Socket = factory().createSocket()
+
+        override fun createSocket(host: String?, port: Int): Socket =
+            factory().createSocket(host, port)
+
+        override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
+            factory().createSocket(host, port, localHost, localPort)
+
+        override fun createSocket(host: InetAddress?, port: Int): Socket =
+            factory().createSocket(host, port)
+
+        override fun createSocket(
+            address: InetAddress?,
+            port: Int,
+            localAddress: InetAddress?,
+            localPort: Int,
+        ): Socket = factory().createSocket(address, port, localAddress, localPort)
+    }
+
+    fun hasToken(): Boolean = !token.isNullOrBlank()
+
     fun mediaUrl(name: String): String = "$baseUrl/media/$name"
 
     fun captcha(): JSONObject {
-        val req = Request.Builder().url("$baseUrl/api/captcha").get().build()
-        client.newCall(req).execute().use { resp ->
-            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
-            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "取得驗證碼失敗"))
-            return json
+        val url = "$baseUrl/api/captcha"
+        Log.i(TAG, "GET $url")
+        val req = Request.Builder().url(url).get().build()
+        try {
+            client.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                Log.i(TAG, "captcha HTTP ${resp.code} bytes=${body.length}")
+                val json = JSONObject(body.ifBlank { "{}" })
+                if (!resp.isSuccessful) {
+                    throw RuntimeException(errorDetail(json, "取得驗證碼失敗 HTTP ${resp.code}"))
+                }
+                val token = json.optString("captcha_token")
+                val b64 = json.optString("image_base64")
+                val mime = json.optString("mime", "image/png")
+                Log.i(
+                    TAG,
+                    "captcha fields tokenLen=${token.length} b64Len=${b64.length} mime=$mime keys=${json.keys().asSequence().toList()}"
+                )
+                if (token.isBlank() || b64.isBlank()) {
+                    throw RuntimeException("CAPTCHA_BAD_JSON: missing captcha_token or image_base64")
+                }
+                return json
+            }
+        } catch (e: UnknownHostException) {
+            throw IOException("CAPTCHA_DNS: ${e.message}", e)
+        } catch (e: ConnectException) {
+            throw IOException("CAPTCHA_REFUSED: ${e.message}", e)
+        } catch (e: SocketTimeoutException) {
+            throw IOException("CAPTCHA_TIMEOUT: ${e.message}", e)
+        } catch (e: IOException) {
+            val msg = (e.message ?: "").lowercase()
+            if (msg.contains("cleartext") || msg.contains("plaintext")) {
+                throw IOException("CAPTCHA_CLEARTEXT: ${e.message}", e)
+            }
+            throw e
         }
+    }
+
+    companion object {
+        private const val TAG = "HealthingCaptcha"
     }
 
     fun register(
@@ -163,13 +301,17 @@ class ApiClient(
         scores: String,
         patterns: String,
         female: Boolean,
-        byBody: Boolean = false
+        byBody: Boolean = false,
+        name: String = "",
     ): JSONObject {
         val url = "$baseUrl/api/recipes".toHttpUrl().newBuilder()
-            .addQueryParameter("country", country)
             .addQueryParameter("lang", lang)
             .addQueryParameter("female", if (female) "1" else "0")
             .addQueryParameter("by_body", if (byBody) "1" else "0")
+        val countryTrim = country.trim()
+        val nameTrim = name.trim()
+        if (countryTrim.isNotEmpty()) url.addQueryParameter("country", countryTrim)
+        if (nameTrim.isNotEmpty()) url.addQueryParameter("name", nameTrim)
         if (scores.isNotBlank()) url.addQueryParameter("scores", scores)
         if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
         val req = Request.Builder().url(url.build()).auth().get().build()
@@ -210,9 +352,99 @@ class ApiClient(
             builder.addFormDataPart("image", "$shotType.jpg", shotFile.asRequestBody(jpeg))
         }
         val req = Request.Builder().url("$baseUrl/api/record").auth().post(builder.build()).build()
-        client.newCall(req).execute().use { resp ->
+        recordClient.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "送出失敗"))
+            return json
+        }
+    }
+
+    fun mealsDay(date: String? = null): JSONObject {
+        val url = "$baseUrl/api/meals/day".toHttpUrl().newBuilder()
+        if (!date.isNullOrBlank()) url.addQueryParameter("date", date)
+        val req = Request.Builder().url(url.build()).auth().get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取飲食日摘要失敗"))
+            return json
+        }
+    }
+
+    fun mealsMonth(year: Int, month: Int): JSONObject {
+        val url = "$baseUrl/api/meals/month".toHttpUrl().newBuilder()
+            .addQueryParameter("year", year.toString())
+            .addQueryParameter("month", month.toString())
+            .build()
+        val req = Request.Builder().url(url).auth().get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取飲食月曆失敗"))
+            return json
+        }
+    }
+
+    fun addMeal(
+        recipeId: Int,
+        mealDate: String,
+        mealSlot: String,
+        servings: Double = 1.0,
+        lang: String = "zh",
+    ): JSONObject {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("recipe_id", recipeId.toString())
+            .addFormDataPart("meal_date", mealDate)
+            .addFormDataPart("meal_slot", mealSlot)
+            .addFormDataPart("servings", servings.toString())
+            .addFormDataPart("lang", lang)
+            .build()
+        val req = Request.Builder().url("$baseUrl/api/meals").auth().post(body).build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "加入飲食失敗"))
+            return json
+        }
+    }
+
+    fun deleteMeal(mealId: Int, date: String? = null): JSONObject {
+        val url = "$baseUrl/api/meals/$mealId".toHttpUrl().newBuilder()
+        if (!date.isNullOrBlank()) url.addQueryParameter("date", date)
+        val req = Request.Builder().url(url.build()).auth().delete().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "刪除飲食失敗"))
+            return json
+        }
+    }
+
+    fun activityToday(date: String? = null): JSONObject {
+        val url = "$baseUrl/api/activity/today".toHttpUrl().newBuilder()
+        if (!date.isNullOrBlank()) url.addQueryParameter("date", date)
+        val req = Request.Builder().url(url.build()).auth().get().build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取今日活動失敗"))
+            return json
+        }
+    }
+
+    fun postSteps(
+        date: String,
+        actualSteps: Int,
+        source: String,
+        burnedKcal: Double? = null,
+    ): JSONObject {
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("date", date)
+            .addFormDataPart("actual_steps", actualSteps.toString())
+            .addFormDataPart("steps", actualSteps.toString())
+            .addFormDataPart("source", source)
+        if (burnedKcal != null) {
+            builder.addFormDataPart("burned_kcal", burnedKcal.toString())
+        }
+        val req = Request.Builder().url("$baseUrl/api/activity/today").auth().post(builder.build()).build()
+        client.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "同步步數失敗"))
             return json
         }
     }
@@ -225,7 +457,7 @@ class ApiClient(
             .addFormDataPart("lang", lang)
             .build()
         val req = Request.Builder().url("$baseUrl/api/recipes/ensure").auth().post(body).build()
-        client.newCall(req).execute().use { resp ->
+        ensureClient.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "建立食譜失敗"))
             return json

@@ -262,6 +262,9 @@ fun bindOrganScores(
     scores: JSONObject?,
     patterns: JSONObject?,
     female: Boolean,
+    organLabel: (String) -> String = { key ->
+        ORGAN_SCORE_META.firstOrNull { it.key == key }?.name ?: key
+    },
 ) {
     grid.removeAllViews()
     val ctx = grid.context
@@ -280,7 +283,7 @@ fun bindOrganScores(
             setBackgroundColor(Color.parseColor("#F5F5F5"))
         }
         cell.addView(TextView(ctx).apply {
-            text = meta.name
+            text = organLabel(meta.key)
             textSize = 12f
             setTextColor(Color.parseColor("#616161"))
         })
@@ -315,6 +318,10 @@ fun buildSessionSummary(
     female: Boolean,
     headingIdle: String,
     sourceLabelOf: (String) -> String,
+    organLabel: (String) -> String = { key ->
+        ORGAN_SCORE_META.firstOrNull { it.key == key }?.name ?: key
+    },
+    organScoresHeading: String = "臟腑平均分（僅有測到的來源）",
 ): String {
     val scores = json.optJSONObject("scores")
     val patterns = json.optJSONObject("patterns")
@@ -347,12 +354,12 @@ fun buildSessionSummary(
         if (scores == null || !scores.has(meta.scoreKey)) return@mapNotNull null
         val n = scores.optInt(meta.scoreKey, -1)
         if (n < 0) return@mapNotNull null
-        meta.name to n
+        organLabel(meta.key) to n
     }
     if (scored.isNotEmpty()) {
         val avg = scored.map { it.second }.average()
         lines.add(
-            "臟腑平均分（僅有測到的來源）：" +
+            "$organScoresHeading：" +
                 scored.joinToString("、") { "${it.first}${it.second}" } +
                 "（均 ${"%.1f".format(avg)}）"
         )
@@ -363,7 +370,7 @@ fun buildSessionSummary(
         val score = scores?.optInt(meta.scoreKey, -1)?.takeIf { it >= 0 }
         val label = patternDisplayLabel(score, patterns?.optString(meta.patternKey))
         if (label.isBlank() || label == "健康" || label == "待觀察") return@mapNotNull null
-        "${meta.name}$label"
+        "${organLabel(meta.key)}$label"
     }
     if (flagged.isNotEmpty()) {
         lines.add("主要證型：" + flagged.joinToString("、"))

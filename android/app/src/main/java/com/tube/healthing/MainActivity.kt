@@ -175,7 +175,10 @@ class MainActivity : AppCompatActivity() {
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         binding.preview.scaleType = PreviewView.ScaleType.FILL_CENTER
         ensureLoginFieldsEditable()
-        val savedUrl = sanitizeBaseUrl(prefs.getString("base_url", getString(R.string.default_base_url)))
+        val storedUrl = prefs.getString("base_url", null)
+        val savedUrl = sanitizeBaseUrl(
+            if (storedUrl.isNullOrBlank()) getString(R.string.default_base_url) else storedUrl,
+        )
         binding.server.setText(savedUrl)
         if (savedUrl.isNotBlank()) {
             api.setBaseUrl(savedUrl)
@@ -1053,71 +1056,86 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 Toast.makeText(this, t("toastCircleBusy"), Toast.LENGTH_SHORT).show()
             }
+            // Same endpoint/rules as web. Do NOT re-upload face/tongue on circle re-shot:
+            // that re-runs heavy face/tongue grids, often exceeds phone timeouts, and leaves
+            // circleResult on the previous line (catch path does not rewrite UI).
             val json = api.submit(
                 symptoms = binding.symptoms.text.toString(),
                 discomfort = binding.discomfort.text.toString(),
-                face = faceFile,
-                tongue = tongueFile,
-                pulseJson = if (pulseReady(pulseJson)) pulseJson else null,
+                face = null,
+                tongue = null,
+                pulseJson = null,
                 colorTemperatureK = selectedColorTemperatureK(),
                 shotType = kind,
                 shotFile = file,
                 confounders = confoundersCsv(),
-                includePulse = pulseReady(pulseJson),
+                includePulse = false,
                 deviceHint = silentDeviceHint(),
             )
             // Do not keep stool/urine photo for display.
             if (kind == CameraFacing.STOOL) stoolFile = null
             if (kind == CameraFacing.URINE) urineFile = null
             runOnUiThread {
-                // Primary judgment surface: @id/circleResult under stool/urine buttons.
-                // Force focus modality from this response (ignore any prior panel merge races).
-                showDayResult(json, focusKind = kind)
-                val forced = StoolUrineJudge.briefStatus(json, kind)
-                val panel = binding.circleResult.text?.toString().orEmpty()
-                val merged = linkedMapOf<String, String>()
-                panel.lineSequence().forEach { line ->
-                    val t = line.trim()
-                    when {
-                        t.startsWith("大便") -> merged["stool"] = t
-                        t.startsWith("尿尿") -> merged["urine"] = t
-                        t.startsWith("脈") -> merged["pulse"] = t
-                    }
-                }
-                if (kind == CameraFacing.STOOL || kind == "stool") merged["stool"] = forced
-                if (kind == CameraFacing.URINE || kind == "urine") merged["urine"] = forced
-                val text = listOfNotNull(merged["stool"], merged["urine"], merged["pulse"])
-                    .joinToString("\n")
-                if (text.isNotBlank()) {
-                    binding.circleResult.text = text
-                    binding.circleResult.visibility = View.VISIBLE
-                }
-                binding.result.text = prettyCircle(json, kind)
-                bindAdvice(json)
-                bindOrganSessionUi(json)
-                refreshTrend()
-                refreshRecipeChoices(keepSelection = true)
-                Toast.makeText(
-                    this,
-                    StoolUrineJudge.toastLine(json, kind),
-                    Toast.LENGTH_LONG,
-                ).show()
-                binding.bodyImage.post {
-                    Thread {
-                        applyBodyOverlays(
-                            binding.bodyMap,
-                            binding.bodyImage,
-                            json.optJSONObject("overlays"),
-                            json.optJSONObject("scores"),
-                            female,
-                            api::mediaUrl,
-                            http
-                        )
-                    }.start()
-                }
+                applyCircleShotResult(json, kind)
             }
         } catch (e: Exception) {
-            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+            // Timeout/network: keep old text intentionally visible, but say so clearly.
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    t("toastCircleTimeoutKeep") + "\n" + friendlyNetworkError(e),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    /** Force-replace this modality line from live /api/record (like web lastDayLines). */
+    private fun applyCircleShotResult(json: JSONObject, kind: String) {
+        showDayResult(json, focusKind = kind)
+        val forced = StoolUrineJudge.briefStatus(json, kind).ifBlank {
+            if (kind == CameraFacing.URINE || kind == "urine") "尿尿：尚無色調判斷"
+            else "大便：尚無色調判斷"
+        }
+        val panel = binding.circleResult.text?.toString().orEmpty()
+        val merged = linkedMapOf<String, String>()
+        panel.lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("大便") -> merged["stool"] = t
+                t.startsWith("尿尿") -> merged["urine"] = t
+                t.startsWith("脈") -> merged["pulse"] = t
+            }
+        }
+        // Live shot always wins for its modality (never keep prior panel string).
+        if (kind == CameraFacing.STOOL || kind == "stool") merged["stool"] = forced
+        if (kind == CameraFacing.URINE || kind == "urine") merged["urine"] = forced
+        val text = listOfNotNull(merged["stool"], merged["urine"], merged["pulse"])
+            .joinToString("\n")
+        binding.circleResult.text = text
+        binding.circleResult.visibility = if (text.isNotBlank()) View.VISIBLE else View.GONE
+        binding.result.text = prettyCircle(json, kind)
+        bindAdvice(json)
+        bindOrganSessionUi(json)
+        refreshTrend()
+        refreshRecipeChoices(keepSelection = true)
+        Toast.makeText(
+            this,
+            StoolUrineJudge.toastLine(json, kind),
+            Toast.LENGTH_LONG,
+        ).show()
+        binding.bodyImage.post {
+            Thread {
+                applyBodyOverlays(
+                    binding.bodyMap,
+                    binding.bodyImage,
+                    json.optJSONObject("overlays"),
+                    json.optJSONObject("scores"),
+                    female,
+                    api::mediaUrl,
+                    http
+                )
+            }.start()
         }
     }
 
@@ -2384,7 +2402,9 @@ class MainActivity : AppCompatActivity() {
         }
         val shownScores = withoutMaleUterus(scores)
         val shownPatterns = withoutMaleUterus(patterns)
-        bindOrganScores(binding.organScores, shownScores, shownPatterns, female)
+        bindOrganScores(binding.organScores, shownScores, shownPatterns, female) { key ->
+            UiLang.organName(currentLang(), key)
+        }
         val summaryJson = JSONObject(json.toString())
         summaryJson.put("scores", shownScores ?: JSONObject())
         summaryJson.put("patterns", shownPatterns ?: JSONObject())
@@ -2392,17 +2412,20 @@ class MainActivity : AppCompatActivity() {
             summaryJson,
             female,
             t("sessionSummaryIdle"),
-        ) { key ->
-            when (key) {
-                "face" -> t("sourceFace")
-                "tongue_body" -> t("sourceTongueBody")
-                "tongue_coat" -> t("sourceTongueCoat")
-                "stool" -> t("sourceStool")
-                "urine" -> t("sourceUrine")
-                "pulse" -> t("sourcePulse")
-                else -> sourceKeyLabel(key)
-            }
-        }
+            sourceLabelOf = { key ->
+                when (key) {
+                    "face" -> t("sourceFace")
+                    "tongue_body" -> t("sourceTongueBody")
+                    "tongue_coat" -> t("sourceTongueCoat")
+                    "stool" -> t("sourceStool")
+                    "urine" -> t("sourceUrine")
+                    "pulse" -> t("sourcePulse")
+                    else -> sourceKeyLabel(key)
+                }
+            },
+            organLabel = { key -> UiLang.organName(currentLang(), key) },
+            organScoresHeading = t("organScoresHeading"),
+        )
     }
 
     private fun bindAdvice(json: JSONObject) {

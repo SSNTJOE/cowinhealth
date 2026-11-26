@@ -1602,6 +1602,19 @@ def _confirm_stool_class(
     return out, notes
 
 
+def _downscale_circle(image: Image.Image, max_side: int = 720) -> Image.Image:
+    """Phone JPEGs are huge; Lab/WB on 1600px+ was multi-second and timed out App clients."""
+    work = image.convert("RGB")
+    largest = max(work.size)
+    if largest <= max_side:
+        return work
+    scale = max_side / float(largest)
+    return work.resize(
+        (max(1, int(round(work.size[0] * scale))), max(1, int(round(work.size[1] * scale)))),
+        Image.Resampling.BILINEAR,
+    )
+
+
 def _preprocess_circle_image(
     image: Image.Image,
     color_temperature_k: int | float | str | None = "auto",
@@ -1614,7 +1627,7 @@ def _preprocess_circle_image(
         estimate_relative_brightness,
     )
 
-    rgb = image.convert("RGB")
+    rgb = _downscale_circle(image.convert("RGB"), max_side=720)
     if color_temperature_k is None or str(color_temperature_k).strip().lower() in {"", "auto"}:
         cct = estimate_color_temperature_k(rgb)
         auto = True

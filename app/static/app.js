@@ -2825,8 +2825,12 @@ async function sendRecord(extraShot) {
       if (cf) body.append("confounders", cf);
     }
   }
-  if (lastShots.face && extraShot !== "face") body.append("face", lastShots.face, "face.jpg");
-  if (lastShots.tongue && extraShot !== "tongue") body.append("tongue", lastShots.tongue, "tongue.jpg");
+  // Circle re-shot: only send this modality image (server keeps other day_modalities).
+  // Re-attaching face/tongue re-runs heavy grids and can time out phones / slow web.
+  if (!CIRCLE_SHOTS.has(extraShot)) {
+    if (lastShots.face && extraShot !== "face") body.append("face", lastShots.face, "face.jpg");
+    if (lastShots.tongue && extraShot !== "tongue") body.append("tongue", lastShots.tongue, "tongue.jpg");
+  }
   const result = await api("/api/record", { method: "POST", body });
   camMsg.textContent = CIRCLE_SHOTS.has(extraShot)
     ? "已產生文字判斷（未存照片）"

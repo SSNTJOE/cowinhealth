@@ -41,19 +41,35 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     private var pendingOrganSummary = ""
 
     private data class PulseStep(
-        val shortName: String,
-        val organs: String,
+        val stepKey: String,
+        val heavyOrgan: String,
+        val lightOrgan: String,
         val resId: Int,
     )
 
     private val steps = listOf(
-        PulseStep("左寸", "心、小腸", R.drawable.pulse_left_cun),
-        PulseStep("左關", "肝、膽", R.drawable.pulse_left_guan),
-        PulseStep("左尺", "腎、膀胱", R.drawable.pulse_left_chi),
-        PulseStep("右寸", "肺、大腸", R.drawable.pulse_right_cun),
-        PulseStep("右關", "脾、胃", R.drawable.pulse_right_guan),
-        PulseStep("右尺", "腎、命門", R.drawable.pulse_right_chi),
+        PulseStep("pulseStepLeftCun", "heart", "small_intestine", R.drawable.pulse_left_cun),
+        PulseStep("pulseStepLeftGuan", "liver", "gallbladder", R.drawable.pulse_left_guan),
+        PulseStep("pulseStepLeftChi", "kidney", "bladder", R.drawable.pulse_left_chi),
+        PulseStep("pulseStepRightCun", "lung", "large_intestine", R.drawable.pulse_right_cun),
+        PulseStep("pulseStepRightGuan", "spleen", "stomach", R.drawable.pulse_right_guan),
+        PulseStep("pulseStepRightChi", "mingmen", "bladder", R.drawable.pulse_right_chi),
     )
+
+    private fun uiLang(): String {
+        val prefs = getSharedPreferences("healthing", MODE_PRIVATE)
+        val stored = prefs.getString("ui_lang", "zh") ?: "zh"
+        return if (stored in setOf("zh", "en", "ja", "ko")) stored else "zh"
+    }
+
+    private fun t(key: String): String = UiLang.t(uiLang(), key)
+
+    private fun organName(key: String): String = UiLang.organName(uiLang(), key)
+
+    private fun stepShortName(step: PulseStep): String = t(step.stepKey)
+
+    private fun stepOrgansLabel(step: PulseStep): String =
+        "${organName(step.heavyOrgan)}、${organName(step.lightOrgan)}"
 
     private val permission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -212,7 +228,7 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         val padV = (4 * resources.displayMetrics.density).toInt()
         steps.forEachIndexed { index, step ->
             val btn = Button(this).apply {
-                text = chipLabel(index, step.shortName)
+                text = chipLabel(index, stepShortName(step))
                 textSize = 12f
                 isAllCaps = false
                 setPadding(padH, padV, padH, padV)
@@ -237,15 +253,17 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     private fun selectPosition(index: Int) {
         positionIndex = index.coerceIn(0, steps.lastIndex)
         val step = steps[positionIndex]
+        val shortName = stepShortName(step)
+        val organs = stepOrgansLabel(step)
         binding.positionBanner.text =
-            "目前量測：${step.shortName}（${step.organs}）· 步驟 ${positionIndex + 1}／${steps.size}"
+            "目前量測：$shortName（$organs）· 步驟 ${positionIndex + 1}／${steps.size}"
         binding.guideHand.setImageResource(step.resId)
         binding.guideCaption.text =
-            "左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝${step.shortName}（${step.organs}）"
+            "左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝$shortName（$organs）"
         stepChipButtons.forEachIndexed { i, btn ->
             val selected = i == positionIndex
             val done = stepReadings.containsKey(i)
-            btn.text = chipLabel(i, steps[i].shortName)
+            btn.text = chipLabel(i, stepShortName(steps[i]))
             btn.setBackgroundColor(
                 when {
                     selected -> Color.parseColor("#2E7D32")
@@ -314,10 +332,11 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         if (pendingOrganSummary.isBlank()) {
             binding.organConclusion.visibility = View.GONE
             binding.organConclusion.text = ""
-            binding.pulseScoreToggle.text = "脈搏分數 ▸"
+            binding.pulseScoreToggle.text = "${t("pulseScoreToggle")} ▸"
             return
         }
-        binding.pulseScoreToggle.text = if (organExpanded) "脈搏分數 ▾" else "脈搏分數 ▸"
+        binding.pulseScoreToggle.text =
+            if (organExpanded) "${t("pulseScoreToggle")} ▾" else "${t("pulseScoreToggle")} ▸"
         if (organExpanded) {
             binding.organConclusion.visibility = View.VISIBLE
             binding.organConclusion.text = pendingOrganSummary
@@ -327,7 +346,11 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     }
 
     private fun refreshOrganConclusion() {
-        pendingOrganSummary = PulseOrganJudge.summaryFromReadings(stepReadings)
+        pendingOrganSummary = PulseOrganJudge.summaryFromReadings(
+            stepReadings,
+            organName = { organName(it) },
+            title = t("pulseOrganSummaryTitle"),
+        )
         // Stay collapsed by default; only show body when user already expanded.
         applyOrganVisibility()
     }
@@ -345,7 +368,12 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
             stepBpms[positionIndex] = bpm
         }
         saveTodayReadings()
-        val json = PulseOrganJudge.pulseJsonFromReadings(stepReadings, lastBpm ?: stepBpms.values.lastOrNull())
+        val json = PulseOrganJudge.pulseJsonFromReadings(
+            stepReadings,
+            lastBpm ?: stepBpms.values.lastOrNull(),
+            organName = { organName(it) },
+            title = t("pulseOrganSummaryTitle"),
+        )
         val summary = json.optString("organ_summary")
         setResult(
             RESULT_OK,
@@ -378,12 +406,12 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
             }
             is FrontCameraHeartRateMonitor.MeasurementState.Measuring -> {
                 showGuideImages(true)
-                val step = steps[positionIndex]
+                val shortName = stepShortName(steps[positionIndex])
                 binding.status.text =
                     if (state.currentBpm > 0) {
-                        "量測 ${step.shortName}… ${state.remainingSeconds} 秒（約 ${state.currentBpm} BPM）"
+                        "量測 $shortName… ${state.remainingSeconds} 秒（約 ${state.currentBpm} BPM）"
                     } else {
-                        "量測 ${step.shortName}… ${state.remainingSeconds} 秒"
+                        "量測 $shortName… ${state.remainingSeconds} 秒"
                     }
                 binding.ring.setProgress(state.progress)
                 binding.start.isEnabled = false
@@ -417,11 +445,14 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         stepBpms[positionIndex] = medianBpm
         saveTodayReadings()
         val step = steps[positionIndex]
+        val shortName = stepShortName(step)
         val lines = PulseOrganJudge.linesForStep(positionIndex, beats15s)
-            .joinToString("；") { PulseOrganJudge.shortLine(it) }
+            .joinToString("；") { line ->
+                PulseOrganJudge.shortLine(line) { key -> organName(key) }
+            }
         binding.bpm.text = "$medianBpm BPM"
         binding.status.text =
-            "完成 ${step.shortName}：中位 $medianBpm BPM（15 秒約 $beats15s 次）\n$lines"
+            "完成 $shortName：中位 $medianBpm BPM（15 秒約 $beats15s 次）\n$lines"
         binding.done.isEnabled = true
         binding.remeasure.isEnabled = true
         refreshOrganConclusion()
@@ -429,7 +460,7 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         selectPosition(positionIndex)
         Toast.makeText(
             this,
-            "${step.shortName} $medianBpm BPM｜$lines",
+            "$shortName $medianBpm BPM｜$lines",
             Toast.LENGTH_LONG,
         ).show()
     }

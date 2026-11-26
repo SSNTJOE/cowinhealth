@@ -5,4 +5,6 @@
     <string name="camera_facing_tongue" translatable="false">front</string>
     <string name="camera_facing_stool" translatable="false">back</string>
     <string name="camera_facing_urine" translatable="false">back</string>
+    <!-- LAN default for this host Wi‑Fi; override in App server field if needed. Emulator: http://10.0.2.2:8000 -->
+    <string name="default_base_url" translatable="false">http://192.168.66.16:8000</string>
 </resources>
