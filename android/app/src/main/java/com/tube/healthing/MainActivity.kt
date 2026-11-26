@@ -987,19 +987,6 @@ class MainActivity : AppCompatActivity() {
         ).joinToString("|")
     }
 
-    private fun confoundersCsv(): String? {
-        val keys = mutableListOf<String>()
-        if (binding.confounderPitaya.isChecked) keys.add("pitaya")
-        if (binding.confounderPigBlood.isChecked) keys.add("pig_blood")
-        if (binding.confounderDarkGreens.isChecked) keys.add("dark_greens")
-        if (binding.confounderIron.isChecked) keys.add("iron")
-        if (binding.confounderAntacid.isChecked) keys.add("antacid")
-        if (binding.confounderBismuth.isChecked) keys.add("bismuth")
-        if (binding.confounderFood.isChecked) keys.add("染色")
-        if (keys.isEmpty()) return null
-        return keys.joinToString(",")
-    }
-
     /** Immediate face/tongue analyze; server keeps today's other modalities. */
     private fun submitModalityShot(kind: String, file: File) {
         try {
@@ -1068,7 +1055,6 @@ class MainActivity : AppCompatActivity() {
                 colorTemperatureK = selectedColorTemperatureK(),
                 shotType = kind,
                 shotFile = file,
-                confounders = confoundersCsv(),
                 includePulse = false,
                 deviceHint = silentDeviceHint(),
             )
@@ -1417,8 +1403,6 @@ class MainActivity : AppCompatActivity() {
         binding.shotUrine.text = t("shotUrine")
         binding.circleNote.text = ""
         binding.circleNote.visibility = View.GONE
-        binding.confounderHeading.text = t("confounder")
-        binding.confounderFood.text = t("confounderOther")
         binding.openPulse.text = t("openPulse")
         binding.save.text = t("save")
         binding.bodyHeading.text = t("bodyHeading")

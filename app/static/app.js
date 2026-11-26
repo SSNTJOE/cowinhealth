@@ -670,13 +670,9 @@ function captureFrame(kind) {
   return captureFaceFrame();
 }
 
-function selectedConfounders(kind) {
-  const name = kind === "urine" ? "urine-cf" : "stool-cf";
-  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
-    .map((el) => el.value)
-    .filter(Boolean)
-    .join(",");
-}
+/** Static teaching note under stool/urine interpretation (no checkbox questionnaire). */
+const DYE_CONFUSION_NOTE =
+  "火龍果, 紅色蔬果, 豬血, 深綠色蔬菜, 鐵劑, 制酸劑, 鋇劑等皆有可能染色排泄物造成混淆";
 
 const SYNDROME_STICKERS = new Set([
   "strong-hot.png",
@@ -1088,13 +1084,18 @@ function updateCircleLinesFromResult(result) {
 function renderCircleResultPanel() {
   const el = document.getElementById("circle-result");
   if (!el) return;
-  const lines = [
-    lastDayLines.face,
-    lastDayLines.tongue,
-    lastDayLines.stool,
-    lastDayLines.urine,
-    lastDayLines.pulse,
-  ].filter(Boolean);
+  const lines = [];
+  if (lastDayLines.face) lines.push(lastDayLines.face);
+  if (lastDayLines.tongue) lines.push(lastDayLines.tongue);
+  if (lastDayLines.stool) {
+    lines.push(lastDayLines.stool);
+    lines.push(DYE_CONFUSION_NOTE);
+  }
+  if (lastDayLines.urine) {
+    lines.push(lastDayLines.urine);
+    lines.push(DYE_CONFUSION_NOTE);
+  }
+  if (lastDayLines.pulse) lines.push(lastDayLines.pulse);
   if (!lines.length) {
     el.textContent = "";
     el.classList.add("hidden");
@@ -2820,10 +2821,6 @@ async function sendRecord(extraShot) {
     }
     body.append("shot_type", extraShot);
     body.append("image", blob, `${extraShot}.jpg`);
-    if (CIRCLE_SHOTS.has(extraShot)) {
-      const cf = selectedConfounders(extraShot);
-      if (cf) body.append("confounders", cf);
-    }
   }
   // Circle re-shot: only send this modality image (server keeps other day_modalities).
   // Re-attaching face/tongue re-runs heavy grids and can time out phones / slow web.

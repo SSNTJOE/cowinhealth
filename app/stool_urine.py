@@ -12,6 +12,11 @@ from PIL import Image, ImageFilter
 
 TEACHING_TAG = "教學示範，非診斷"
 
+# Static teaching note (web shows under stool/urine result; no checkbox questionnaire).
+DYE_CONFUSION_NOTE = (
+    "火龍果, 紅色蔬果, 豬血, 深綠色蔬菜, 鐵劑, 制酸劑, 鋇劑等皆有可能染色排泄物造成混淆"
+)
+
 STOOL_DANGER_NOTE = (
     "教育提醒（非診斷）：若排除飲食／藥物染色後，異常糞色超過約兩日，"
     "或合併發燒、暈眩、黃疸、尿如濃茶、劇痛、嘔吐、排便習慣明顯改變，請儘速就醫。"
@@ -1508,10 +1513,11 @@ def _confirm_stool_class(
     water: dict[str, Any],
     conf_keys: list[str],
 ) -> tuple[dict[str, Any], list[str]]:
-    """Rule-based anti-false-positive notes before output (teaching, not diagnosis)."""
+    """Image-based anti-false-positive notes (no checkbox questionnaire required)."""
     out = dict(hit)
     notes: list[str] = []
     cid = out.get("id") or ""
+    # Optional API confounders still accepted for backward compat; UI no longer collects them.
     conf_set = set(conf_keys)
 
     if cid == "black_tarry":
@@ -1521,12 +1527,12 @@ def _confirm_stool_class(
         if surf == "matte" and diet_black:
             out["label"] = "黑色／瀝青色（近似・飲食／鐵劑染色較可能）"
             out["hint"] = (
-                f"表面偏啞光（glossy≈{glossy:.2f}）；近24小時已勾選鐵劑／血品／鉍劑，"
-                "教學上先排除染色再解讀上消化道出血"
+                f"表面偏啞光（glossy≈{glossy:.2f}）；"
+                "教學上先排除飲食／鐵劑／鉍劑染色再解讀上消化道出血"
             )
             out["confirm"] = "diet_or_drug_matte_black"
             notes.append(
-                f"黑色確認：啞光＋已勾選染色因子 → 飲食／藥物染色較可能"
+                f"黑色確認：啞光＋可能染色因子 → 飲食／藥物染色較可能"
                 f"（GLCM對比≈{surface.get('glcm_contrast')}）（{TEACHING_TAG}）"
             )
         elif surf == "glossy_tar" and not diet_black:
@@ -1538,14 +1544,18 @@ def _confirm_stool_class(
             notes.append(
                 f"黑色確認：高光／紋理偏油亮 → 瀝青樣黑便較可能（教學）（{TEACHING_TAG}）"
             )
+        elif surf == "matte":
+            out["hint"] = (
+                f"{out.get('hint')}；表面偏啞光（glossy≈{glossy:.2f}），"
+                "教學上亦可能為飲食／鐵劑染色"
+            )
+            out["confirm"] = "diet_or_drug_matte_black"
+            notes.append(
+                f"黑色確認：啞光表面 → 飲食／藥物染色亦可能"
+                f"（GLCM對比≈{surface.get('glcm_contrast')}）（{TEACHING_TAG}）"
+            )
         elif diet_black:
-            notes.append(
-                f"近24小時已勾選可能致黑便因子，請先排除染色再解讀（{TEACHING_TAG}）"
-            )
-        else:
-            notes.append(
-                f"黑色確認：請勾選近24小時是否吃豬血／鐵劑／鉍劑以降低假陽性（{TEACHING_TAG}）"
-            )
+            notes.append(f"可能致黑便染色因子存在時，請先排除染色再解讀（{TEACHING_TAG}）")
 
     if cid == "bright_dark_red":
         pink = bool(water.get("pink_bloom"))
@@ -1560,45 +1570,34 @@ def _confirm_stool_class(
             notes.append(
                 f"紅色確認：水液 a* 暈染偏粉紅 → 新鮮出血較可能（教學）（{TEACHING_TAG}）"
             )
-        elif (clear or not pink) and ("pitaya" in conf_set):
-            out["label"] = "鮮紅色／暗紅色（近似・飲食色素較可能）"
+        elif clear or not pink:
+            out["label"] = "鮮紅色／暗紅色（近似・飲食色素亦可能）"
             out["hint"] = (
-                f"水液未見明顯 a* 粉紅暈染（Δa*≈{da}）且已勾選火龍果／紅色蔬果，"
-                "教學上飲食色素較可能"
+                f"水液未見明顯 a* 粉紅暈染（Δa*≈{da}），"
+                "教學上火龍果／紅色蔬果色素亦可能"
             )
             out["confirm"] = "clear_water_diet_red"
             notes.append(
-                f"紅色確認：無粉紅水暈＋火龍果等 → 飲食色素較可能（教學）（{TEACHING_TAG}）"
+                f"紅色確認：無粉紅水暈 → 飲食色素亦可能（教學）（{TEACHING_TAG}）"
             )
-        elif clear:
-            notes.append(
-                f"紅色確認：水液偏清；若近24小時吃火龍果／紅色蔬果，飲食色素較可能（{TEACHING_TAG}）"
-            )
-        elif "pitaya" in conf_set and pink:
-            notes.append(f"已勾選火龍果／紅色蔬果，但水液偏粉紅 — 仍請對照出血可能（{TEACHING_TAG}）")
 
-    if cid == "dark_green" and "dark_greens" in conf_set:
-        out["label"] = "墨綠色／深綠色（近似・深绿蔬菜／鐵劑混淆可能）"
-        out["hint"] = f"{out.get('hint')}；已勾選深綠色蔬菜／相關因子，教學上先排除染色"
-        out["confirm"] = "dark_greens_confounder"
-        notes.append(f"綠色確認：已勾選深綠色蔬菜等 → 染色混淆可能（{TEACHING_TAG}）")
+    if cid == "dark_green":
+        out["hint"] = f"{out.get('hint')}；深綠色蔬菜／鐵劑亦可能造成混淆"
+        if "dark_greens" in conf_set or "iron" in conf_set:
+            out["label"] = "墨綠色／深綠色（近似・深绿蔬菜／鐵劑混淆可能）"
+            out["confirm"] = "dark_greens_confounder"
+        notes.append(f"綠色確認：深綠色蔬菜／鐵劑染色混淆可能（{TEACHING_TAG}）")
 
-    if cid == "clay_gray" and ("antacid" in conf_set):
-        out["hint"] = f"{out.get('hint')}；已勾選制酸劑／鋇劑，教學上先排除造影／制酸染色"
-        out["confirm"] = "antacid_confounder"
-        notes.append(f"灰白確認：已勾選制酸劑／鋇劑 → 染色混淆可能（{TEACHING_TAG}）")
+    if cid == "clay_gray":
+        out["hint"] = f"{out.get('hint')}；制酸劑／鋇劑亦可能造成灰白混淆"
+        if "antacid" in conf_set:
+            out["confirm"] = "antacid_confounder"
+        notes.append(f"灰白確認：制酸劑／鋇劑染色混淆可能（{TEACHING_TAG}）")
 
-    if conf_keys and cid not in {"outside_palette"}:
-        notes.append(
-            "近24小時混淆勾選："
-            + "、".join(STOOL_CONFOUNDER_LABELS.get(k, k) for k in conf_keys)
-            + f"（{TEACHING_TAG}）"
-        )
-    elif cid in {"black_tarry", "bright_dark_red", "dark_green", "clay_gray"}:
-        notes.append(
-            "輸出前確認：近24小時是否吃火龍果／豬血／深綠色蔬菜，或服用鐵劑／制酸劑／鉍劑？"
-            f"（{TEACHING_TAG}）"
-        )
+    if cid in {"black_tarry", "bright_dark_red", "dark_green", "clay_gray", "outside_palette"}:
+        notes.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
+    elif conf_keys and cid not in {"outside_palette"}:
+        notes.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
     return out, notes
 
 
@@ -1687,7 +1686,6 @@ def analyze_stool_image(
         hit["steatorrhea_score"] = steat["score"]
 
     conf_keys = _parse_confounder_keys(confounders, STOOL_CONFOUNDER_LABELS)
-    user_conf = [STOOL_CONFOUNDER_LABELS.get(k, k) for k in conf_keys]
     water = _surrounding_water_a_bloom(work)
     water_red = bool(water.get("pink_bloom"))
     surface = _black_surface_metrics(work) if (hit.get("id") == "black_tarry" or L < 40) else {
@@ -1728,8 +1726,7 @@ def analyze_stool_image(
             )
         findings.append(f"{STEATORRHEA_FLOAT_NOTE}（{TEACHING_TAG}）")
     findings.extend(confirm_notes)
-    if user_conf and not any("近24小時混淆勾選" in n for n in confirm_notes):
-        findings.append(f"近２４小時自行勾選可能染色／混淆：{'、'.join(user_conf)}（{TEACHING_TAG}）")
+    # No checkbox questionnaire; static dye note already appended in confirm_notes when relevant.
     if water_red and hit["id"] in {"bright_dark_red", "normal_yellow_brown", "pale_oily"}:
         findings.append(
             f"周圍水液 a* 暈染偏粉紅（Δa*≈{water.get('da_ring_minus_center')}）："
@@ -1783,7 +1780,7 @@ def analyze_urine_image(
     turbidity = _turbidity_heuristic(work)
     foam = _foam_metrics(work, prior_frames=prior_foam_frames)
     hit = classify_urine_lab(L, a, b, turbidity=turbidity, hsv=(H, S, V))
-    user_conf = _parse_confounders(confounders, URINE_CONFOUNDER_LABELS)
+    # Optional confounders form field kept for API compat; UI no longer collects them.
     organ_scores = _organ_scores_from_keys(
         hit.get("organ_keys") or [], hit.get("health_score", 8), severe_gate=severe_gate
     )
@@ -1810,12 +1807,11 @@ def analyze_urine_image(
         extras.append("混合泡沫")
     if foam.get("decay_measured"):
         extras.append(f"泡沫衰減={foam.get('decay_half_life_hint')}")
-    if user_conf:
-        extras.append("已勾選染色")
     tip = hit.get("hint") or TEACHING_TAG
     if extras:
         tip = f"{tip}；{'、'.join(extras)}"
     findings = [f"尿尿：{status} — {hit['label']}（{tip}）"]
+    findings.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
     findings.append(f"{URINE_PHONE_LIMIT}（{TEACHING_TAG}）")
     if foam.get("foam_ratio", 0) >= 0.05:
         findings.append(
