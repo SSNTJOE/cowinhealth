@@ -7,7 +7,7 @@ from collections import Counter
 from html import unescape
 from typing import Any
 
-from .health_flags import ACUPOINT_BIAS, DIET_BIAS, allergy_exclude_tokens
+from .health_flags import allergy_exclude_tokens
 from .syndrome import ORGAN_META
 
 USER_AGENT = "Health-ing/1.0 (educational demo)"
@@ -352,6 +352,189 @@ def _merge_unique(*groups: list[str], limit: int) -> list[str]:
     return out
 
 
+def _clip_query(parts: list[str], *, max_len: int = 72) -> str:
+    query = " ".join(part for part in parts if part).strip()
+    if len(query) > max_len:
+        query = query[:max_len].rsplit(" ", 1)[0]
+    return query
+
+
+def query_from_search_url(url: str | None) -> str:
+    """Extract ?q= from a Google/search URL; blank if missing."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(raw)
+        qs = urllib.parse.parse_qs(parsed.query)
+        vals = qs.get("q") or []
+        return urllib.parse.unquote_plus(str(vals[0])).strip() if vals else ""
+    except Exception:
+        return ""
+
+
+def enrich_stored_advice(
+    row: dict[str, Any],
+    *,
+    allergies: list[str] | None = None,
+    conditions: list[str] | None = None,
+) -> dict[str, Any]:
+    """Fill missing structured query/url fields on a persisted health_records row."""
+    allergies = allergies or []
+    conditions = conditions or []
+    diet_query = str(row.get("diet_query") or "").strip() or query_from_search_url(row.get("diet_url"))
+    acu_query = str(row.get("acupoint_query") or "").strip() or query_from_search_url(row.get("acupoint_url"))
+    diet_video_query = str(row.get("diet_video_query") or "").strip()
+    acu_video_query = str(row.get("acupoint_video_query") or "").strip()
+
+    # Rebuild structured intents when older rows only stored article/image URLs.
+    diag_tokens = [
+        tok
+        for tok in (diet_query or acu_query).split()
+        if tok and tok not in {"食譜", "影片", "穴道", "圖片"} and not tok.startswith("-") and not tok.startswith("不含")
+    ][:3]
+    if not diet_query:
+        diet_query = diet_article_search_query(diag_tokens, conditions)
+    if not diet_video_query:
+        diet_video_query = diet_video_search_query(diag_tokens or diet_query.split(), conditions, allergies)
+    if not acu_query:
+        acu_query = acupoint_image_search_query(diag_tokens, conditions)
+    elif "圖片" in acu_query and "照片" not in acu_query:
+        acu_query = acu_query.replace("圖片", "照片", 1)
+    if not acu_video_query:
+        acu_video_query = acupoint_video_search_query(diag_tokens or acu_query.split(), conditions)
+
+    row["diet_query"] = diet_query
+    row["diet_video_query"] = diet_video_query
+    row["acupoint_query"] = acu_query
+    row["acupoint_video_query"] = acu_video_query
+    row["diet_url"] = row.get("diet_url") or google_recipe_article_url(diet_query)
+    row["diet_video_url"] = row.get("diet_video_url") or google_recipe_video_url(diet_video_query)
+    row["acupoint_url"] = row.get("acupoint_url") or google_acupoint_image_url(acu_query)
+    row["acupoint_video_url"] = row.get("acupoint_video_url") or google_acupoint_video_url(acu_video_query)
+    return row
+
+
+def diagnosis_result_keywords(
+    findings: list[str] | None,
+    symptoms: str,
+    discomfort: str,
+    result: dict[str, Any] | None = None,
+    week_records: list[dict[str, Any]] | None = None,
+    *,
+    limit: int = 4,
+) -> list[str]:
+    """今日症狀優先；若無症狀／不適，改用當日五臟六腑證型判斷。"""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(token: str) -> None:
+        text = (token or "").strip()
+        if not text or text in HEALTHY_PATTERN or text in seen:
+            return
+        seen.add(text)
+        out.append(text)
+
+    # Prefer today's typed symptoms / discomfort (and light week fallback).
+    for tok in symptom_discomfort_keywords(symptoms, discomfort, week_records, limit=limit):
+        add(tok)
+        if len(out) >= limit:
+            return out[:limit]
+
+    # No symptoms → today's 五臟六腑 judgment (patterns / findings).
+    if out:
+        return out[:limit]
+    patterns = (result or {}).get("patterns") if isinstance(result, dict) else None
+    if isinstance(patterns, dict):
+        for label in patterns.values():
+            add(str(label or ""))
+            if len(out) >= limit:
+                return out[:limit]
+    for finding in findings or []:
+        split = _split_organ_pattern(str(finding or ""))
+        if split and (split[0] or split[1]):
+            organ, kind = split
+            add(f"{organ}{kind}" if organ and kind else (organ or kind))
+        if len(out) >= limit:
+            return out[:limit]
+    return out[:limit]
+
+
+def special_disease_keywords(conditions: list[str] | None, *, limit: int = 2) -> list[str]:
+    """特殊疾病: user-selected condition labels (short)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for key in conditions or []:
+        label = str(key or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def diet_article_search_query(
+    diagnosis: list[str],
+    conditions: list[str],
+    *,
+    aux_keywords: list[str] | None = None,
+) -> str:
+    """食譜文章 → Google Search: 食譜 + 特殊疾病 + 今日症狀／五臟六腑。"""
+    parts = [
+        "食譜",
+        *special_disease_keywords(conditions, limit=2),
+        *diagnosis[:3],
+        *(aux_keywords or [])[:1],
+    ]
+    return _clip_query(parts, max_len=56) or "食譜"
+
+
+def diet_video_search_query(
+    diagnosis: list[str],
+    conditions: list[str],
+    allergies: list[str],
+) -> str:
+    """食譜影片 → 食譜 + 影片 + 特殊疾病 + 症狀／判斷，並避開過敏原。"""
+    parts = [
+        "食譜",
+        "影片",
+        *special_disease_keywords(conditions, limit=2),
+        *diagnosis[:3],
+        *allergy_excludes(allergies)[:4],
+    ]
+    return _clip_query(parts) or "食譜 影片"
+
+
+def acupoint_image_search_query(
+    diagnosis: list[str],
+    conditions: list[str],
+) -> str:
+    """穴道照片 → 穴道 + 照片 + 特殊疾病 + 症狀／判斷。"""
+    parts = [
+        "穴道",
+        "照片",
+        *special_disease_keywords(conditions, limit=2),
+        *diagnosis[:3],
+    ]
+    return _clip_query(parts) or "穴道 照片"
+
+
+def acupoint_video_search_query(
+    diagnosis: list[str],
+    conditions: list[str],
+) -> str:
+    """穴道影片 → 穴道 + 影片 + 特殊疾病 + 症狀／判斷。"""
+    parts = [
+        "穴道",
+        "影片",
+        *special_disease_keywords(conditions, limit=2),
+        *diagnosis[:3],
+    ]
+    return _clip_query(parts) or "穴道 影片"
+
+
 def diet_search_query(
     base: str,
     conditions: list[str],
@@ -362,29 +545,13 @@ def diet_search_query(
     session_keywords: list[str] | None = None,
     week_keywords: list[str] | None = None,
 ) -> str:
-    """Google query: symptoms/discomfort first, color directions aux, − allergens."""
-    extras = [DIET_BIAS[key] for key in conditions if key in DIET_BIAS]
+    """Legacy alias → 食譜文章（Google AI concise）. allergies ignored here."""
     primary = list(primary_keywords or [])
-    # Legacy callers may still pass session/week as color aux.
-    aux = _merge_unique(aux_keywords or [], session_keywords or [], week_keywords or [], limit=2)
+    aux = _merge_unique(aux_keywords or [], session_keywords or [], week_keywords or [], limit=1)
     if not primary and base:
-        primary = [tok for tok in str(base).split() if tok][:4]
-    parts = [
-        *primary[:6],
-        "食譜",
-        "作法",
-        "做法",
-        *aux,
-        *extras,
-        *allergy_excludes(allergies),
-        "(文章 OR 作法教學 OR 影片 OR YouTube OR 食譜影片)",
-        "教學參考食療",
-        "非診斷",
-    ]
-    query = " ".join(part for part in parts if part).strip()
-    if len(query) > 180:
-        query = query[:180].rsplit(" ", 1)[0]
-    return query
+        primary = [tok for tok in str(base).split() if tok][:3]
+    _ = allergies  # articles stay allergen-free for Gemini-style prompts
+    return diet_article_search_query(primary, conditions, aux_keywords=aux)
 
 
 def acupoint_search_query(
@@ -397,31 +564,12 @@ def acupoint_search_query(
     session_keywords: list[str] | None = None,
     week_keywords: list[str] | None = None,
 ) -> str:
-    """Google query: symptoms/discomfort first, color directions aux, image/video intent."""
-    extras = [ACUPOINT_BIAS[key] for key in conditions if key in ACUPOINT_BIAS]
-    if "服用抗凝血劑" in conditions:
-        extras.append("避免放血破血")
-        extras.append("輕柔按揉勿刮痧放血")
+    """Legacy alias → 穴道圖片 structured query."""
     primary = list(primary_keywords or [])
-    aux = _merge_unique(aux_keywords or [], session_keywords or [], week_keywords or [], limit=2)
     if not primary and base:
-        primary = [tok for tok in str(base).split() if tok][:4]
-    parts = [
-        *primary[:6],
-        "穴道按摩",
-        "穴位圖",
-        "按摩手法",
-        *aux,
-        *extras,
-        *acupoint_allergy_notes(allergies or []),
-        "(圖片 OR 示意圖 OR 影片 OR YouTube OR 按摩教學)",
-        "教學參考",
-        "非診斷",
-    ]
-    query = " ".join(part for part in parts if part).strip()
-    if len(query) > 180:
-        query = query[:180].rsplit(" ", 1)[0]
-    return query
+        primary = [tok for tok in str(base).split() if tok][:3]
+    _ = (allergies, aux_keywords, session_keywords, week_keywords)
+    return acupoint_image_search_query(primary, conditions)
 
 
 def local_fallback(
@@ -482,46 +630,36 @@ def build_advice(
 ) -> dict[str, str]:
     conditions = conditions or []
     allergies = allergies or []
-    primary = symptom_discomfort_keywords(symptoms, discomfort, week_records)
+    diagnosis = diagnosis_result_keywords(
+        findings, symptoms, discomfort, result, week_records, limit=4
+    )
     diet_aux = _merge_unique(
         keywords_from_session_result(result),
         keywords_from_week_records(week_records),
-        limit=2,
+        limit=1,
     )
-    acu_aux = _merge_unique(
-        acupoint_keywords_from_session_result(result),
-        acupoint_keywords_from_week_records(week_records),
-        limit=2,
-    )
-    diet_query = diet_search_query(
-        " ".join(primary) or "中醫食譜調理",
-        conditions,
-        allergies,
-        primary_keywords=primary,
-        aux_keywords=diet_aux,
-    )
-    acupoint_query = acupoint_search_query(
-        " ".join(primary) or "中醫調理",
-        conditions,
-        allergies,
-        primary_keywords=primary,
-        aux_keywords=acu_aux,
-    )
+    # Four structured intents (aligned with Android SearchLinks labels).
+    diet_query = diet_article_search_query(diagnosis, conditions, aux_keywords=diet_aux)
+    diet_video_query = diet_video_search_query(diagnosis, conditions, allergies)
+    acupoint_query = acupoint_image_search_query(diagnosis, conditions)
+    acupoint_video_query = acupoint_video_search_query(diagnosis, conditions)
     snippet = fetch_snippet(diet_query)
     if not snippet:
         snippet = clip50(
             local_fallback(findings, (symptoms or "") + (discomfort or ""), conditions, allergies)
         )
     diet_url = google_recipe_article_url(diet_query)
-    diet_video_url = google_recipe_video_url(diet_query)
+    diet_video_url = google_recipe_video_url(diet_video_query)
     acupoint_url = google_acupoint_image_url(acupoint_query)
-    acupoint_video_url = google_acupoint_video_url(acupoint_query)
+    acupoint_video_url = google_acupoint_video_url(acupoint_video_query)
     return {
         "diet_advice": snippet,
         "diet_url": diet_url,
         "diet_video_url": diet_video_url,
         "diet_query": diet_query,
+        "diet_video_query": diet_video_query,
         "acupoint_url": acupoint_url,
         "acupoint_video_url": acupoint_video_url,
         "acupoint_query": acupoint_query,
+        "acupoint_video_query": acupoint_video_query,
     }

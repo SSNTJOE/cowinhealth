@@ -1,0 +1,174 @@
+package com.tube.healthing
+
+import org.json.JSONObject
+
+/**
+ * Teaching-demo stool / urine → short normal vs concern text.
+ * Mirrors server [app/stool_urine.py] class labels (abnormal flag).
+ */
+object StoolUrineJudge {
+    data class ClassHit(
+        val id: String,
+        val label: String,
+        val organs: String,
+        val hint: String,
+        val healthScore: Int,
+        val abnormal: Boolean,
+        val organKeys: List<String>,
+    )
+
+    data class OrganLine(
+        val name: String,
+        val display: String,
+        val score: Int,
+        val note: String,
+    )
+
+    fun extractClass(note: JSONObject?): ClassHit? {
+        if (note == null) return null
+        val cls = note.optJSONObject("class") ?: return null
+        val keys = mutableListOf<String>()
+        val arr = cls.optJSONArray("organ_keys")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val k = arr.optString(i).trim()
+                if (k.isNotBlank()) keys.add(k)
+            }
+        }
+        val label = cls.optString("label").trim()
+        if (label.isBlank() && keys.isEmpty()) return null
+        return ClassHit(
+            id = cls.optString("id").trim(),
+            label = label.ifBlank { "未分類" },
+            organs = cls.optString("organs").trim(),
+            hint = cls.optString("hint").trim(),
+            healthScore = cls.optInt("health_score", 8).coerceIn(1, 10),
+            abnormal = cls.optBoolean("abnormal", false),
+            organKeys = keys,
+        )
+    }
+
+    fun shortLine(line: OrganLine): String {
+        return "${line.name}：${line.display}（${line.note}，約${line.score}分）"
+    }
+
+    private fun displayFor(score: Int, pattern: String?, abnormal: Boolean): String {
+        val fromPattern = patternDisplayLabel(score, pattern)
+        if (fromPattern.isNotBlank()) return fromPattern
+        return when {
+            score >= 8 -> "健康"
+            abnormal && score <= 4 -> "需留意"
+            else -> "待觀察"
+        }
+    }
+
+    private fun noteSnippet(hit: ClassHit?): String {
+        val label = hit?.label?.trim().orEmpty()
+        if (label.isNotBlank()) return label.take(18)
+        return "教學色調"
+    }
+
+    private fun scoresForKind(json: JSONObject, kind: String, hit: ClassHit?): Map<String, Int> {
+        val out = LinkedHashMap<String, Int>()
+        val note = json.optJSONObject(kind)
+        val nested = note?.optJSONObject("organ_scores")
+        if (nested != null) {
+            ORGAN_SCORE_META.forEach { meta ->
+                if (nested.has(meta.scoreKey)) {
+                    val n = nested.optInt(meta.scoreKey, -1)
+                    if (n >= 0) out[meta.key] = n.coerceIn(1, 10)
+                }
+            }
+        }
+        if (out.isEmpty()) {
+            val top = json.optJSONObject("scores")
+            val keys = hit?.organKeys.orEmpty().toSet()
+            ORGAN_SCORE_META.forEach { meta ->
+                if (keys.isNotEmpty() && meta.key !in keys) return@forEach
+                if (top != null && top.has(meta.scoreKey)) {
+                    val n = top.optInt(meta.scoreKey, -1)
+                    if (n >= 0) out[meta.key] = n.coerceIn(1, 10)
+                }
+            }
+        }
+        if (out.isEmpty() && hit != null) {
+            hit.organKeys.forEach { key -> out[key] = hit.healthScore.coerceIn(1, 10) }
+        }
+        return out
+    }
+
+    fun organLines(json: JSONObject, kind: String): List<OrganLine> {
+        val note = json.optJSONObject(kind)
+        val hit = extractClass(note)
+        val scores = scoresForKind(json, kind, hit)
+        if (scores.isEmpty()) return emptyList()
+        val patterns = json.optJSONObject("patterns")
+        val snippet = noteSnippet(hit)
+        return ORGAN_SCORE_META.mapNotNull { meta ->
+            val score = scores[meta.key] ?: return@mapNotNull null
+            val rawPattern = patterns?.optString(meta.patternKey).orEmpty()
+            OrganLine(
+                name = meta.name,
+                display = displayFor(score, rawPattern.ifBlank { null }, hit?.abnormal == true),
+                score = score,
+                note = snippet,
+            )
+        }
+    }
+
+    /** One short line: normal vs notes of concern (existing class rules). */
+    fun briefStatus(json: JSONObject, kind: String): String {
+        val isUrine = kind == CameraFacing.URINE || kind == "urine"
+        val tag = if (isUrine) "尿尿" else "大便"
+        val note = json.optJSONObject(kind)
+        val hit = extractClass(note)
+        val label = hit?.label?.trim()
+            ?.ifBlank { null }
+            ?: json.optString("color_label").trim().ifBlank { "未分類" }
+        if (hit == null && label == "未分類") {
+            return "$tag：尚無色調判斷"
+        }
+        val concernExtra = buildList {
+            if (isUrine) {
+                val foam = note?.optJSONObject("foam")
+                when (foam?.optString("granularity")) {
+                    "fine_dense" -> add("細密泡沫")
+                    "coarse_sparse" -> add("粗疏泡沫")
+                    "mixed" -> add("混合泡沫")
+                }
+                if (foam?.optBoolean("persistent_foam_teaching_alert", false) == true) {
+                    add("泡沫持續警覺")
+                }
+            } else {
+                val steat = note?.optJSONObject("steatorrhea")
+                if (steat?.optBoolean("triggered", false) == true || hit?.id == "pale_oily") {
+                    add("油光／淡脂線索")
+                }
+            }
+        }
+        return if (hit?.abnormal == true) {
+            val hint = hit.hint.take(24).ifBlank { hit.organs.take(24) }
+            val extra = if (concernExtra.isNotEmpty()) "；" + concernExtra.joinToString("、") else ""
+            if (hint.isNotBlank()) "$tag：需留意 — $label（$hint$extra）"
+            else "$tag：需留意 — $label$extra"
+        } else {
+            "$tag：正常 — $label"
+        }
+    }
+
+    /** Brief conclusion block shown after 拍大便／拍尿尿. */
+    fun summaryFromResult(json: JSONObject, kind: String): String {
+        val isUrine = kind == CameraFacing.URINE || kind == "urine"
+        val title = if (isUrine) {
+            "尿尿色診（教學參考，非診斷）"
+        } else {
+            "大便色診（教學參考，非診斷）"
+        }
+        return listOf(title, briefStatus(json, kind)).joinToString("\n")
+    }
+
+    /** One-line toast companion. */
+    fun toastLine(json: JSONObject, kind: String): String {
+        return briefStatus(json, kind)
+    }
+}

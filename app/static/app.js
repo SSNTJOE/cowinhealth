@@ -1048,7 +1048,9 @@ function renderResult(result) {
     }
   })();
   const acuVideoQ = (result.acupoint_video_query || "").trim() || (
-    acuImageQ ? `穴道 影片 ${acuImageQ.replace(/^穴道\s+圖片\s+/, "")}` : ""
+    acuImageQ
+      ? `穴道 影片 ${acuImageQ.replace(/^穴道\s+(?:照片|圖片)\s+/, "")}`
+      : ""
   );
   const acuImages = result.acupoint_url || (acuImageQ
     ? `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(acuImageQ)}`
