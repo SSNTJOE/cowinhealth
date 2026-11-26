@@ -4134,6 +4134,9 @@ def analyze_session(
     crops: dict[str, Any] = {}
     stool_note = None
     urine_note = None
+    face_findings: list[str] = []
+    tongue_findings: list[str] = []
+    shot_types_present = {r.get("shot_type") for r in color_reports if r.get("shot_type")}
     for report in color_reports:
         shot = report.get("shot_type")
         # Keep stool/urine text out of organ-score keyword mapping.
@@ -4143,6 +4146,12 @@ def analyze_session(
                 stool_note = report["stool"]
             if report.get("urine"):
                 urine_note = report["urine"]
+        elif shot == "face":
+            face_findings.extend(report.get("findings") or [])
+            findings.extend(report["findings"])
+        elif shot == "tongue":
+            tongue_findings.extend(report.get("findings") or [])
+            findings.extend(report["findings"])
         else:
             findings.extend(report["findings"])
         for key, value in (report.get("region_colors") or {}).items():
@@ -4163,6 +4172,57 @@ def analyze_session(
         if shot == "tongue" and report.get("preview"):
             tongue_preview = report["preview"]
 
+    # Same calendar day: keep prior modalities until that modality is re-shot.
+    prior = prior_session if isinstance(prior_session, dict) else {}
+    same_day = bool(prior.get("same_day"))
+    prior_day = prior.get("day_modalities") if isinstance(prior.get("day_modalities"), dict) else {}
+    prior_su = prior.get("stool_urine") if isinstance(prior.get("stool_urine"), dict) else {}
+    if same_day:
+        if face_grid is None and isinstance(prior.get("face_grid"), dict):
+            face_grid = prior["face_grid"]
+            prior_face = prior_day.get("face") if isinstance(prior_day.get("face"), dict) else {}
+            face_findings = list(prior_face.get("findings") or [])
+            findings.extend(face_findings)
+            for key, value in (prior.get("region_colors") or {}).items():
+                if key in ("face_color", "lip_color") and value and not region_colors.get(key):
+                    region_colors[key] = value
+            if prior_face.get("color_label") and color_label == "尚未拍照":
+                color_label = str(prior_face["color_label"])
+        if tongue_grid is None and isinstance(prior.get("tongue_grid"), dict):
+            tongue_grid = prior["tongue_grid"]
+            prior_tongue = prior_day.get("tongue") if isinstance(prior_day.get("tongue"), dict) else {}
+            tongue_findings = list(prior_tongue.get("findings") or [])
+            findings.extend(tongue_findings)
+            for key, value in (prior.get("region_colors") or {}).items():
+                if key in ("tongue_body_color", "tongue_coat_color") and value and not region_colors.get(key):
+                    region_colors[key] = value
+            if prior_tongue.get("color_label"):
+                color_label = (
+                    f"{color_label}／{prior_tongue['color_label']}"
+                    if color_label and color_label != "尚未拍照"
+                    else str(prior_tongue["color_label"])
+                )
+        if "stool" not in shot_types_present and isinstance(prior_su.get("stool"), dict):
+            stool_note = prior_su["stool"]
+            prior_stool_findings = prior_su.get("findings") or []
+            stool_bits = [
+                t for t in prior_stool_findings
+                if str(t).startswith("大便") or "大便" in str(t)[:8]
+            ]
+            if not stool_bits and isinstance(prior_day.get("stool"), dict):
+                stool_bits = list(prior_day["stool"].get("findings") or [])
+            stool_urine_findings = list(stool_bits) + list(stool_urine_findings)
+        if "urine" not in shot_types_present and isinstance(prior_su.get("urine"), dict):
+            urine_note = prior_su["urine"]
+            prior_urine_findings = prior_su.get("findings") or []
+            urine_bits = [
+                t for t in prior_urine_findings
+                if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
+            ]
+            if not urine_bits and isinstance(prior_day.get("urine"), dict):
+                urine_bits = list(prior_day["urine"].get("findings") or [])
+            stool_urine_findings = list(stool_urine_findings) + list(urine_bits)
+
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}", include_uterus=female)
     pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")
@@ -4182,6 +4242,14 @@ def analyze_session(
             continue
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     pulse_notes = apply_pulse(evidence, pulse)
+    if (
+        same_day
+        and not pulse_notes
+        and isinstance(prior_day.get("pulse"), dict)
+        and isinstance(prior_day["pulse"].get("findings"), list)
+    ):
+        # Pulse payload was carried; restore prior pulse narrative if apply_pulse was quiet.
+        pulse_notes = list(prior_day["pulse"]["findings"] or [])
     for organ, name in (("spleen", "脾"), ("stomach", "胃")):
         for kind in pattern_kinds_gained(evidence[organ], pattern_baseline[organ]):
             pattern_scores[f"{name}{kind}"] += 1
@@ -4313,6 +4381,74 @@ def analyze_session(
             "urine": urine_note,
             "findings": list(stool_urine_findings),
         }
+
+    # Persist today's modality snapshots so the next shot can update only one item.
+    day_modalities: dict[str, Any] = {}
+    if isinstance(prior_day, dict):
+        day_modalities.update(prior_day)
+    if face_grid is not None:
+        day_modalities["face"] = {
+            "color_label": next(
+                (
+                    r.get("color_label")
+                    for r in color_reports
+                    if r.get("shot_type") == "face" and r.get("color_label")
+                ),
+                (day_modalities.get("face") or {}).get("color_label")
+                or (face_grid.get("complexion") or {}).get("bias")
+                or "臉色已測",
+            ),
+            "findings": list(face_findings)
+            or list((day_modalities.get("face") or {}).get("findings") or []),
+        }
+    if tongue_grid is not None:
+        day_modalities["tongue"] = {
+            "color_label": next(
+                (
+                    r.get("color_label")
+                    for r in color_reports
+                    if r.get("shot_type") == "tongue" and r.get("color_label")
+                ),
+                (day_modalities.get("tongue") or {}).get("color_label") or "舌頭已測",
+            ),
+            "findings": list(tongue_findings)
+            or list((day_modalities.get("tongue") or {}).get("findings") or []),
+        }
+    if stool_note is not None:
+        day_modalities["stool"] = {
+            "color_label": (stool_note.get("class") or {}).get("label")
+            if isinstance(stool_note.get("class"), dict)
+            else "大便已測",
+            "findings": [t for t in stool_urine_findings if str(t).startswith("大便") or "大便" in str(t)[:8]]
+            or list((day_modalities.get("stool") or {}).get("findings") or []),
+        }
+    if urine_note is not None:
+        day_modalities["urine"] = {
+            "color_label": (urine_note.get("class") or {}).get("label")
+            if isinstance(urine_note.get("class"), dict)
+            else "尿尿已測",
+            "findings": [t for t in stool_urine_findings if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]]
+            or list((day_modalities.get("urine") or {}).get("findings") or []),
+        }
+    if pulse is not None or pulse_notes:
+        day_modalities["pulse"] = {
+            "present": True,
+            "findings": list(pulse_notes)
+            or list((day_modalities.get("pulse") or {}).get("findings") or []),
+        }
+    if day_modalities:
+        organ_health["day_modalities"] = day_modalities
+        # Prefer a stable multi-modality color label for UI.
+        label_bits = []
+        for key in ("face", "tongue", "stool", "urine"):
+            block = day_modalities.get(key)
+            if isinstance(block, dict) and block.get("color_label"):
+                tag = {"face": "臉", "tongue": "舌", "stool": "大便", "urine": "尿尿"}[key]
+                label_bits.append(f"{tag}：{block['color_label']}")
+        if day_modalities.get("pulse"):
+            label_bits.append("脈：已測")
+        if label_bits:
+            color_label = "／".join(label_bits)
 
     def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
         for organ, label in (pattern_map or {}).items():

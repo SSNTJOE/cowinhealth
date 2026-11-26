@@ -35,8 +35,10 @@ let alignMode = "face";
 let lastFaceGrid = null;
 let lastTongueGrid = null;
 let complexionHistory = [];
-/** Last stool/urine short status lines (persist across loadRecords re-render). */
-let lastCircleLines = { stool: "", urine: "" };
+/** Today's modality short lines (persist until that modality is re-shot). */
+let lastDayLines = { face: "", tongue: "", stool: "", urine: "", pulse: "" };
+/** @deprecated alias kept for stool/urine helpers */
+let lastCircleLines = lastDayLines;
 
 const organs = [
   { key: "lung", name: "肺", score: "lung_score", pattern: "lung_pattern", spots: [{ x: 44, y: 31.5 }, { x: 56, y: 31.5 }] },
@@ -997,30 +999,64 @@ function briefCircleLine(note, kind) {
   return abnormal ? `${tag}：需留意 — ${label}` : `${tag}：正常 — ${label}`;
 }
 
+function findingsFromDayModalities(organHealth) {
+  const dm = (organHealth && organHealth.day_modalities) || {};
+  const out = [];
+  for (const key of ["face", "tongue", "stool", "urine", "pulse"]) {
+    const block = dm[key];
+    if (!block || typeof block !== "object") continue;
+    const list = Array.isArray(block.findings) ? block.findings : [];
+    list.forEach((t) => {
+      const s = String(t || "").trim();
+      if (s) out.push(s);
+    });
+  }
+  return out;
+}
+
 function updateCircleLinesFromResult(result) {
   if (!result) return;
-  const su = (result.organ_health && result.organ_health.stool_urine) || {};
-  const stoolNote = result.stool || su.stool;
-  const urineNote = result.urine || su.urine;
+  const oh = result.organ_health || {};
+  const dm = oh.day_modalities || {};
+  const su = oh.stool_urine || {};
+  if (dm.face && dm.face.color_label) {
+    lastDayLines.face = `臉：${dm.face.color_label}`;
+  }
+  if (dm.tongue && dm.tongue.color_label) {
+    lastDayLines.tongue = `舌：${dm.tongue.color_label}`;
+  }
+  if (dm.pulse && (dm.pulse.present || (dm.pulse.findings || []).length)) {
+    lastDayLines.pulse = "脈：已測";
+  }
+  const stoolNote = result.stool || su.stool || (dm.stool && dm.stool.class) || null;
+  const urineNote = result.urine || su.urine || (dm.urine && dm.urine.class) || null;
   const stoolLine = briefCircleLine(stoolNote, "stool");
   const urineLine = briefCircleLine(urineNote, "urine");
-  if (stoolLine) lastCircleLines.stool = stoolLine;
-  if (urineLine) lastCircleLines.urine = urineLine;
+  if (stoolLine) lastDayLines.stool = stoolLine;
+  else if (dm.stool && dm.stool.color_label) lastDayLines.stool = `大便：${dm.stool.color_label}`;
+  if (urineLine) lastDayLines.urine = urineLine;
+  else if (dm.urine && dm.urine.color_label) lastDayLines.urine = `尿尿：${dm.urine.color_label}`;
   // Fallback: derive from short findings when nested note missing.
-  if (!stoolLine && Array.isArray(result.findings)) {
+  if (!lastDayLines.stool && Array.isArray(result.findings)) {
     const hit = result.findings.find((t) => String(t).startsWith("大便"));
-    if (hit) lastCircleLines.stool = String(hit).split("（")[0].trim();
+    if (hit) lastDayLines.stool = String(hit).split("（")[0].trim();
   }
-  if (!urineLine && Array.isArray(result.findings)) {
+  if (!lastDayLines.urine && Array.isArray(result.findings)) {
     const hit = result.findings.find((t) => String(t).startsWith("尿尿"));
-    if (hit) lastCircleLines.urine = String(hit).split("（")[0].trim();
+    if (hit) lastDayLines.urine = String(hit).split("（")[0].trim();
   }
 }
 
 function renderCircleResultPanel() {
   const el = document.getElementById("circle-result");
   if (!el) return;
-  const lines = [lastCircleLines.stool, lastCircleLines.urine].filter(Boolean);
+  const lines = [
+    lastDayLines.face,
+    lastDayLines.tongue,
+    lastDayLines.stool,
+    lastDayLines.urine,
+    lastDayLines.pulse,
+  ].filter(Boolean);
   if (!lines.length) {
     el.textContent = "";
     el.classList.add("hidden");
@@ -1834,13 +1870,14 @@ async function loadRecords(opts = {}) {
     return;
   }
   const latest = data.records[0];
-  const su = (latest.organ_health && latest.organ_health.stool_urine) || {};
+  const oh = latest.organ_health || {};
+  const su = oh.stool_urine || {};
+  const dmFindings = findingsFromDayModalities(oh);
   const circleFindings = Array.isArray(su.findings) ? su.findings.slice() : [];
   const textBits = [latest.symptoms, latest.discomfort].filter(Boolean);
-  // Keep stool/urine findings visible; do not replace them with only symptoms.
-  const findings = opts.preserveFindings
-    ? undefined
-    : (circleFindings.length ? circleFindings.concat(textBits) : textBits);
+  // Keep today's modality findings; do not replace them with only symptoms.
+  const mergedFindings = (dmFindings.length ? dmFindings : circleFindings).concat(textBits);
+  const findings = opts.preserveFindings ? undefined : mergedFindings;
   if (!opts.skipResult) {
     const payload = {
       scores: latest,
@@ -1860,22 +1897,24 @@ async function loadRecords(opts = {}) {
       acupoint_video_url: latest.acupoint_video_url,
       acupoint_query: latest.acupoint_query,
       acupoint_video_query: latest.acupoint_video_query,
-      color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
+      color_label: latest.color_label
+        || [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
       face_grid: latest.face_grid,
       tongue_grid: latest.tongue_grid,
       complexion: (latest.face_grid && latest.face_grid.complexion) || {
         bias: latest.complexion_label,
         hex: latest.complexion_hex,
       },
-      disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
+      disclaimer: "以下為今日累積檢測（同一天內換拍只更新該項）。教學示範，非診斷。",
     };
     renderResult(payload);
   } else {
-    // Circle shot just rendered live findings — only refresh the persistent panel from DB.
+    // Live shot just rendered — refresh persistent day panel from DB merge.
     updateCircleLinesFromResult({
       organ_health: latest.organ_health,
       stool: su.stool || null,
       urine: su.urine || null,
+      findings: mergedFindings,
     });
     renderCircleResultPanel();
   }

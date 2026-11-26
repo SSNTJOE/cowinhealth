@@ -893,9 +893,8 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) {
                             }
                             faceFile = file
-                            runOnUiThread {
-                                Toast.makeText(this@MainActivity, t("toastFaceShot"), Toast.LENGTH_SHORT).show()
-                            }
+                            // Same as website: analyze immediately; keep today’s other modalities on server.
+                            Thread { submitModalityShot(CameraFacing.FACE, file) }.start()
                         }
                         CameraFacing.TONGUE -> {
                             try {
@@ -903,9 +902,7 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) {
                             }
                             tongueFile = file
-                            runOnUiThread {
-                                Toast.makeText(this@MainActivity, t("toastTongueShot"), Toast.LENGTH_SHORT).show()
-                            }
+                            Thread { submitModalityShot(CameraFacing.TONGUE, file) }.start()
                         }
                         CameraFacing.STOOL, CameraFacing.URINE -> {
                             if (mode == CameraFacing.STOOL) stoolFile = file else urineFile = file
@@ -991,6 +988,55 @@ class MainActivity : AppCompatActivity() {
         return "近24小時飲食或藥物可能染色"
     }
 
+    /** Immediate face/tongue analyze; server keeps today's other modalities. */
+    private fun submitModalityShot(kind: String, file: File) {
+        try {
+            rememberServer()
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    if (kind == CameraFacing.FACE) t("toastFaceShot") else t("toastTongueShot"),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            val json = api.submit(
+                symptoms = binding.symptoms.text.toString(),
+                discomfort = binding.discomfort.text.toString(),
+                face = if (kind == CameraFacing.FACE) file else faceFile,
+                tongue = if (kind == CameraFacing.TONGUE) file else tongueFile,
+                pulseJson = if (pulseReady(pulseJson)) pulseJson else null,
+                colorTemperatureK = selectedColorTemperatureK(),
+                shotType = kind,
+                shotFile = file,
+                includePulse = pulseReady(pulseJson),
+                deviceHint = silentDeviceHint(),
+            )
+            runOnUiThread {
+                showDayResult(json)
+                binding.result.text = pretty(json)
+                bindAdvice(json)
+                bindOrganSessionUi(json)
+                refreshTrend()
+                refreshRecipeChoices(keepSelection = true)
+                binding.bodyImage.post {
+                    Thread {
+                        applyBodyOverlays(
+                            binding.bodyMap,
+                            binding.bodyImage,
+                            json.optJSONObject("overlays"),
+                            json.optJSONObject("scores"),
+                            female,
+                            api::mediaUrl,
+                            http
+                        )
+                    }.start()
+                }
+            }
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
     /** Immediate stool/urine analyze via same /api/record → MySQL as the website. */
     private fun submitCircleShot(kind: String, file: File) {
         try {
@@ -1015,7 +1061,7 @@ class MainActivity : AppCompatActivity() {
             if (kind == CameraFacing.STOOL) stoolFile = null
             if (kind == CameraFacing.URINE) urineFile = null
             runOnUiThread {
-                showCircleResult(json, kind)
+                showDayResult(json)
                 binding.result.text = prettyCircle(json, kind)
                 bindAdvice(json)
                 bindOrganSessionUi(json)
@@ -1045,29 +1091,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Restore stool/urine panel from MySQL organ_health (same as web). */
-    private fun hydrateCircleResult(json: JSONObject) {
-        val text = StoolUrineJudge.panelText(json)
-        if (text.isBlank()) return
-        binding.circleResult.text = text
-        binding.circleResult.visibility = View.VISIBLE
-    }
-
-    /** Dedicated stool/urine panel under the shoot buttons (always visible). */
-    private fun showCircleResult(json: JSONObject, kind: String) {
-        val panel = binding.circleResult
-        val prior = panel.text?.toString().orEmpty()
+    /** Today's face/tongue/stool/urine/pulse lines (same as web #circle-result). */
+    private fun dayPanelText(json: JSONObject): String {
         val lines = linkedMapOf<String, String>()
-        // Keep the other modality's prior line if present.
-        prior.lineSequence().forEach { line ->
-            val t = line.trim()
-            when {
-                t.startsWith("大便") -> lines["stool"] = t
-                t.startsWith("尿尿") -> lines["urine"] = t
+        val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
+        fun putLabel(key: String, tag: String) {
+            val block = dm?.optJSONObject(key) ?: return
+            val label = block.optString("color_label").trim()
+            if (label.isNotBlank()) lines[key] = "$tag：$label"
+            else if (key == "pulse" && (block.optBoolean("present") || block.optJSONArray("findings") != null)) {
+                lines[key] = "脈：已測"
             }
         }
-        lines[kind] = StoolUrineJudge.briefStatus(json, kind)
-        // Also merge any nested notes from this response (both may be present).
+        putLabel("face", "臉")
+        putLabel("tongue", "舌")
         StoolUrineJudge.panelText(json).lineSequence().forEach { line ->
             val t = line.trim()
             when {
@@ -1075,7 +1112,53 @@ class MainActivity : AppCompatActivity() {
                 t.startsWith("尿尿") -> lines["urine"] = t
             }
         }
-        val text = listOfNotNull(lines["stool"], lines["urine"]).joinToString("\n")
+        if (!lines.containsKey("stool")) putLabel("stool", "大便")
+        if (!lines.containsKey("urine")) putLabel("urine", "尿尿")
+        putLabel("pulse", "脈")
+        if (dm?.optJSONObject("pulse") != null && !lines.containsKey("pulse")) {
+            lines["pulse"] = "脈：已測"
+        }
+        return listOfNotNull(
+            lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
+        ).joinToString("\n")
+    }
+
+    /** Restore today's day panel from MySQL organ_health (same as web). */
+    private fun hydrateCircleResult(json: JSONObject) {
+        val text = dayPanelText(json)
+        if (text.isBlank()) return
+        binding.circleResult.text = text
+        binding.circleResult.visibility = View.VISIBLE
+    }
+
+    /** Dedicated day panel under the shoot buttons (always visible). */
+    private fun showDayResult(json: JSONObject) {
+        val panel = binding.circleResult
+        val prior = panel.text?.toString().orEmpty()
+        val lines = linkedMapOf<String, String>()
+        prior.lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("臉") -> lines["face"] = t
+                t.startsWith("舌") -> lines["tongue"] = t
+                t.startsWith("大便") -> lines["stool"] = t
+                t.startsWith("尿尿") -> lines["urine"] = t
+                t.startsWith("脈") -> lines["pulse"] = t
+            }
+        }
+        dayPanelText(json).lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("臉") -> lines["face"] = t
+                t.startsWith("舌") -> lines["tongue"] = t
+                t.startsWith("大便") -> lines["stool"] = t
+                t.startsWith("尿尿") -> lines["urine"] = t
+                t.startsWith("脈") -> lines["pulse"] = t
+            }
+        }
+        val text = listOfNotNull(
+            lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
+        ).joinToString("\n")
         if (text.isBlank()) {
             panel.visibility = View.GONE
             return
@@ -1112,6 +1195,7 @@ class MainActivity : AppCompatActivity() {
                 deviceHint = silentDeviceHint(),
             )
             runOnUiThread {
+                showDayResult(json)
                 binding.result.text = pretty(json)
                 bindAdvice(json)
                 bindOrganSessionUi(json)
