@@ -376,6 +376,11 @@ fun buildSessionSummary(
         lines.add("主要證型：" + flagged.joinToString("、"))
     }
 
+    // Tongue: only final 舌質／舌苔 — hide regional 上中下左右 statements.
+    for (line in tongueFinalConclusions(json)) {
+        lines.add(line)
+    }
+
     val advice = json.optString("diet_advice").trim()
     if (advice.isNotBlank()) {
         lines.add("食療整理：$advice")
@@ -396,12 +401,67 @@ fun buildSessionSummary(
             ) {
                 continue
             }
+            // Hide tongue regional zone statements (中／脾胃／舌中 etc.).
+            if (isTongueRegionalFinding(text)) continue
+            // Overall 舌質／舌苔 lines already emitted via tongueFinalConclusions.
+            if (text.startsWith("舌質") || text.startsWith("舌苔") ||
+                (text.contains("舌質") && !text.contains("（"))
+            ) {
+                continue
+            }
             if (text.length > 80) text = text.take(80) + "…"
             lines.add("・$text")
             shown++
         }
     }
     return lines.joinToString("\n")
+}
+
+/** Regional tongue zone lines like 中（脾胃／舌中）… — hide on App UX. */
+fun isTongueRegionalFinding(text: String): Boolean {
+    if (text.isBlank()) return false
+    val regionalMarkers = listOf(
+        "（脾胃／舌中）", "（心肺／舌尖）", "（腎／舌根）",
+        "（肝膽／舌邊）", "／舌中）", "／舌尖）", "／舌根）", "／舌邊）",
+        "舌尖−舌中", "舌尖-舌中", "心肺區偏紅", "上區舌質",
+        "上（腎", "中（脾胃", "下（心肺", "左（肝膽", "右（肝膽",
+    )
+    if (regionalMarkers.any { text.contains(it) }) return true
+    // "上／中／下／左／右（…）舌質…" zone headers from analysis.py
+    if (Regex("""^[上下中左右]（[^）]+）""").containsMatchIn(text)) return true
+    return false
+}
+
+/** Final tongue conclusions only (舌質 + 舌苔), from region_colors / day_modalities. */
+fun tongueFinalConclusions(json: JSONObject): List<String> {
+    val out = mutableListOf<String>()
+    val colors = json.optJSONObject("region_colors")
+    val body = colors?.optString("tongue_body_color")?.trim().orEmpty()
+    val coat = colors?.optString("tongue_coat_color")?.trim().orEmpty()
+    if (body.isNotBlank()) out.add("舌質：$body")
+    if (coat.isNotBlank()) out.add("舌苔：$coat")
+    if (out.isNotEmpty()) return out
+
+    // Fallback: day_modalities.tongue.color_label like "舌質偏紅 → …；黃苔 → …"
+    val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
+        ?: json.optJSONObject("day_modalities")
+    val label = dm?.optJSONObject("tongue")?.optString("color_label")?.trim().orEmpty()
+    if (label.isBlank() || isTongueRegionalFinding(label)) return out
+    if (label.contains("舌質") || label.contains("舌苔") || label.contains("→")) {
+        // Split composite "舌質…；苔…" into two lines when possible.
+        val parts = label.split("；", ";", "／").map { it.trim() }.filter { it.isNotBlank() }
+        if (parts.size >= 2) {
+            val bodyPart = parts.firstOrNull { it.contains("舌質") } ?: parts[0]
+            val coatPart = parts.firstOrNull { it.contains("苔") } ?: parts[1]
+            out.add(if (bodyPart.startsWith("舌質")) bodyPart else "舌質：$bodyPart")
+            out.add(if (coatPart.startsWith("舌苔") || coatPart.startsWith("苔")) {
+                if (coatPart.startsWith("舌苔")) coatPart else "舌苔：$coatPart"
+            } else "舌苔：$coatPart")
+        } else {
+            out.add(if (label.startsWith("舌")) label else "舌：$label")
+        }
+    }
+    return out
 }
 
 fun sourceKeyLabel(key: String): String = when (key) {

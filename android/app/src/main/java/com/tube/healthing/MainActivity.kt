@@ -1088,6 +1088,8 @@ class MainActivity : AppCompatActivity() {
         panel.lineSequence().forEach { line ->
             val t = line.trim()
             when {
+                t.startsWith("舌質") -> merged["tongue_body"] = t
+                t.startsWith("舌苔") -> merged["tongue_coat"] = t
                 t.startsWith("大便") -> merged["stool"] = t
                 t.startsWith("尿尿") -> merged["urine"] = t
                 t.startsWith("脈") -> merged["pulse"] = t
@@ -1096,8 +1098,10 @@ class MainActivity : AppCompatActivity() {
         // Live shot always wins for its modality (never keep prior panel string).
         if (kind == CameraFacing.STOOL || kind == "stool") merged["stool"] = forced
         if (kind == CameraFacing.URINE || kind == "urine") merged["urine"] = forced
-        val text = listOfNotNull(merged["stool"], merged["urine"], merged["pulse"])
-            .joinToString("\n")
+        val text = listOfNotNull(
+            merged["tongue_body"], merged["tongue_coat"],
+            merged["stool"], merged["urine"], merged["pulse"],
+        ).joinToString("\n")
         binding.circleResult.text = text
         binding.circleResult.visibility = if (text.isNotBlank()) View.VISIBLE else View.GONE
         binding.result.text = prettyCircle(json, kind)
@@ -1125,7 +1129,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Today's stool/urine/pulse lines (face/tongue color teaching blocks stay hidden). */
+    /** Today's stool/urine/pulse + final 舌質／舌苔 (regional tongue zones stay hidden). */
     private fun dayPanelText(json: JSONObject, focusKind: String? = null): String {
         val lines = linkedMapOf<String, String>()
         val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
@@ -1138,7 +1142,7 @@ class MainActivity : AppCompatActivity() {
                 lines[key] = "脈：已測"
             }
         }
-        // Face 「教學正常值…色澤…(8-10健康)」and tongue 「色澤分析」stay hidden on App.
+        // Face 「教學正常值…色澤…(8-10健康)」stay hidden; tongue shows only final 舌質／舌苔.
         StoolUrineJudge.panelText(json).lineSequence().forEach { line ->
             val t = line.trim()
             when {
@@ -1165,9 +1169,12 @@ class MainActivity : AppCompatActivity() {
         if (dm?.optJSONObject("pulse") != null && !lines.containsKey("pulse")) {
             lines["pulse"] = "脈：已測"
         }
-        return listOfNotNull(
-            lines["stool"], lines["urine"], lines["pulse"],
-        ).joinToString("\n")
+        val tongueLines = tongueFinalConclusions(json)
+        return (
+            tongueLines + listOfNotNull(
+                lines["stool"], lines["urine"], lines["pulse"],
+            )
+            ).joinToString("\n")
     }
 
     /** Restore today's day panel from MySQL organ_health (same as web). */
@@ -1194,11 +1201,16 @@ class MainActivity : AppCompatActivity() {
             CameraFacing.TONGUE, "tongue" -> "tongue"
             else -> null
         }
+        val priorTongue = linkedMapOf<String, String>()
         prior.lineSequence().forEach { line ->
             val t = line.trim()
             when {
-                // Drop legacy face/tongue color-analysis lines from prior panel text.
-                t.startsWith("臉") || t.startsWith("舌") -> Unit
+                // Drop legacy face color-analysis; keep only final 舌質／舌苔 (not regional).
+                t.startsWith("臉") -> Unit
+                t.startsWith("舌質") -> priorTongue["body"] = t
+                t.startsWith("舌苔") -> priorTongue["coat"] = t
+                t.startsWith("舌") && isTongueRegionalFinding(t) -> Unit
+                t.startsWith("舌") -> Unit
                 t.startsWith("大便") -> if (focusKey != "stool") lines["stool"] = t
                 t.startsWith("尿尿") -> if (focusKey != "urine") lines["urine"] = t
                 t.startsWith("脈") -> lines["pulse"] = t
@@ -1207,6 +1219,8 @@ class MainActivity : AppCompatActivity() {
         dayPanelText(json, focusKind).lineSequence().forEach { line ->
             val t = line.trim()
             when {
+                t.startsWith("舌質") -> priorTongue["body"] = t
+                t.startsWith("舌苔") -> priorTongue["coat"] = t
                 t.startsWith("大便") -> lines["stool"] = t
                 t.startsWith("尿尿") -> lines["urine"] = t
                 t.startsWith("脈") -> lines["pulse"] = t
@@ -1216,13 +1230,25 @@ class MainActivity : AppCompatActivity() {
         when (focusKey) {
             "stool" -> lines["stool"] = StoolUrineJudge.briefStatus(json, "stool")
             "urine" -> lines["urine"] = StoolUrineJudge.briefStatus(json, "urine")
+            "tongue" -> {
+                val fresh = tongueFinalConclusions(json)
+                priorTongue.clear()
+                fresh.forEach { line ->
+                    when {
+                        line.startsWith("舌質") -> priorTongue["body"] = line
+                        line.startsWith("舌苔") -> priorTongue["coat"] = line
+                    }
+                }
+            }
         }
         val text = listOfNotNull(
+            priorTongue["body"], priorTongue["coat"],
             lines["stool"], lines["urine"], lines["pulse"],
         ).joinToString("\n")
         if (text.isBlank()) {
             val fallback = when (focusKey) {
                 "stool", "urine" -> StoolUrineJudge.briefStatus(json, focusKey)
+                "tongue" -> tongueFinalConclusions(json).joinToString("\n")
                 else -> ""
             }
             if (fallback.isBlank()) {
@@ -2975,6 +3001,44 @@ class MainActivity : AppCompatActivity() {
         return kept.toString().trim()
     }
 
+    /** True when local 寸關尺 JSON or server day session already includes pulse. */
+    private fun hasPulseMeasurement(json: JSONObject): Boolean {
+        if (pulseReady(pulseJson)) return true
+        val keys = json.optJSONObject("organ_health")?.optJSONArray("source_keys")
+        if (keys != null) {
+            for (i in 0 until keys.length()) {
+                if (keys.optString(i) == "pulse") return true
+            }
+        }
+        val pulse = json.optJSONObject("organ_health")
+            ?.optJSONObject("day_modalities")
+            ?.optJSONObject("pulse")
+        if (pulse != null &&
+            (pulse.optBoolean("present") ||
+                pulse.optJSONArray("findings") != null ||
+                pulse.optString("color_label").isNotBlank())
+        ) {
+            return true
+        }
+        return false
+    }
+
+    /** Readable 五臟六腑 status from measured scores/patterns (not raw JSON dump). */
+    private fun formatOrganStatusLines(scores: JSONObject?, patterns: JSONObject?): Pair<String, String> {
+        val scoreBits = mutableListOf<String>()
+        val patternBits = mutableListOf<String>()
+        ORGAN_SCORE_META.forEach { meta ->
+            if (meta.femaleOnly && !female) return@forEach
+            val score = scores?.optInt(meta.scoreKey, -1)?.takeIf { it >= 0 }
+            val rawPattern = patterns?.optString(meta.patternKey).orEmpty()
+            val label = patternDisplayLabel(score, rawPattern)
+            val name = UiLang.organName(currentLang(), meta.key)
+            if (score != null) scoreBits.add("$name$score")
+            if (label.isNotBlank()) patternBits.add("$name$label")
+        }
+        return scoreBits.joinToString("、") to patternBits.joinToString("、")
+    }
+
     private fun pretty(json: JSONObject): String {
         val scores = json.optJSONObject("scores")
         val patterns = json.optJSONObject("patterns")
@@ -2982,10 +3046,34 @@ class MainActivity : AppCompatActivity() {
         val shownScores = withoutMaleUterus(scores)
         val shownPatterns = withoutMaleUterus(patterns)
         // Do not paste raw search URLs here — clickable labels live in dietLink / acupointLink.
-        return "匿名紀錄已寫入 MySQL（教學參考，非診斷）\n" +
-            "食療：" + withoutMaleUterusText(json.optString("diet_advice")) + "\n" +
-            t("dietLinkHint") + "\n" +
-            "分數：" + shownScores + "\n" +
-            "證型：" + healthyPatterns(shownScores, shownPatterns)
+        val parts = mutableListOf(
+            "匿名紀錄已寫入 MySQL（教學參考，非診斷）",
+            "食療：" + withoutMaleUterusText(json.optString("diet_advice")),
+            t("dietLinkHint"),
+        )
+        // Under 連結搜尋: hide 脈診分數／證型 until 寸關尺 has measured data.
+        if (hasPulseMeasurement(json)) {
+            val organSummary = try {
+                org.json.JSONObject(pulseJson ?: "{}").optString("organ_summary").trim()
+            } catch (_: Exception) {
+                ""
+            }
+            val patternForDisplay = try {
+                val hp = healthyPatterns(shownScores, shownPatterns)
+                if (hp.isNotBlank()) JSONObject(hp) else shownPatterns
+            } catch (_: Exception) {
+                shownPatterns
+            }
+            val (scoreLine, patternLine) = formatOrganStatusLines(shownScores, patternForDisplay)
+            if (organSummary.isNotBlank()) {
+                parts.add("脈診分數：\n$organSummary")
+            } else if (scoreLine.isNotBlank()) {
+                parts.add("脈診分數：$scoreLine")
+            }
+            if (patternLine.isNotBlank()) {
+                parts.add("證型：$patternLine")
+            }
+        }
+        return parts.joinToString("\n")
     }
 }
