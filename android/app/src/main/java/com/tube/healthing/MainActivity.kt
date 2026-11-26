@@ -1015,6 +1015,7 @@ class MainActivity : AppCompatActivity() {
             if (kind == CameraFacing.STOOL) stoolFile = null
             if (kind == CameraFacing.URINE) urineFile = null
             runOnUiThread {
+                showCircleResult(json, kind)
                 binding.result.text = prettyCircle(json, kind)
                 bindAdvice(json)
                 bindOrganSessionUi(json)
@@ -1041,6 +1042,49 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    /** Restore stool/urine panel from MySQL organ_health (same as web). */
+    private fun hydrateCircleResult(json: JSONObject) {
+        val text = StoolUrineJudge.panelText(json)
+        if (text.isBlank()) return
+        binding.circleResult.text = text
+        binding.circleResult.visibility = View.VISIBLE
+    }
+
+    /** Dedicated stool/urine panel under the shoot buttons (always visible). */
+    private fun showCircleResult(json: JSONObject, kind: String) {
+        val panel = binding.circleResult
+        val prior = panel.text?.toString().orEmpty()
+        val lines = linkedMapOf<String, String>()
+        // Keep the other modality's prior line if present.
+        prior.lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("大便") -> lines["stool"] = t
+                t.startsWith("尿尿") -> lines["urine"] = t
+            }
+        }
+        lines[kind] = StoolUrineJudge.briefStatus(json, kind)
+        // Also merge any nested notes from this response (both may be present).
+        StoolUrineJudge.panelText(json).lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("大便") -> lines["stool"] = t
+                t.startsWith("尿尿") -> lines["urine"] = t
+            }
+        }
+        val text = listOfNotNull(lines["stool"], lines["urine"]).joinToString("\n")
+        if (text.isBlank()) {
+            panel.visibility = View.GONE
+            return
+        }
+        panel.text = text
+        panel.visibility = View.VISIBLE
+        panel.post {
+            val scroll = binding.root as? android.widget.ScrollView ?: return@post
+            scroll.smoothScrollTo(0, panel.top.coerceAtLeast(0))
         }
     }
 
@@ -2254,6 +2298,7 @@ class MainActivity : AppCompatActivity() {
             if (records.length() == 0) return
             val latest = records.getJSONObject(0)
             runOnUiThread {
+                hydrateCircleResult(latest)
                 bindAdvice(latest)
                 bindOrganSessionUi(latest)
                 binding.bodyImage.post {

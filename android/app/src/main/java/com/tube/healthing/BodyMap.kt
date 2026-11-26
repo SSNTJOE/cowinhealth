@@ -337,7 +337,7 @@ fun buildSessionSummary(
 
     // Separate short stool / urine lines: normal vs notes of concern.
     for (kind in listOf("stool", "urine")) {
-        if (json.optJSONObject(kind) != null) {
+        if (StoolUrineJudge.noteForKind(json, kind) != null) {
             lines.add(StoolUrineJudge.briefStatus(json, kind))
         }
     }

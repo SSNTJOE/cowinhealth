@@ -70,7 +70,7 @@ object StoolUrineJudge {
 
     private fun scoresForKind(json: JSONObject, kind: String, hit: ClassHit?): Map<String, Int> {
         val out = LinkedHashMap<String, Int>()
-        val note = json.optJSONObject(kind)
+        val note = noteForKind(json, kind)
         val nested = note?.optJSONObject("organ_scores")
         if (nested != null) {
             ORGAN_SCORE_META.forEach { meta ->
@@ -98,7 +98,7 @@ object StoolUrineJudge {
     }
 
     fun organLines(json: JSONObject, kind: String): List<OrganLine> {
-        val note = json.optJSONObject(kind)
+        val note = noteForKind(json, kind)
         val hit = extractClass(note)
         val scores = scoresForKind(json, kind, hit)
         if (scores.isEmpty()) return emptyList()
@@ -116,11 +116,18 @@ object StoolUrineJudge {
         }
     }
 
+    /** Prefer top-level stool/urine; fall back to organ_health.stool_urine. */
+    fun noteForKind(json: JSONObject, kind: String): JSONObject? {
+        json.optJSONObject(kind)?.let { return it }
+        val su = json.optJSONObject("organ_health")?.optJSONObject("stool_urine")
+        return su?.optJSONObject(kind)
+    }
+
     /** One short line: normal vs notes of concern (existing class rules). */
     fun briefStatus(json: JSONObject, kind: String): String {
         val isUrine = kind == CameraFacing.URINE || kind == "urine"
         val tag = if (isUrine) "尿尿" else "大便"
-        val note = json.optJSONObject(kind)
+        val note = noteForKind(json, kind)
         val hit = extractClass(note)
         val label = hit?.label?.trim()
             ?.ifBlank { null }
@@ -164,7 +171,26 @@ object StoolUrineJudge {
         } else {
             "大便色診（教學參考，非診斷）"
         }
-        return listOf(title, briefStatus(json, kind)).joinToString("\n")
+        val status = briefStatus(json, kind)
+        // Keep urine narrative short: title + one status line only.
+        return if (isUrine) {
+            listOf(title, status).joinToString("\n")
+        } else {
+            listOf(title, status).joinToString("\n")
+        }
+    }
+
+    /** Combined stool + urine short panel (both stay visible). */
+    fun panelText(json: JSONObject): String {
+        val lines = mutableListOf<String>()
+        if (noteForKind(json, "stool") != null) lines.add(briefStatus(json, "stool"))
+        if (noteForKind(json, "urine") != null) lines.add(briefStatus(json, "urine"))
+        // If only one kind was just measured but nested note missing, still show color_label.
+        if (lines.isEmpty()) {
+            val label = json.optString("color_label").trim()
+            if (label.startsWith("尿尿") || label.startsWith("大便")) lines.add(label)
+        }
+        return lines.joinToString("\n")
     }
 
     /** One-line toast companion. */

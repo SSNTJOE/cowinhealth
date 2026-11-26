@@ -271,6 +271,17 @@ video, canvas, img.preview {
 .align-frame.is-circle {
   border-radius: 50%;
 }
+.circle-result {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(165deg, #f7fbf8 0%, #eef4f8 100%);
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #1a2a24;
+}
 .stool-urine-confounders {
   margin: 8px 0 4px;
   font-size: 0.92rem;

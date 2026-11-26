@@ -1029,41 +1029,24 @@ def analyze_urine_image(
             prev = organ_scores.get(key)
             organ_scores[key] = val if prev is None else min(prev, val)
 
-    findings = [
-        (
-            f"尿尿色觀察（已提醒排除火龍果／甜菜／Ｂ群／藥物染色）："
-            f"{hit['label']} → {hit['hint']}（{TEACHING_TAG}）"
-        ),
-    ]
+    # Short urine narrative: one status line (foam / stain folded in).
+    status = "需留意" if hit.get("abnormal") else "正常"
+    extras: list[str] = []
     if hit.get("far_from_palette"):
-        findings.append(
-            f"色調偏離教學色盤（ΔE≈{hit.get('palette_delta_e')}）："
-            f"優先考慮飲食／藥物染色，勿逕行解讀為病色（{TEACHING_TAG}）"
-        )
+        extras.append("疑染色")
     gran = foam.get("granularity")
-    ratio = foam.get("foam_ratio", 0)
-    if gran == "fine_dense":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、細密均勻 → 教學上提示可能持續性泡沫／蛋白尿警覺"
-            f"（{TEACHING_TAG}）"
-        )
+    if gran == "fine_dense" or foam.get("persistent_foam_teaching_alert"):
+        extras.append("細密泡沫")
     elif gran == "coarse_sparse":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、粗疏 → 教學上較像水柱衝擊等物理泡沫（{TEACHING_TAG}）"
-        )
+        extras.append("粗疏泡沫")
     elif gran == "mixed":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、粗細混合 → 僅作教學參考（{TEACHING_TAG}）"
-        )
-    else:
-        findings.append(f"泡沫單幀：未見明顯泡沫區（{TEACHING_TAG}）")
-    findings.append(f"{URINE_FOAM_TEACHING}（{TEACHING_TAG}）")
-    findings.append(f"{URINE_FOAM_V1_LIMIT}（{TEACHING_TAG}）")
-    findings.append(f"{URINE_CARE_NOTE}（{TEACHING_TAG}）")
-    findings.append(f"{URINE_PHONE_LIMIT}（{TEACHING_TAG}）")
+        extras.append("混合泡沫")
     if user_conf:
-        findings.append(f"近２４小時自行勾選可能染色：{'、'.join(user_conf)}（{TEACHING_TAG}）")
-    findings.append(TEACHING_TAG)
+        extras.append("已勾選染色")
+    tip = hit.get("hint") or TEACHING_TAG
+    if extras:
+        tip = f"{tip}；{'、'.join(extras)}"
+    findings = [f"尿尿：{status} — {hit['label']}（{tip}）"]
     return {
         "shot_type": "urine",
         "dominant_color": _dominant_hex(work),

@@ -35,6 +35,8 @@ let alignMode = "face";
 let lastFaceGrid = null;
 let lastTongueGrid = null;
 let complexionHistory = [];
+/** Last stool/urine short status lines (persist across loadRecords re-render). */
+let lastCircleLines = { stool: "", urine: "" };
 
 const organs = [
   { key: "lung", name: "肺", score: "lung_score", pattern: "lung_pattern", spots: [{ x: 44, y: 31.5 }, { x: 56, y: 31.5 }] },
@@ -985,7 +987,52 @@ function renderScoreCards(result) {
   });
 }
 
+function briefCircleLine(note, kind) {
+  if (!note || typeof note !== "object") return "";
+  const hit = note.class || note;
+  const label = String(hit.label || "").trim();
+  if (!label) return "";
+  const tag = kind === "urine" ? "尿尿" : "大便";
+  const abnormal = Boolean(hit.abnormal);
+  return abnormal ? `${tag}：需留意 — ${label}` : `${tag}：正常 — ${label}`;
+}
+
+function updateCircleLinesFromResult(result) {
+  if (!result) return;
+  const su = (result.organ_health && result.organ_health.stool_urine) || {};
+  const stoolNote = result.stool || su.stool;
+  const urineNote = result.urine || su.urine;
+  const stoolLine = briefCircleLine(stoolNote, "stool");
+  const urineLine = briefCircleLine(urineNote, "urine");
+  if (stoolLine) lastCircleLines.stool = stoolLine;
+  if (urineLine) lastCircleLines.urine = urineLine;
+  // Fallback: derive from short findings when nested note missing.
+  if (!stoolLine && Array.isArray(result.findings)) {
+    const hit = result.findings.find((t) => String(t).startsWith("大便"));
+    if (hit) lastCircleLines.stool = String(hit).split("（")[0].trim();
+  }
+  if (!urineLine && Array.isArray(result.findings)) {
+    const hit = result.findings.find((t) => String(t).startsWith("尿尿"));
+    if (hit) lastCircleLines.urine = String(hit).split("（")[0].trim();
+  }
+}
+
+function renderCircleResultPanel() {
+  const el = document.getElementById("circle-result");
+  if (!el) return;
+  const lines = [lastCircleLines.stool, lastCircleLines.urine].filter(Boolean);
+  if (!lines.length) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = lines.join("\n");
+  el.classList.remove("hidden");
+}
+
 function renderResult(result) {
+  updateCircleLinesFromResult(result);
+  renderCircleResultPanel();
   if (result.dominant_color) {
     document.getElementById("color-chip").style.background = result.dominant_color;
     document.getElementById("color-hex").textContent = result.dominant_color;
@@ -1777,7 +1824,7 @@ function bindRecipePickers() {
   });
 }
 
-async function loadRecords() {
+async function loadRecords(opts = {}) {
   const data = await api("/api/records");
   const box = document.getElementById("records");
   renderTrend(data.trend);
@@ -1787,27 +1834,51 @@ async function loadRecords() {
     return;
   }
   const latest = data.records[0];
-  renderResult({
-    scores: latest,
-    patterns: latest,
-    overlays: latest.overlays || {},
-    pattern_scores: latest.pattern_scores,
-    organ_health: latest.organ_health,
-    findings: [latest.symptoms, latest.discomfort].filter(Boolean),
-    diet_advice: latest.diet_advice,
-    diet_url: latest.diet_url,
-    diet_video_url: latest.diet_video_url,
-    acupoint_url: latest.acupoint_url,
-    acupoint_video_url: latest.acupoint_video_url,
-    color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
-    face_grid: latest.face_grid,
-    tongue_grid: latest.tongue_grid,
-    complexion: (latest.face_grid && latest.face_grid.complexion) || {
-      bias: latest.complexion_label,
-      hex: latest.complexion_hex,
-    },
-    disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
-  });
+  const su = (latest.organ_health && latest.organ_health.stool_urine) || {};
+  const circleFindings = Array.isArray(su.findings) ? su.findings.slice() : [];
+  const textBits = [latest.symptoms, latest.discomfort].filter(Boolean);
+  // Keep stool/urine findings visible; do not replace them with only symptoms.
+  const findings = opts.preserveFindings
+    ? undefined
+    : (circleFindings.length ? circleFindings.concat(textBits) : textBits);
+  if (!opts.skipResult) {
+    const payload = {
+      scores: latest,
+      patterns: latest,
+      overlays: latest.overlays || {},
+      pattern_scores: latest.pattern_scores,
+      organ_health: latest.organ_health,
+      stool: su.stool || null,
+      urine: su.urine || null,
+      findings: findings || textBits,
+      diet_advice: latest.diet_advice,
+      diet_url: latest.diet_url,
+      diet_video_url: latest.diet_video_url,
+      diet_query: latest.diet_query,
+      diet_video_query: latest.diet_video_query,
+      acupoint_url: latest.acupoint_url,
+      acupoint_video_url: latest.acupoint_video_url,
+      acupoint_query: latest.acupoint_query,
+      acupoint_video_query: latest.acupoint_video_query,
+      color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
+      face_grid: latest.face_grid,
+      tongue_grid: latest.tongue_grid,
+      complexion: (latest.face_grid && latest.face_grid.complexion) || {
+        bias: latest.complexion_label,
+        hex: latest.complexion_hex,
+      },
+      disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
+    };
+    renderResult(payload);
+  } else {
+    // Circle shot just rendered live findings — only refresh the persistent panel from DB.
+    updateCircleLinesFromResult({
+      organ_health: latest.organ_health,
+      stool: su.stool || null,
+      urine: su.urine || null,
+    });
+    renderCircleResultPanel();
+  }
   renderComplexionHistory(data.records);
   const shownOrgans = visibleOrgans();
   const head = ["日期", "狀況", ...shownOrgans.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
@@ -2689,7 +2760,8 @@ async function sendRecord(extraShot) {
     }
   }
   renderResult(result);
-  await loadRecords();
+  // Circle shots: keep live findings; do not let loadRecords wipe them.
+  await loadRecords(CIRCLE_SHOTS.has(extraShot) ? { skipResult: true } : {});
 }
 
 const loginCaptcha = bindCaptchaControls();

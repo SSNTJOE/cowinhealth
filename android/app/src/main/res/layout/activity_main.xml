@@ -238,6 +238,18 @@
             android:layout_height="wrap_content"
             android:textSize="12sp"
             android:text="大便／尿尿：後置鏡頭＋黃圓；只寫文字判斷，不存照片。教學示範，非診斷。"/>
+        <TextView
+            android:id="@+id/circleResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:textSize="14sp"
+            android:textColor="#1A2A24"
+            android:background="#EEF4F8"
+            android:visibility="gone"/>
         <CheckBox
             android:id="@+id/confounderFood"
             android:layout_width="match_parent"
