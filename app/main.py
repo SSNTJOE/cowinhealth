@@ -703,7 +703,7 @@ def fetch_prior_session_context(user_id: str) -> dict | None:
                 + """
                 FROM health_records
                 WHERE user_id = %s
-                ORDER BY record_date DESC
+                ORDER BY record_date DESC, record_id DESC
                 LIMIT 1
                 """,
                 (user_id,),
@@ -1568,7 +1568,7 @@ def records(request: Request):
                        tongue_grid_json, tongue_measurements_json, organ_composite_json
                 FROM health_records
                 WHERE user_id = %s
-                ORDER BY record_date DESC
+                ORDER BY record_date DESC, record_id DESC
                 LIMIT 50
                 """,
                 (user_id,),

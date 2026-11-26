@@ -1063,7 +1063,27 @@ class MainActivity : AppCompatActivity() {
             if (kind == CameraFacing.URINE) urineFile = null
             runOnUiThread {
                 // Primary judgment surface: @id/circleResult under stool/urine buttons.
+                // Force focus modality from this response (ignore any prior panel merge races).
                 showDayResult(json, focusKind = kind)
+                val forced = StoolUrineJudge.briefStatus(json, kind)
+                val panel = binding.circleResult.text?.toString().orEmpty()
+                val merged = linkedMapOf<String, String>()
+                panel.lineSequence().forEach { line ->
+                    val t = line.trim()
+                    when {
+                        t.startsWith("大便") -> merged["stool"] = t
+                        t.startsWith("尿尿") -> merged["urine"] = t
+                        t.startsWith("脈") -> merged["pulse"] = t
+                    }
+                }
+                if (kind == CameraFacing.STOOL || kind == "stool") merged["stool"] = forced
+                if (kind == CameraFacing.URINE || kind == "urine") merged["urine"] = forced
+                val text = listOfNotNull(merged["stool"], merged["urine"], merged["pulse"])
+                    .joinToString("\n")
+                if (text.isNotBlank()) {
+                    binding.circleResult.text = text
+                    binding.circleResult.visibility = View.VISIBLE
+                }
                 binding.result.text = prettyCircle(json, kind)
                 bindAdvice(json)
                 bindOrganSessionUi(json)

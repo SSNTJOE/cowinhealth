@@ -382,9 +382,10 @@ fun buildSessionSummary(
             var text = findings.optString(i).trim()
             if (text.isBlank()) continue
             if (!female && text.contains("子宮")) continue
-            // Hide face/tongue color-teaching blocks (教學正常值 / Lab 色澤).
-            if (text.startsWith("教學正常值") || text.contains("臉色分數 ΔE") ||
-                text.contains("8–10 健康）") || text.contains("8-10 健康）")
+            // Hide face color-teaching blocks under 食療整理 / findings.
+            if (text.startsWith("教學正常值") || text.contains("臉色分數") ||
+                text.contains("ΔE*/20") || text.contains("8–10 健康") ||
+                text.contains("8-10 健康")
             ) {
                 continue
             }

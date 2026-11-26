@@ -991,12 +991,25 @@ function renderScoreCards(result) {
 
 function briefCircleLine(note, kind) {
   if (!note || typeof note !== "object") return "";
-  const hit = note.class || note;
-  const label = String(hit.label || "").trim();
+  // day_modalities.<kind>.note holds class; legacy callers may pass note or class itself.
+  const hit = (note.note && note.note.class) || note.class || note.note || note;
+  const label = String((hit && hit.label) || "").trim();
   if (!label) return "";
   const tag = kind === "urine" ? "尿尿" : "大便";
-  const abnormal = Boolean(hit.abnormal);
+  const abnormal = Boolean(hit && hit.abnormal);
   return abnormal ? `${tag}：需留意 — ${label}` : `${tag}：正常 — ${label}`;
+}
+
+/** Face Lab teaching lines must not appear under 食療整理 / findings. */
+function isFaceColorTeachingFinding(text) {
+  const s = String(text || "");
+  return (
+    s.startsWith("教學正常值") ||
+    s.includes("臉色分數") ||
+    s.includes("ΔE*/20") ||
+    s.includes("8–10 健康") ||
+    s.includes("8-10 健康")
+  );
 }
 
 function findingsFromDayModalities(organHealth) {
@@ -1028,22 +1041,27 @@ function updateCircleLinesFromResult(result) {
   if (dm.pulse && (dm.pulse.present || (dm.pulse.findings || []).length)) {
     lastDayLines.pulse = "脈：已測";
   }
-  const stoolNote = result.stool || su.stool || (dm.stool && dm.stool.class) || null;
-  const urineNote = result.urine || su.urine || (dm.urine && dm.urine.class) || null;
+  const stoolNote =
+    result.stool || su.stool || (dm.stool && (dm.stool.note || dm.stool.class)) || null;
+  const urineNote =
+    result.urine || su.urine || (dm.urine && (dm.urine.note || dm.urine.class)) || null;
   const stoolLine = briefCircleLine(stoolNote, "stool");
   const urineLine = briefCircleLine(urineNote, "urine");
   if (stoolLine) lastDayLines.stool = stoolLine;
   else if (dm.stool && dm.stool.color_label) lastDayLines.stool = `大便：${dm.stool.color_label}`;
   if (urineLine) lastDayLines.urine = urineLine;
   else if (dm.urine && dm.urine.color_label) lastDayLines.urine = `尿尿：${dm.urine.color_label}`;
-  // Fallback: derive from short findings when nested note missing.
-  if (!lastDayLines.stool && Array.isArray(result.findings)) {
-    const hit = result.findings.find((t) => String(t).startsWith("大便"));
-    if (hit) lastDayLines.stool = String(hit).split("（")[0].trim();
-  }
-  if (!lastDayLines.urine && Array.isArray(result.findings)) {
-    const hit = result.findings.find((t) => String(t).startsWith("尿尿"));
-    if (hit) lastDayLines.urine = String(hit).split("（")[0].trim();
+  // Fallback: newest matching finding (re-shots append; first match was stale).
+  if (Array.isArray(result.findings)) {
+    let stoolHit = "";
+    let urineHit = "";
+    result.findings.forEach((t) => {
+      const s = String(t || "");
+      if (s.startsWith("大便")) stoolHit = s.split("（")[0].trim();
+      if (s.startsWith("尿尿")) urineHit = s.split("（")[0].trim();
+    });
+    if (!lastDayLines.stool && stoolHit) lastDayLines.stool = stoolHit;
+    if (!lastDayLines.urine && urineHit) lastDayLines.urine = urineHit;
   }
 }
 
@@ -1089,6 +1107,7 @@ function renderResult(result) {
   findings.innerHTML = "";
   (result.findings || []).forEach((text) => {
     if (hidesSpleenStomachPatternList(text)) return;
+    if (isFaceColorTeachingFinding(text)) return;
     const line = withoutUterusStatement(text);
     if (!line) return;
     const li = document.createElement("li");
@@ -1096,7 +1115,9 @@ function renderResult(result) {
     findings.appendChild(li);
   });
   const advice = withoutUterusStatement(result.diet_advice || "");
-  document.getElementById("advice").textContent = advice ? "食療整理：" + advice : "";
+  // Hide face color-analysis teaching blobs if they ever ride inside diet_advice.
+  const adviceClean = isFaceColorTeachingFinding(advice) ? "" : advice;
+  document.getElementById("advice").textContent = adviceClean ? "食療整理：" + adviceClean : "";
   const links = document.getElementById("links");
   links.innerHTML = "";
   const dietArticleQ = (result.diet_query || "").trim() || (() => {
@@ -2801,6 +2822,19 @@ async function sendRecord(extraShot) {
   renderResult(result);
   // Circle shots: keep live findings; do not let loadRecords wipe them.
   await loadRecords(CIRCLE_SHOTS.has(extraShot) ? { skipResult: true } : {});
+  // Live /api/record wins for the modality just shot (DB same-second race / prior merge).
+  if (CIRCLE_SHOTS.has(extraShot) && result) {
+    const dm = ((result.organ_health || {}).day_modalities || {})[extraShot] || {};
+    const note = result[extraShot] || dm.note || dm;
+    const line = briefCircleLine(note, extraShot)
+      || (dm.color_label
+        ? `${extraShot === "urine" ? "尿尿" : "大便"}：${dm.color_label}`
+        : "");
+    if (line) {
+      lastDayLines[extraShot] = line;
+      renderCircleResultPanel();
+    }
+  }
 }
 
 const loginCaptcha = bindCaptchaControls();

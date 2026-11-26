@@ -1957,7 +1957,7 @@ def analyze_face_grid(
         f"教學正常值 L*65 a*12 b*20 #E2AC8A（紅黃隱隱）。本圖平均 {base_hex}，"
         f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。臉色分數 ΔE*/20 → 1–10（8–10 健康）（{TEACHING_NOTE}）"
     )
-    findings.append(c_text)
+    # Keep Lab teaching text on complexion only — do not dump into findings / 食療整理.
 
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
     face_blocks: list[dict[str, Any]] = []
@@ -4203,26 +4203,38 @@ def analyze_session(
                     else str(prior_tongue["color_label"])
                 )
         # Carry the other modality only. Re-shot modality keeps the fresh report note/findings.
-        if "stool" not in shot_types_present and isinstance(prior_su.get("stool"), dict):
-            stool_note = prior_su["stool"]
-            prior_stool_findings = prior_su.get("findings") or []
-            stool_bits = [
-                t for t in prior_stool_findings
-                if str(t).startswith("大便") or "大便" in str(t)[:8]
-            ]
-            if not stool_bits and isinstance(prior_day.get("stool"), dict):
-                stool_bits = list(prior_day["stool"].get("findings") or [])
-            stool_urine_findings = list(stool_bits) + list(stool_urine_findings)
-        if "urine" not in shot_types_present and isinstance(prior_su.get("urine"), dict):
-            urine_note = prior_su["urine"]
-            prior_urine_findings = prior_su.get("findings") or []
-            urine_bits = [
-                t for t in prior_urine_findings
-                if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
-            ]
-            if not urine_bits and isinstance(prior_day.get("urine"), dict):
-                urine_bits = list(prior_day["urine"].get("findings") or [])
-            stool_urine_findings = list(stool_urine_findings) + list(urine_bits)
+        def _prior_circle_note(kind: str) -> dict[str, Any] | None:
+            raw = prior_su.get(kind) if isinstance(prior_su.get(kind), dict) else None
+            if isinstance(raw, dict) and raw:
+                return raw
+            block = prior_day.get(kind) if isinstance(prior_day.get(kind), dict) else None
+            note = block.get("note") if isinstance(block, dict) else None
+            return note if isinstance(note, dict) else None
+
+        if "stool" not in shot_types_present:
+            prior_stool = _prior_circle_note("stool")
+            if isinstance(prior_stool, dict):
+                stool_note = prior_stool
+                prior_stool_findings = prior_su.get("findings") or []
+                stool_bits = [
+                    t for t in prior_stool_findings
+                    if str(t).startswith("大便") or "大便" in str(t)[:8]
+                ]
+                if not stool_bits and isinstance(prior_day.get("stool"), dict):
+                    stool_bits = list(prior_day["stool"].get("findings") or [])
+                stool_urine_findings = list(stool_bits) + list(stool_urine_findings)
+        if "urine" not in shot_types_present:
+            prior_urine = _prior_circle_note("urine")
+            if isinstance(prior_urine, dict):
+                urine_note = prior_urine
+                prior_urine_findings = prior_su.get("findings") or []
+                urine_bits = [
+                    t for t in prior_urine_findings
+                    if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
+                ]
+                if not urine_bits and isinstance(prior_day.get("urine"), dict):
+                    urine_bits = list(prior_day["urine"].get("findings") or [])
+                stool_urine_findings = list(stool_urine_findings) + list(urine_bits)
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}", include_uterus=female)
     pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")
@@ -4414,13 +4426,35 @@ def analyze_session(
             "findings": list(tongue_findings)
             or list((day_modalities.get("tongue") or {}).get("findings") or []),
         }
+    def _circle_findings(kind: str) -> list[str]:
+        if kind == "stool":
+            matched = [
+                t for t in stool_urine_findings
+                if str(t).startswith("大便") or "大便" in str(t)[:8]
+            ]
+        else:
+            matched = [
+                t for t in stool_urine_findings
+                if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
+            ]
+        # Re-shot this session: never fall back to yesterday-of-today prior findings.
+        if kind in shot_types_present:
+            if matched:
+                return matched
+            note = stool_note if kind == "stool" else urine_note
+            label = ""
+            if isinstance(note, dict) and isinstance(note.get("class"), dict):
+                label = str(note["class"].get("label") or "").strip()
+            tag = "大便" if kind == "stool" else "尿尿"
+            return [f"{tag}：{label or '已測'}"]
+        return matched or list((day_modalities.get(kind) or {}).get("findings") or [])
+
     if stool_note is not None:
         day_modalities["stool"] = {
             "color_label": (stool_note.get("class") or {}).get("label")
             if isinstance(stool_note.get("class"), dict)
             else "大便已測",
-            "findings": [t for t in stool_urine_findings if str(t).startswith("大便") or "大便" in str(t)[:8]]
-            or list((day_modalities.get("stool") or {}).get("findings") or []),
+            "findings": _circle_findings("stool"),
             "note": stool_note,
         }
     if urine_note is not None:
@@ -4428,8 +4462,7 @@ def analyze_session(
             "color_label": (urine_note.get("class") or {}).get("label")
             if isinstance(urine_note.get("class"), dict)
             else "尿尿已測",
-            "findings": [t for t in stool_urine_findings if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]]
-            or list((day_modalities.get("urine") or {}).get("findings") or []),
+            "findings": _circle_findings("urine"),
             "note": urine_note,
         }
     if pulse is not None or pulse_notes:

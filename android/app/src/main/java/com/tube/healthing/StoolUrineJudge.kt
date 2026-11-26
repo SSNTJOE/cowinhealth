@@ -119,14 +119,20 @@ object StoolUrineJudge {
 
     /** Prefer top-level stool/urine; fall back to organ_health.stool_urine / day_modalities. */
     fun noteForKind(json: JSONObject, kind: String): JSONObject? {
-        json.optJSONObject(kind)?.let { return it }
+        // Top-level from /api/record is always the just-shot modality when present.
+        json.optJSONObject(kind)?.let { note ->
+            if (note.optJSONObject("class") != null || note.has("lab")) return note
+        }
         val health = json.optJSONObject("organ_health")
-        health?.optJSONObject("stool_urine")?.optJSONObject(kind)?.let { return it }
+        health?.optJSONObject("stool_urine")?.optJSONObject(kind)?.let { note ->
+            if (note.optJSONObject("class") != null || note.has("lab")) return note
+        }
         // day_modalities.<kind>.note carries the full teaching note across same-day merges.
         health?.optJSONObject("day_modalities")?.optJSONObject(kind)?.optJSONObject("note")?.let {
             return it
         }
-        return null
+        return json.optJSONObject(kind)
+            ?: health?.optJSONObject("stool_urine")?.optJSONObject(kind)
     }
 
     /** Newest findings line for this modality (server writes 「大便：…」/「尿尿：…」). */
