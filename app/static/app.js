@@ -996,8 +996,28 @@ function briefCircleLine(note, kind) {
   const label = String((hit && hit.label) || "").trim();
   if (!label) return "";
   const tag = kind === "urine" ? "尿尿" : "大便";
+  const outside = Boolean(
+    hit && (hit.id === "outside_palette" || hit.far_from_palette)
+  );
+  if (outside) {
+    const hint = String((hit && hit.hint) || "").trim();
+    return hint
+      ? `${tag}：無法對照 — ${label}（${hint.slice(0, 48)}）`
+      : `${tag}：無法對照 — ${label}`;
+  }
   const abnormal = Boolean(hit && hit.abnormal);
-  return abnormal ? `${tag}：需留意 — ${label}` : `${tag}：正常 — ${label}`;
+  const confirm = String((hit && hit.confirm) || "").trim();
+  const confirmHint =
+    confirm === "diet_or_drug_matte_black" || confirm === "clear_water_diet_red"
+      ? "（染色較可能）"
+      : confirm === "pink_water_fresh_blood"
+        ? "（水液偏粉紅）"
+        : confirm === "glossy_tar_like"
+          ? "（偏油亮）"
+          : "";
+  return abnormal
+    ? `${tag}：需留意 — ${label}${confirmHint}`
+    : `${tag}：正常 — ${label}`;
 }
 
 /** Face Lab teaching lines must not appear under 食療整理 / findings. */

@@ -254,11 +254,57 @@
             android:background="#EEF4F8"
             android:visibility="gone"
             android:contentDescription="今日大便尿尿判斷"/>
-        <CheckBox
-            android:id="@+id/confounderFood"
+        <TextView
+            android:id="@+id/confounderHeading"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="近24小時飲食／藥物可能染色（火龍果、豬血、鐵劑等）"/>
+            android:paddingTop="4dp"
+            android:textSize="13sp"
+            android:textColor="#1A2A24"
+            android:text="近24小時染色／混淆（勾選後再解讀）"/>
+        <LinearLayout
+            android:id="@+id/confounderFoodGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+            <CheckBox
+                android:id="@+id/confounderPitaya"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="火龍果／紅色蔬果"/>
+            <CheckBox
+                android:id="@+id/confounderPigBlood"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="豬血／血品"/>
+            <CheckBox
+                android:id="@+id/confounderDarkGreens"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="深綠色蔬菜"/>
+            <CheckBox
+                android:id="@+id/confounderIron"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="鐵劑"/>
+            <CheckBox
+                android:id="@+id/confounderAntacid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="制酸劑／鋇劑"/>
+            <CheckBox
+                android:id="@+id/confounderBismuth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="鉍劑"/>
+            <CheckBox
+                android:id="@+id/confounderFood"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="其他飲食／藥物可能染色"/>
+        </LinearLayout>
         <Button android:id="@+id/openPulse" android:text="寸關尺脈診（前置綠光補光，15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/save" android:text="送出今日紀錄" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <TextView android:id="@+id/bodyHeading" android:text="臟腑圖（有證型才放貼圖）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>

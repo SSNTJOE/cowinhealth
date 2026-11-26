@@ -209,6 +209,19 @@ object StoolUrineJudge {
                 }
             }
         }
+        val classObj = note?.optJSONObject("class")
+        val offPalette = hit?.id == "outside_palette" ||
+            hit?.id == "possible_stain" ||
+            classObj?.optBoolean("far_from_palette", false) == true ||
+            label.contains("偏離教學色盤") ||
+            label.contains("無法對照") ||
+            label.contains("可能染色")
+        if (offPalette) {
+            val hint = hit?.hint?.take(48).orEmpty()
+                .ifBlank { classObj?.optString("hint").orEmpty().take(48) }
+            return if (hint.isNotBlank()) "$tag：無法對照 — $label（$hint）"
+            else "$tag：無法對照 — $label"
+        }
         return if (hit?.abnormal == true) {
             val hint = hit.hint.take(24).ifBlank { hit.organs.take(24) }
             val extra = if (concernExtra.isNotEmpty()) "；" + concernExtra.joinToString("、") else ""
