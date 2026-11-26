@@ -318,9 +318,11 @@ def _lab_from_roi(
         if prefer_dark_cluster:
             chroma = (a * a + bb * bb) ** 0.5
             # Drop toilet porcelain / water and yellow UI ring contamination.
-            if L >= 68 and chroma < 18:
+            # Do NOT drop mid-pale chalky stool (L~62–78, low chroma) here —
+            # that emptied the ROI onto shadows and locked 黑色／墨绿.
+            if L >= 82 and chroma < 14:
                 continue
-            if L >= 62 and chroma < 10:
+            if L >= 78 and chroma < 8:
                 continue
             if L >= 55 and bb > 28 and a > 8 and s > 0.35:
                 # Saturated yellow (guide ring / urine splash), not stool body.
@@ -331,21 +333,31 @@ def _lab_from_roi(
     cluster = kept
     cluster_mode = "all"
     if prefer_dark_cluster and kept:
-        dark = [p for p in kept if p[0] < 40]
-        mid = [p for p in kept if p[0] < 55]
-        need = max(60, len(kept) // 12)
-        if len(dark) >= need:
-            cluster = dark
-            cluster_mode = "dark"
-        elif len(mid) >= need:
-            cluster = mid
-            cluster_mode = "mid"
-        elif _variance([p[0] for p in kept]) > 180:
-            # Bimodal porcelain+stool: use darkest quartile.
-            ordered = sorted(kept, key=lambda p: p[0])
-            q = max(40, len(ordered) // 4)
-            cluster = ordered[:q]
-            cluster_mode = "dark_quartile"
+        all_L = [p[0] for p in kept]
+        med_all = _median(all_L)
+        pale_frac = sum(1 for lv in all_L if lv >= 58) / float(len(all_L))
+        # Pale/white stool fills the circle: keep the pale majority. Minority
+        # green water / creases must not become dark_cluster → 墨绿／瀝青.
+        if med_all >= 58.0 and pale_frac >= 0.55:
+            pale = [p for p in kept if p[0] >= 55]
+            cluster = pale if len(pale) >= max(40, len(kept) // 8) else kept
+            cluster_mode = "pale_majority"
+        else:
+            dark = [p for p in kept if p[0] < 40]
+            mid = [p for p in kept if p[0] < 55]
+            need = max(60, len(kept) // 12)
+            if len(dark) >= need:
+                cluster = dark
+                cluster_mode = "dark"
+            elif len(mid) >= need:
+                cluster = mid
+                cluster_mode = "mid"
+            elif _variance(all_L) > 180:
+                # Bimodal porcelain+stool: use darkest quartile.
+                ordered = sorted(kept, key=lambda p: p[0])
+                q = max(40, len(ordered) // 4)
+                cluster = ordered[:q]
+                cluster_mode = "dark_quartile"
     kept_l = [p[0] for p in cluster]
     kept_a = [p[1] for p in cluster]
     kept_b = [p[2] for p in cluster]
@@ -1014,16 +1026,18 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
-    if a < -3 and b > 8:
+    # Pale / chalky BEFORE loose green: toilet WB / green water often nudge a* slightly
+    # negative on white stool; unbounded green approx used to lock 墨綠色.
+    if L >= 62 and chroma < 22 and -12 <= a <= 8 and b < 20:
         return {
-            "id": "dark_green",
-            "label": "墨綠色／深綠色（近似）",
-            "organs": "小腸／大腸",
-            "organ_keys": ["small_intestine", "large_intestine"],
-            "hint": "感染／發炎／通過過快教學提示",
-            "confounders": "深綠色蔬菜、鐵劑、抗生素",
+            "id": "clay_gray",
+            "label": "灰白色／陶土色（近似）",
+            "organs": "肝／膽道／胰",
+            "organ_keys": ["liver", "gallbladder", "spleen"],
+            "hint": "膽汁排出受阻教學警示",
+            "confounders": "鋇劑、制酸劑",
             "abnormal": True,
-            "health_score": 5,
+            "health_score": 3,
         }
     if L > 65 and chroma < 16:
         return {
@@ -1036,12 +1050,25 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
+    # Green approx: mid/dark L only (pale samples are clay/outside, not 墨绿).
+    if L <= 55 and a < -5 and b > 8:
+        return {
+            "id": "dark_green",
+            "label": "墨綠色／深綠色（近似）",
+            "organs": "小腸／大腸",
+            "organ_keys": ["small_intestine", "large_intestine"],
+            "hint": "感染／發炎／通過過快教學提示",
+            "confounders": "深綠色蔬菜、鐵劑、抗生素",
+            "abnormal": True,
+            "health_score": 5,
+        }
     # Soft near-match only when close to a known center — never invent 黃褐／正常.
     nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
     # Prefer 黃褐 over 淡脂 when chroma is warm (a*≥5) even if nearest center is pale_oily.
-    if 30 <= L <= 72 and a >= 5 and 18 <= b <= 52 and b >= a + 4:
+    # Slightly wider b* floor so dark-cluster medians of brown stool still hit 黃褐.
+    if 28 <= L <= 72 and a >= 5 and 14 <= b <= 52 and b >= a - 2:
         de_yb = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
-        if de_yb <= 22.0:
+        if de_yb <= 24.0:
             return {
                 "id": "normal_yellow_brown",
                 "label": "黃褐色／金黃色（近似）",
@@ -1065,13 +1092,18 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "health_score": 8,
             "palette_delta_e": round(nearest_de, 1),
         }
-    if nearest_de <= STOOL_OUTSIDE_PALETTE_DE and nearest_id in {
+    # Soft dark_green only when a* is actually greenish — warm brown (a*>0) must not
+    # soft-match 墨绿 just because ΔE to the green center is slightly nearer than 黃褐.
+    soft_ok = nearest_de <= STOOL_OUTSIDE_PALETTE_DE and nearest_id in {
         "black_tarry",
         "clay_gray",
         "bright_dark_red",
         "dark_green",
         "pale_oily",
-    }:
+    }
+    if soft_ok and nearest_id == "dark_green" and a >= -2:
+        soft_ok = False
+    if soft_ok:
         approx_map = {
             "black_tarry": (
                 "黑色／瀝青色（近似）",

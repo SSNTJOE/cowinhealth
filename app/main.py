@@ -1431,11 +1431,17 @@ async def analyze(
     color_temperature_k: str | None = Form(default=None),
     confounders: str | None = Form(default=None),
     device_hint: str | None = Form(default=None),
+    circle_fast: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
         face, tongue, face_base64, tongue_base64, image, image_base64, shot_type
     )
+    # App circle re-shot: skip week-advice + deviation xls (keep same-day modality merge).
+    circle_fast_flag = str(circle_fast or "").strip().lower() in {"1", "true", "yes"}
+    shot_kinds = {s for s, _ in images}
+    circle_only = bool(shot_kinds) and shot_kinds.issubset({"stool", "urine"})
+    use_circle_fast = circle_fast_flag and circle_only
     pulse = None
     if pulse_json:
         try:
@@ -1510,16 +1516,31 @@ async def analyze(
                 conn.close()
         except Exception:
             logger.exception("lighting_calib_json 寫入失敗")
-    week_records = fetch_week_records_for_advice(user_id)
-    advice = build_advice(
-        result["findings"],
-        symptoms or "",
-        discomfort or "",
-        conditions=condition_list,
-        allergies=allergy_list,
-        result=result,
-        week_records=week_records,
-    )
+    if use_circle_fast:
+        # Skip week MySQL + heavy advice merge; keep stub keys for App binders.
+        week_records: list[dict] = []
+        advice = {
+            "diet_advice": "",
+            "diet_url": "",
+            "diet_video_url": "",
+            "diet_query": "",
+            "diet_video_query": "",
+            "acupoint_url": "",
+            "acupoint_video_url": "",
+            "acupoint_query": "",
+            "acupoint_video_query": "",
+        }
+    else:
+        week_records = fetch_week_records_for_advice(user_id)
+        advice = build_advice(
+            result["findings"],
+            symptoms or "",
+            discomfort or "",
+            conditions=condition_list,
+            allergies=allergy_list,
+            result=result,
+            week_records=week_records,
+        )
     result["diet_query"] = advice.get("diet_query")
     result["diet_video_query"] = advice.get("diet_video_query")
     result["diet_video_url"] = advice.get("diet_video_url")
@@ -1529,12 +1550,12 @@ async def analyze(
     extra = {
         "symptoms": symptoms,
         "discomfort": discomfort,
-        "diet_advice": advice["diet_advice"],
-        "diet_url": advice["diet_url"],
+        "diet_advice": advice.get("diet_advice") or "",
+        "diet_url": advice.get("diet_url") or "",
         "diet_video_url": advice.get("diet_video_url"),
         "diet_query": advice.get("diet_query"),
         "diet_video_query": advice.get("diet_video_query"),
-        "acupoint_url": advice["acupoint_url"],
+        "acupoint_url": advice.get("acupoint_url") or "",
         "acupoint_video_url": advice.get("acupoint_video_url"),
         "acupoint_query": advice.get("acupoint_query"),
         "acupoint_video_query": advice.get("acupoint_video_query"),
@@ -1563,10 +1584,11 @@ async def analyze(
             conn.close()
     except Exception:
         logger.exception("online color calibration persist failed")
-    try:
-        record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
-    except Exception:
-        logger.exception("檢測差異沒有寫入 deviation.xls")
+    if not use_circle_fast:
+        try:
+            record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
+        except Exception:
+            logger.exception("檢測差異沒有寫入 deviation.xls")
     return result
 
 

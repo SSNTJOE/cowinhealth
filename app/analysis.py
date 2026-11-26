@@ -4264,7 +4264,9 @@ def analyze_session(
 
         conn = connect()
         try:
-            for mod in {shot for shot, _raw in images} | {"face", "tongue", "stool", "urine"}:
+            # Only load modalities present in this request (circle-only skips face/tongue DB).
+            mods = {shot for shot, _raw in images} or {"face", "tongue", "stool", "urine"}
+            for mod in mods:
                 online_by_mod[mod] = load_compensation(
                     conn,
                     modality=mod,

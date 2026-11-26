@@ -63,6 +63,14 @@ class ApiClient(
         callSec = 120,
     )
 
+    /** Circle-only: small JPEG + server fast path; tighter than full face/tongue record. */
+    private val circleClient = buildClient(
+        connectSec = 12,
+        readSec = 45,
+        writeSec = 30,
+        callSec = 60,
+    )
+
     /** Recipe research/create can take minutes; keep a longer client for ensure only. */
     private val ensureClient = buildClient(
         connectSec = 20,
@@ -353,6 +361,36 @@ class ApiClient(
         }
         val req = Request.Builder().url("$baseUrl/api/record").auth().post(builder.build()).build()
         recordClient.newCall(req).execute().use { resp ->
+            val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
+            if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "送出失敗"))
+            return json
+        }
+    }
+
+    /**
+     * Stool/urine only: no face/tongue/pulse upload, `circle_fast=1` so server skips
+     * week-advice + deviation xls. Judgment text still waits for this response.
+     */
+    fun submitCircle(
+        symptoms: String,
+        discomfort: String,
+        colorTemperatureK: String = "auto",
+        shotType: String,
+        shotFile: File,
+        deviceHint: String? = null,
+    ): JSONObject {
+        val jpeg = "image/jpeg".toMediaType()
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("symptoms", symptoms)
+            .addFormDataPart("discomfort", discomfort)
+            .addFormDataPart("include_pulse", "0")
+            .addFormDataPart("color_temperature_k", colorTemperatureK)
+            .addFormDataPart("circle_fast", "1")
+            .addFormDataPart("shot_type", shotType)
+            .addFormDataPart("image", "$shotType.jpg", shotFile.asRequestBody(jpeg))
+        if (!deviceHint.isNullOrBlank()) builder.addFormDataPart("device_hint", deviceHint)
+        val req = Request.Builder().url("$baseUrl/api/record").auth().post(builder.build()).build()
+        circleClient.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "送出失敗"))
             return json

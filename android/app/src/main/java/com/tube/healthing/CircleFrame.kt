@@ -24,14 +24,23 @@ object CircleFrame {
     /** Must match [CircleGuideView] radius = min(w,h) * 0.32f. */
     const val RADIUS_FRAC = 0.32f
 
+    /** Lab only needs a small circle; keep upload snappy on phone Wi‑Fi. */
+    private const val MAX_SIDE = 640
+    private const val JPEG_QUALITY = 72
+
     fun cropFileToYellowCircle(file: File, viewW: Int, viewH: Int) {
         if (viewW < 2 || viewH < 2 || !file.isFile) return
         val decoded = BitmapFactory.decodeFile(file.absolutePath) ?: return
         val uprightBmp = upright(decoded, file)
         val cropped = cropVisibleCircle(uprightBmp, viewW, viewH) ?: return
+        val scaled = downscale(cropped, MAX_SIDE)
         val bytes = ByteArrayOutputStream()
-        if (!cropped.compress(Bitmap.CompressFormat.JPEG, 92, bytes)) return
+        if (!scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bytes)) return
         file.writeBytes(bytes.toByteArray())
+        if (scaled !== cropped && scaled !== uprightBmp) scaled.recycle()
+        if (cropped !== uprightBmp) cropped.recycle()
+        if (uprightBmp !== decoded) uprightBmp.recycle()
+        decoded.recycle()
     }
 
     /**
@@ -62,6 +71,17 @@ object CircleFrame {
         val y1 = ((bottom - offY) / fit).roundToInt().coerceIn(y0 + 1, bitmap.height)
         if (x1 <= x0 || y1 <= y0) return null
         return Bitmap.createBitmap(bitmap, x0, y0, x1 - x0, y1 - y0)
+    }
+
+    private fun downscale(bitmap: Bitmap, maxSide: Int): Bitmap {
+        val w = bitmap.width
+        val h = bitmap.height
+        val longest = max(w, h)
+        if (longest <= maxSide) return bitmap
+        val scale = maxSide.toFloat() / longest.toFloat()
+        val nw = max(1, (w * scale).roundToInt())
+        val nh = max(1, (h * scale).roundToInt())
+        return Bitmap.createScaledBitmap(bitmap, nw, nh, true)
     }
 
     private fun upright(bitmap: Bitmap, file: File): Bitmap {

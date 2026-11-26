@@ -916,6 +916,8 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) {
                             }
                             if (mode == CameraFacing.STOOL) stoolFile = file else urineFile = file
+                            // Optimistic line before /api/record returns (judgment still waits on server).
+                            runOnUiThread { showCircleAnalyzing(mode) }
                             // Same as website: analyze immediately; text only, no photo keep/display.
                             Thread { submitCircleShot(mode, file) }.start()
                         }
@@ -1046,22 +1048,17 @@ class MainActivity : AppCompatActivity() {
     private fun submitCircleShot(kind: String, file: File) {
         try {
             rememberServer()
-            runOnUiThread {
-                Toast.makeText(this, t("toastCircleBusy"), Toast.LENGTH_SHORT).show()
-            }
             // Same endpoint/rules as web. Do NOT re-upload face/tongue on circle re-shot:
             // that re-runs heavy face/tongue grids, often exceeds phone timeouts, and leaves
             // circleResult on the previous line (catch path does not rewrite UI).
-            val json = api.submit(
+            // Circle path: light body (no pulse/face/tongue) + small JPEG; judgment text
+            // still appears only after /api/record returns.
+            val json = api.submitCircle(
                 symptoms = binding.symptoms.text.toString(),
                 discomfort = binding.discomfort.text.toString(),
-                face = null,
-                tongue = null,
-                pulseJson = null,
                 colorTemperatureK = selectedColorTemperatureK(),
                 shotType = kind,
                 shotFile = file,
-                includePulse = false,
                 deviceHint = silentDeviceHint(),
             )
             // Do not keep stool/urine photo for display.
@@ -1080,6 +1077,34 @@ class MainActivity : AppCompatActivity() {
                 ).show()
             }
         }
+    }
+
+    /** Swap this modality line to 「分析中…」 immediately after capture (before network). */
+    private fun showCircleAnalyzing(kind: String) {
+        val focus = when (kind) {
+            CameraFacing.URINE, "urine" -> "urine"
+            else -> "stool"
+        }
+        val analyzing = if (focus == "urine") t("circleAnalyzingUrine") else t("circleAnalyzingStool")
+        val panel = binding.circleResult.text?.toString().orEmpty()
+        val merged = linkedMapOf<String, String>()
+        panel.lineSequence().forEach { line ->
+            val t = line.trim()
+            when {
+                t.startsWith("舌質") -> merged["tongue_body"] = t
+                t.startsWith("舌苔") -> merged["tongue_coat"] = t
+                t.startsWith("大便") -> if (focus != "stool") merged["stool"] = t
+                t.startsWith("尿尿") -> if (focus != "urine") merged["urine"] = t
+                t.startsWith("脈") -> merged["pulse"] = t
+            }
+        }
+        merged[focus] = analyzing
+        binding.circleResult.text = listOfNotNull(
+            merged["tongue_body"], merged["tongue_coat"],
+            merged["stool"], merged["urine"], merged["pulse"],
+        ).joinToString("\n")
+        binding.circleResult.visibility = View.VISIBLE
+        Toast.makeText(this, t("toastCircleBusy"), Toast.LENGTH_SHORT).show()
     }
 
     /** Force-replace this modality line from live /api/record (like web lastDayLines). */
