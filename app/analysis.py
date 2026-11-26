@@ -4421,6 +4421,7 @@ def analyze_session(
             else "大便已測",
             "findings": [t for t in stool_urine_findings if str(t).startswith("大便") or "大便" in str(t)[:8]]
             or list((day_modalities.get("stool") or {}).get("findings") or []),
+            "note": stool_note,
         }
     if urine_note is not None:
         day_modalities["urine"] = {
@@ -4429,6 +4430,7 @@ def analyze_session(
             else "尿尿已測",
             "findings": [t for t in stool_urine_findings if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]]
             or list((day_modalities.get("urine") or {}).get("findings") or []),
+            "note": urine_note,
         }
     if pulse is not None or pulse_notes:
         day_modalities["pulse"] = {

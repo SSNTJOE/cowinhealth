@@ -116,11 +116,55 @@ object StoolUrineJudge {
         }
     }
 
-    /** Prefer top-level stool/urine; fall back to organ_health.stool_urine. */
+    /** Prefer top-level stool/urine; fall back to organ_health.stool_urine / day_modalities. */
     fun noteForKind(json: JSONObject, kind: String): JSONObject? {
         json.optJSONObject(kind)?.let { return it }
-        val su = json.optJSONObject("organ_health")?.optJSONObject("stool_urine")
-        return su?.optJSONObject(kind)
+        val health = json.optJSONObject("organ_health")
+        health?.optJSONObject("stool_urine")?.optJSONObject(kind)?.let { return it }
+        // day_modalities.<kind>.note carries the full teaching note across same-day merges.
+        health?.optJSONObject("day_modalities")?.optJSONObject(kind)?.optJSONObject("note")?.let {
+            return it
+        }
+        return null
+    }
+
+    /** First findings line for this modality (server often writes 「大便：…」/「尿尿：…」). */
+    fun findingLine(json: JSONObject, kind: String): String? {
+        val isUrine = kind == CameraFacing.URINE || kind == "urine"
+        val prefixes = if (isUrine) {
+            listOf("尿尿", "尿")
+        } else {
+            listOf("大便", "大便色")
+        }
+        val arr = json.optJSONArray("findings")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val raw = arr.optString(i).trim()
+                if (raw.isBlank()) continue
+                if (prefixes.any { raw.startsWith(it) }) {
+                    return raw.split("（").first().trim()
+                }
+            }
+        }
+        val dm = json.optJSONObject("organ_health")
+            ?.optJSONObject("day_modalities")
+            ?.optJSONObject(if (isUrine) "urine" else "stool")
+        val nested = dm?.optJSONArray("findings")
+        if (nested != null) {
+            for (i in 0 until nested.length()) {
+                val raw = nested.optString(i).trim()
+                if (raw.isBlank()) continue
+                if (prefixes.any { raw.startsWith(it) }) {
+                    return raw.split("（").first().trim()
+                }
+            }
+        }
+        val label = dm?.optString("color_label")?.trim().orEmpty()
+        if (label.isNotBlank()) {
+            val tag = if (isUrine) "尿尿" else "大便"
+            return if (label.startsWith(tag)) label else "$tag：$label"
+        }
+        return null
     }
 
     /** One short line: normal vs notes of concern (existing class rules). */
@@ -129,11 +173,21 @@ object StoolUrineJudge {
         val tag = if (isUrine) "尿尿" else "大便"
         val note = noteForKind(json, kind)
         val hit = extractClass(note)
+        // Prefer class label; avoid using multi-modality composite color_label as the stool/urine name.
+        val rawColor = json.optString("color_label").trim()
+        val colorFallback = when {
+            rawColor.startsWith(tag) -> rawColor.removePrefix("$tag：").removePrefix("$tag:").trim()
+            rawColor.contains("／") || rawColor.startsWith("臉") || rawColor.startsWith("舌") -> ""
+            rawColor.isNotBlank() && rawColor != "尚未拍照" -> rawColor
+            else -> ""
+        }
         val label = hit?.label?.trim()
             ?.ifBlank { null }
-            ?: json.optString("color_label").trim().ifBlank { "未分類" }
+            ?: colorFallback.ifBlank { null }
+            ?: findingLine(json, kind)?.substringAfter("：")?.substringAfter(":")?.trim()
+            ?: "未分類"
         if (hit == null && label == "未分類") {
-            return "$tag：尚無色調判斷"
+            return findingLine(json, kind) ?: "$tag：尚無色調判斷"
         }
         val concernExtra = buildList {
             if (isUrine) {
@@ -183,9 +237,14 @@ object StoolUrineJudge {
     /** Combined stool + urine short panel (both stay visible). */
     fun panelText(json: JSONObject): String {
         val lines = mutableListOf<String>()
-        if (noteForKind(json, "stool") != null) lines.add(briefStatus(json, "stool"))
-        if (noteForKind(json, "urine") != null) lines.add(briefStatus(json, "urine"))
-        // If only one kind was just measured but nested note missing, still show color_label.
+        val hasStool = noteForKind(json, "stool") != null || findingLine(json, "stool") != null
+        val hasUrine = noteForKind(json, "urine") != null || findingLine(json, "urine") != null
+        if (hasStool) lines.add(briefStatus(json, "stool"))
+        if (hasUrine) lines.add(briefStatus(json, "urine"))
+        if (lines.isEmpty()) {
+            findingLine(json, "stool")?.let { lines.add(it) }
+            findingLine(json, "urine")?.let { lines.add(it) }
+        }
         if (lines.isEmpty()) {
             val label = json.optString("color_label").trim()
             if (label.startsWith("尿尿") || label.startsWith("大便")) lines.add(label)

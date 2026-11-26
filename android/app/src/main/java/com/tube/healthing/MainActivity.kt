@@ -1012,7 +1012,7 @@ class MainActivity : AppCompatActivity() {
                 deviceHint = silentDeviceHint(),
             )
             runOnUiThread {
-                showDayResult(json)
+                showDayResult(json, focusKind = kind)
                 binding.result.text = pretty(json)
                 bindAdvice(json)
                 bindOrganSessionUi(json)
@@ -1061,7 +1061,8 @@ class MainActivity : AppCompatActivity() {
             if (kind == CameraFacing.STOOL) stoolFile = null
             if (kind == CameraFacing.URINE) urineFile = null
             runOnUiThread {
-                showDayResult(json)
+                // Primary judgment surface: @id/circleResult under stool/urine buttons.
+                showDayResult(json, focusKind = kind)
                 binding.result.text = prettyCircle(json, kind)
                 bindAdvice(json)
                 bindOrganSessionUi(json)
@@ -1092,14 +1093,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Today's face/tongue/stool/urine/pulse lines (same as web #circle-result). */
-    private fun dayPanelText(json: JSONObject): String {
+    private fun dayPanelText(json: JSONObject, focusKind: String? = null): String {
         val lines = linkedMapOf<String, String>()
         val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
         fun putLabel(key: String, tag: String) {
             val block = dm?.optJSONObject(key) ?: return
             val label = block.optString("color_label").trim()
-            if (label.isNotBlank()) lines[key] = "$tag：$label"
-            else if (key == "pulse" && (block.optBoolean("present") || block.optJSONArray("findings") != null)) {
+            if (label.isNotBlank()) {
+                lines[key] = if (label.startsWith(tag)) label else "$tag：$label"
+            } else if (key == "pulse" && (block.optBoolean("present") || block.optJSONArray("findings") != null)) {
                 lines[key] = "脈：已測"
             }
         }
@@ -1112,8 +1114,21 @@ class MainActivity : AppCompatActivity() {
                 t.startsWith("尿尿") -> lines["urine"] = t
             }
         }
-        if (!lines.containsKey("stool")) putLabel("stool", "大便")
-        if (!lines.containsKey("urine")) putLabel("urine", "尿尿")
+        if (!lines.containsKey("stool")) {
+            StoolUrineJudge.findingLine(json, "stool")?.let { lines["stool"] = it }
+                ?: putLabel("stool", "大便")
+        }
+        if (!lines.containsKey("urine")) {
+            StoolUrineJudge.findingLine(json, "urine")?.let { lines["urine"] = it }
+                ?: putLabel("urine", "尿尿")
+        }
+        // Just-captured modality must always produce a visible line.
+        when (focusKind) {
+            CameraFacing.STOOL, "stool" ->
+                lines["stool"] = StoolUrineJudge.briefStatus(json, "stool")
+            CameraFacing.URINE, "urine" ->
+                lines["urine"] = StoolUrineJudge.briefStatus(json, "urine")
+        }
         putLabel("pulse", "脈")
         if (dm?.optJSONObject("pulse") != null && !lines.containsKey("pulse")) {
             lines["pulse"] = "脈：已測"
@@ -1131,8 +1146,11 @@ class MainActivity : AppCompatActivity() {
         binding.circleResult.visibility = View.VISIBLE
     }
 
-    /** Dedicated day panel under the shoot buttons (always visible). */
-    private fun showDayResult(json: JSONObject) {
+    /**
+     * Dedicated day judgment panel under stool/urine buttons.
+     * Layout: activity_main.xml → @id/circleResult (TextView below @id/circleNote).
+     */
+    private fun showDayResult(json: JSONObject, focusKind: String? = null) {
         val panel = binding.circleResult
         val prior = panel.text?.toString().orEmpty()
         val lines = linkedMapOf<String, String>()
@@ -1146,7 +1164,7 @@ class MainActivity : AppCompatActivity() {
                 t.startsWith("脈") -> lines["pulse"] = t
             }
         }
-        dayPanelText(json).lineSequence().forEach { line ->
+        dayPanelText(json, focusKind).lineSequence().forEach { line ->
             val t = line.trim()
             when {
                 t.startsWith("臉") -> lines["face"] = t
@@ -1160,22 +1178,39 @@ class MainActivity : AppCompatActivity() {
             lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
         ).joinToString("\n")
         if (text.isBlank()) {
-            panel.visibility = View.GONE
-            return
+            // Last resort: still show something so the panel is not silently gone.
+            val fallback = focusKind?.let { StoolUrineJudge.briefStatus(json, it) }.orEmpty()
+            if (fallback.isBlank()) {
+                panel.visibility = View.GONE
+                return
+            }
+            panel.text = fallback
+        } else {
+            panel.text = text
         }
-        panel.text = text
         panel.visibility = View.VISIBLE
         panel.post {
             val scroll = binding.root as? android.widget.ScrollView ?: return@post
-            scroll.smoothScrollTo(0, panel.top.coerceAtLeast(0))
+            var y = 0
+            var v: View? = panel
+            while (v != null && v !== scroll) {
+                y += v.top
+                v = v.parent as? View
+            }
+            scroll.smoothScrollTo(0, (y - 24).coerceAtLeast(0))
         }
     }
 
     /** Brief stool/urine conclusions (same idea as pulse 五臟六腑簡結). */
     private fun prettyCircle(json: JSONObject, kind: String): String {
         val summary = StoolUrineJudge.summaryFromResult(json, kind)
-        // Keep diet/score footer short; detailed findings stay in session summary / organ cards.
-        return "$summary\n\n${pretty(json)}"
+        val finding = StoolUrineJudge.findingLine(json, kind)
+        val body = pretty(json)
+        return if (!finding.isNullOrBlank() && !summary.contains(finding.take(8))) {
+            "$summary\n$finding\n\n$body"
+        } else {
+            "$summary\n\n$body"
+        }
     }
 
     private fun save() {
