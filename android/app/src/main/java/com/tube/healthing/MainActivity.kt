@@ -1093,7 +1093,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Today's face/tongue/stool/urine/pulse lines (same as web #circle-result). */
+    /** Today's stool/urine/pulse lines (face/tongue color teaching blocks stay hidden). */
     private fun dayPanelText(json: JSONObject, focusKind: String? = null): String {
         val lines = linkedMapOf<String, String>()
         val dm = json.optJSONObject("organ_health")?.optJSONObject("day_modalities")
@@ -1106,8 +1106,7 @@ class MainActivity : AppCompatActivity() {
                 lines[key] = "脈：已測"
             }
         }
-        putLabel("face", "臉")
-        putLabel("tongue", "舌")
+        // Face 「教學正常值…色澤…(8-10健康)」and tongue 「色澤分析」stay hidden on App.
         StoolUrineJudge.panelText(json).lineSequence().forEach { line ->
             val t = line.trim()
             when {
@@ -1135,7 +1134,7 @@ class MainActivity : AppCompatActivity() {
             lines["pulse"] = "脈：已測"
         }
         return listOfNotNull(
-            lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
+            lines["stool"], lines["urine"], lines["pulse"],
         ).joinToString("\n")
     }
 
@@ -1166,8 +1165,8 @@ class MainActivity : AppCompatActivity() {
         prior.lineSequence().forEach { line ->
             val t = line.trim()
             when {
-                t.startsWith("臉") -> if (focusKey != "face") lines["face"] = t
-                t.startsWith("舌") -> if (focusKey != "tongue") lines["tongue"] = t
+                // Drop legacy face/tongue color-analysis lines from prior panel text.
+                t.startsWith("臉") || t.startsWith("舌") -> Unit
                 t.startsWith("大便") -> if (focusKey != "stool") lines["stool"] = t
                 t.startsWith("尿尿") -> if (focusKey != "urine") lines["urine"] = t
                 t.startsWith("脈") -> lines["pulse"] = t
@@ -1176,8 +1175,6 @@ class MainActivity : AppCompatActivity() {
         dayPanelText(json, focusKind).lineSequence().forEach { line ->
             val t = line.trim()
             when {
-                t.startsWith("臉") -> lines["face"] = t
-                t.startsWith("舌") -> lines["tongue"] = t
                 t.startsWith("大便") -> lines["stool"] = t
                 t.startsWith("尿尿") -> lines["urine"] = t
                 t.startsWith("脈") -> lines["pulse"] = t
@@ -1189,10 +1186,13 @@ class MainActivity : AppCompatActivity() {
             "urine" -> lines["urine"] = StoolUrineJudge.briefStatus(json, "urine")
         }
         val text = listOfNotNull(
-            lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
+            lines["stool"], lines["urine"], lines["pulse"],
         ).joinToString("\n")
         if (text.isBlank()) {
-            val fallback = focusKind?.let { StoolUrineJudge.briefStatus(json, it) }.orEmpty()
+            val fallback = when (focusKey) {
+                "stool", "urine" -> StoolUrineJudge.briefStatus(json, focusKey)
+                else -> ""
+            }
             if (fallback.isBlank()) {
                 panel.visibility = View.GONE
                 return
@@ -1369,7 +1369,8 @@ class MainActivity : AppCompatActivity() {
         binding.shotTongue.text = t("shotTongue")
         binding.shotStool.text = t("shotStool")
         binding.shotUrine.text = t("shotUrine")
-        binding.circleNote.text = t("circleNote")
+        binding.circleNote.text = ""
+        binding.circleNote.visibility = View.GONE
         binding.confounderFood.text = t("confounder")
         binding.openPulse.text = t("openPulse")
         binding.save.text = t("save")
@@ -1392,7 +1393,8 @@ class MainActivity : AppCompatActivity() {
         binding.trendEmpty.text = t("trendEmpty")
         refreshSyndromeLegend()
         binding.recipeHeading.text = t("recipeHeading")
-        binding.recipeNote.text = t("recipeNote")
+        binding.recipeNote.text = ""
+        binding.recipeNote.visibility = View.GONE
         val advice = t("recipeBodyAdvice")
         binding.recipeBodyAdvice.textOn = advice
         binding.recipeBodyAdvice.textOff = advice

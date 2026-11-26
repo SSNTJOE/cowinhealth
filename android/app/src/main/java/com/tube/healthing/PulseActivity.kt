@@ -1,21 +1,29 @@
 package com.tube.healthing
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Outline
 import android.os.Bundle
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.tube.healthing.databinding.ActivityPulseBinding
+import org.json.JSONObject
+import java.time.LocalDate
 
 /**
  * Front-camera green fill-light PPG pulse entry (Canvas UI).
+ * Six 寸關尺 steps independently measurable; same-day last value kept per site.
+ * Pulse organ analysis stays collapsed until user taps「脈搏分數」.
  * Wired from MainActivity「寸關尺／脈搏」. Does not replace login MainActivity.
  */
 class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener {
@@ -24,6 +32,28 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     private var lastBpm: Int? = null
     private var lastBeats15: Int? = null
     private var savedBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    private var positionIndex = 0
+    private val stepChipButtons = mutableListOf<Button>()
+    /** stepIndex → 15s beat count (for per-slot pulse_json + organ summary). */
+    private val stepReadings = linkedMapOf<Int, Int>()
+    private val stepBpms = linkedMapOf<Int, Int>()
+    private var organExpanded = false
+    private var pendingOrganSummary = ""
+
+    private data class PulseStep(
+        val shortName: String,
+        val organs: String,
+        val resId: Int,
+    )
+
+    private val steps = listOf(
+        PulseStep("左寸", "心、小腸", R.drawable.pulse_left_cun),
+        PulseStep("左關", "肝、膽", R.drawable.pulse_left_guan),
+        PulseStep("左尺", "腎、膀胱", R.drawable.pulse_left_chi),
+        PulseStep("右寸", "肺、大腸", R.drawable.pulse_right_cun),
+        PulseStep("右關", "脾、胃", R.drawable.pulse_right_guan),
+        PulseStep("右尺", "腎、命門", R.drawable.pulse_right_chi),
+    )
 
     private val permission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -45,14 +75,19 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         applyMaxBrightness()
 
         binding.guide.text =
-            "前置鏡頭綠光補光 PPG\n" +
-                "請用指腹同時蓋住上方前置鏡頭與純綠補光區（不開手電筒）。\n" +
+            "前置鏡頭綠光補光 PPG（不開手電筒）\n" +
+                "請用指腹同時蓋住上方前置鏡頭與純綠補光區。\n" +
+                "六格左／右 寸・關・尺可各自量測與重測；今日最後一次讀值會保留。\n" +
                 "螢幕亮度已調至最大；等待 → 自動量測 15 秒 → 完成（中位 BPM）。\n" +
                 "15 秒次數＝BPM×15/60；>23 偏熱實，<14 偏寒虛。（教學示範，非診斷）"
 
-        // Show placement guides while waiting / measuring (寸關尺 demos + finger PPG).
+        loadTodayReadings()
+        inflateStepChips()
+        selectPosition(firstOpenIndex())
         showGuideImages(true)
-        binding.guideHand.setOnClickListener { cycleHandGuide() }
+        organExpanded = false
+        refreshOrganConclusion()
+        binding.pulseScoreToggle.setOnClickListener { toggleOrganConclusion() }
 
         binding.previewFrame.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
@@ -62,10 +97,11 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         binding.previewFrame.clipToOutline = true
 
         binding.start.setOnClickListener {
+            // Clear only current-step draft; keep prior slot readings.
             lastBpm = null
             lastBeats15 = null
             binding.bpm.text = "— BPM"
-            binding.done.isEnabled = false
+            binding.done.isEnabled = stepReadings.isNotEmpty()
             binding.waveform.clear()
             binding.ring.setProgress(0f)
             applyMaxBrightness()
@@ -74,14 +110,22 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         binding.remeasure.setOnClickListener {
             lastBpm = null
             lastBeats15 = null
+            stepReadings.remove(positionIndex)
+            stepBpms.remove(positionIndex)
+            saveTodayReadings()
             binding.bpm.text = "— BPM"
-            binding.done.isEnabled = false
+            binding.done.isEnabled = stepReadings.isNotEmpty()
             binding.waveform.clear()
             binding.ring.setProgress(0f)
+            refreshOrganConclusion()
             applyMaxBrightness()
             ensureMonitor().remeasure()
         }
         binding.done.setOnClickListener { finishWithResult() }
+
+        // Bring action bar above any overlapping scroll content.
+        binding.actionBar.bringToFront()
+        binding.actionBar.elevation = 12f
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
@@ -104,6 +148,7 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     }
 
     override fun onPause() {
+        saveTodayReadings()
         monitor?.pause()
         super.onPause()
     }
@@ -115,12 +160,121 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         super.onDestroy()
     }
 
+    private fun prefs() = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun todayKey(): String = "pulse_${LocalDate.now()}"
+
+    private fun loadTodayReadings() {
+        stepReadings.clear()
+        stepBpms.clear()
+        val raw = prefs().getString(todayKey(), null) ?: return
+        try {
+            val obj = JSONObject(raw)
+            val beats = obj.optJSONObject("beats") ?: return
+            val bpms = obj.optJSONObject("bpms")
+            for (i in steps.indices) {
+                val key = i.toString()
+                if (!beats.has(key)) continue
+                val b = beats.optInt(key, -1)
+                if (b < 0) continue
+                stepReadings[i] = b
+                val bpm = bpms?.optInt(key, -1)?.takeIf { it > 0 } ?: ((b * 60) / 15)
+                stepBpms[i] = bpm
+            }
+        } catch (_: Exception) {
+            // Ignore corrupt prefs; start fresh for today.
+        }
+    }
+
+    private fun saveTodayReadings() {
+        val beats = JSONObject()
+        val bpms = JSONObject()
+        stepReadings.forEach { (i, b) ->
+            beats.put(i.toString(), b)
+            stepBpms[i]?.let { bpms.put(i.toString(), it) }
+        }
+        prefs().edit()
+            .putString(todayKey(), JSONObject().put("beats", beats).put("bpms", bpms).toString())
+            .apply()
+    }
+
+    private fun firstOpenIndex(): Int {
+        for (i in steps.indices) {
+            if (!stepReadings.containsKey(i)) return i
+        }
+        return 0
+    }
+
+    private fun inflateStepChips() {
+        binding.stepChips.removeAllViews()
+        stepChipButtons.clear()
+        val padH = (8 * resources.displayMetrics.density).toInt()
+        val padV = (4 * resources.displayMetrics.density).toInt()
+        steps.forEachIndexed { index, step ->
+            val btn = Button(this).apply {
+                text = chipLabel(index, step.shortName)
+                textSize = 12f
+                isAllCaps = false
+                setPadding(padH, padV, padH, padV)
+                minimumHeight = 0
+                minHeight = 0
+                setOnClickListener { selectPosition(index) }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = padH }
+            binding.stepChips.addView(btn, lp)
+            stepChipButtons.add(btn)
+        }
+    }
+
+    private fun chipLabel(index: Int, shortName: String): String {
+        val bpm = stepBpms[index]
+        return if (bpm != null) "${index + 1}.$shortName $bpm" else "${index + 1}.$shortName"
+    }
+
+    private fun selectPosition(index: Int) {
+        positionIndex = index.coerceIn(0, steps.lastIndex)
+        val step = steps[positionIndex]
+        binding.positionBanner.text =
+            "目前量測：${step.shortName}（${step.organs}）· 步驟 ${positionIndex + 1}／${steps.size}"
+        binding.guideHand.setImageResource(step.resId)
+        binding.guideCaption.text =
+            "左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝${step.shortName}（${step.organs}）"
+        stepChipButtons.forEachIndexed { i, btn ->
+            val selected = i == positionIndex
+            val done = stepReadings.containsKey(i)
+            btn.text = chipLabel(i, steps[i].shortName)
+            btn.setBackgroundColor(
+                when {
+                    selected -> Color.parseColor("#2E7D32")
+                    done -> Color.parseColor("#455A64")
+                    else -> Color.parseColor("#333333")
+                }
+            )
+            btn.setTextColor(if (selected || done) Color.WHITE else Color.parseColor("#BDBDBD"))
+        }
+        // Restore BPM display for this step if already measured.
+        val priorBpm = stepBpms[positionIndex]
+        val priorBeats = stepReadings[positionIndex]
+        if (priorBpm != null && priorBeats != null) {
+            lastBpm = priorBpm
+            lastBeats15 = priorBeats
+            binding.bpm.text = "$priorBpm BPM"
+        } else {
+            lastBpm = null
+            lastBeats15 = null
+            binding.bpm.text = "— BPM"
+        }
+        binding.done.isEnabled = stepReadings.isNotEmpty()
+    }
+
     private fun applyMaxBrightness() {
         val lp = window.attributes
         if (savedBrightness == WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE ||
             savedBrightness < 0f
         ) {
-            // Keep first non-max value so we can restore later.
             if (lp.screenBrightness in 0f..0.99f) {
                 savedBrightness = lp.screenBrightness
             }
@@ -147,28 +301,60 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         return created
     }
 
-    private fun finishWithResult() {
-        val bpm = lastBpm
-        val beats = lastBeats15
-        if (bpm == null || beats == null) {
-            Toast.makeText(this, "尚無有效 BPM，請先完成量測", Toast.LENGTH_SHORT).show()
+    private fun toggleOrganConclusion() {
+        if (pendingOrganSummary.isBlank()) {
+            Toast.makeText(this, "先完成至少一格寸關尺量測", Toast.LENGTH_SHORT).show()
             return
         }
-        val json = FrontCameraHeartRateMonitor.pulseJsonFromBpm(bpm, beats)
-        setResult(RESULT_OK, Intent().putExtra("pulse_json", json.toString()))
-        finish()
+        organExpanded = !organExpanded
+        applyOrganVisibility()
     }
 
-    private val handGuideRes = intArrayOf(
-        R.drawable.pulse_hand,
-        R.drawable.pulse_left_cun,
-        R.drawable.pulse_left_guan,
-        R.drawable.pulse_left_chi,
-        R.drawable.pulse_right_cun,
-        R.drawable.pulse_right_guan,
-        R.drawable.pulse_right_chi,
-    )
-    private var handGuideIndex = 0
+    private fun applyOrganVisibility() {
+        if (pendingOrganSummary.isBlank()) {
+            binding.organConclusion.visibility = View.GONE
+            binding.organConclusion.text = ""
+            binding.pulseScoreToggle.text = "脈搏分數 ▸"
+            return
+        }
+        binding.pulseScoreToggle.text = if (organExpanded) "脈搏分數 ▾" else "脈搏分數 ▸"
+        if (organExpanded) {
+            binding.organConclusion.visibility = View.VISIBLE
+            binding.organConclusion.text = pendingOrganSummary
+        } else {
+            binding.organConclusion.visibility = View.GONE
+        }
+    }
+
+    private fun refreshOrganConclusion() {
+        pendingOrganSummary = PulseOrganJudge.summaryFromReadings(stepReadings)
+        // Stay collapsed by default; only show body when user already expanded.
+        applyOrganVisibility()
+    }
+
+    private fun finishWithResult() {
+        if (stepReadings.isEmpty()) {
+            // Fallback: single last reading if map empty but lastBpm set.
+            val bpm = lastBpm
+            val beats = lastBeats15
+            if (bpm == null || beats == null) {
+                Toast.makeText(this, "尚無有效 BPM，請先完成量測", Toast.LENGTH_SHORT).show()
+                return
+            }
+            stepReadings[positionIndex] = beats
+            stepBpms[positionIndex] = bpm
+        }
+        saveTodayReadings()
+        val json = PulseOrganJudge.pulseJsonFromReadings(stepReadings, lastBpm ?: stepBpms.values.lastOrNull())
+        val summary = json.optString("organ_summary")
+        setResult(
+            RESULT_OK,
+            Intent()
+                .putExtra("pulse_json", json.toString())
+                .putExtra("organ_summary", summary),
+        )
+        finish()
+    }
 
     private fun showGuideImages(visible: Boolean) {
         val v = if (visible) View.VISIBLE else View.GONE
@@ -176,13 +362,8 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         binding.guideCaption.visibility = v
         if (visible) {
             binding.guideFinger.setImageResource(R.drawable.ppg_finger_guide)
-            binding.guideHand.setImageResource(handGuideRes[handGuideIndex])
+            binding.guideHand.setImageResource(steps[positionIndex].resId)
         }
-    }
-
-    private fun cycleHandGuide() {
-        handGuideIndex = (handGuideIndex + 1) % handGuideRes.size
-        binding.guideHand.setImageResource(handGuideRes[handGuideIndex])
     }
 
     override fun onState(state: FrontCameraHeartRateMonitor.MeasurementState) {
@@ -193,15 +374,16 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
                 binding.start.isEnabled = true
                 binding.start.text = "開始偵測"
                 binding.remeasure.isEnabled = true
-                binding.done.isEnabled = lastBpm != null
+                binding.done.isEnabled = stepReadings.isNotEmpty() || lastBpm != null
             }
             is FrontCameraHeartRateMonitor.MeasurementState.Measuring -> {
                 showGuideImages(true)
+                val step = steps[positionIndex]
                 binding.status.text =
                     if (state.currentBpm > 0) {
-                        "量測中… ${state.remainingSeconds} 秒（約 ${state.currentBpm} BPM）"
+                        "量測 ${step.shortName}… ${state.remainingSeconds} 秒（約 ${state.currentBpm} BPM）"
                     } else {
-                        "量測中… ${state.remainingSeconds} 秒"
+                        "量測 ${step.shortName}… ${state.remainingSeconds} 秒"
                     }
                 binding.ring.setProgress(state.progress)
                 binding.start.isEnabled = false
@@ -213,18 +395,17 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
                 }
             }
             is FrontCameraHeartRateMonitor.MeasurementState.Completed -> {
-                showGuideImages(false)
+                showGuideImages(true)
                 binding.status.text = "完成"
                 binding.start.isEnabled = false
                 binding.remeasure.isEnabled = true
-                binding.done.isEnabled = lastBpm != null
+                binding.done.isEnabled = stepReadings.isNotEmpty() || lastBpm != null
                 binding.ring.setProgress(1f)
             }
         }
     }
 
     override fun onWaveUpdated(value: Float) {
-        // Normalize loosely for waveform display (bandpass centered near 0).
         val norm = ((value / 8f) + 0.5f).coerceIn(0f, 1f)
         binding.waveform.push(norm)
     }
@@ -232,16 +413,34 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
     override fun onCompleted(medianBpm: Int, beats15s: Int) {
         lastBpm = medianBpm
         lastBeats15 = beats15s
+        stepReadings[positionIndex] = beats15s
+        stepBpms[positionIndex] = medianBpm
+        saveTodayReadings()
+        val step = steps[positionIndex]
+        val lines = PulseOrganJudge.linesForStep(positionIndex, beats15s)
+            .joinToString("；") { PulseOrganJudge.shortLine(it) }
         binding.bpm.text = "$medianBpm BPM"
-        binding.status.text = "完成：中位 $medianBpm BPM（15 秒約 $beats15s 次）"
+        binding.status.text =
+            "完成 ${step.shortName}：中位 $medianBpm BPM（15 秒約 $beats15s 次）\n$lines"
         binding.done.isEnabled = true
         binding.remeasure.isEnabled = true
-        Toast.makeText(this, "脈搏 $medianBpm BPM", Toast.LENGTH_SHORT).show()
+        refreshOrganConclusion()
+        // Highlight chip as done; stay on this site so user can retest freely.
+        selectPosition(positionIndex)
+        Toast.makeText(
+            this,
+            "${step.shortName} $medianBpm BPM｜$lines",
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     override fun onError(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         binding.start.isEnabled = true
         binding.remeasure.isEnabled = true
+    }
+
+    companion object {
+        private const val PREFS_NAME = "pulse_day_sites"
     }
 }

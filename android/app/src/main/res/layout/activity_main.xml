@@ -237,7 +237,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="12sp"
-            android:text="大便／尿尿：後置鏡頭＋黃圓；只寫文字判斷，不存照片。教學示範，非診斷。"/>
+            android:visibility="gone"
+            android:text=""/>
         <TextView
             android:id="@+id/circleResult"
             android:layout_width="match_parent"
@@ -436,7 +437,8 @@
             android:layout_height="wrap_content"
             android:paddingTop="4dp"
             android:textSize="13sp"
-            android:text="國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。"/>
+            android:visibility="gone"
+            android:text=""/>
         <ToggleButton
             android:id="@+id/recipeBodyAdvice"
             android:layout_width="wrap_content"
