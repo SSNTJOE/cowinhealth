@@ -548,13 +548,19 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
 }
 .meal-kcal-ruler {
   margin: 8px 0 6px;
+  max-width: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 .meal-kcal-ruler-scale {
   position: relative;
-  height: 18px;
+  height: 26px;
+  width: 100%;
+  max-width: 100%;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.07);
-  overflow: visible;
+  /* Daily need = ~half width; overflow room is the other half — never spill. */
+  overflow: hidden;
 }
 .meal-kcal-intake-bar {
   position: absolute;
@@ -562,11 +568,18 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   top: 0;
   bottom: 0;
   width: 0;
+  max-width: 100%;
   border-radius: 8px 0 0 8px;
   background: rgba(240, 192, 32, 0.6);
   transition: width 0.35s ease;
   z-index: 1;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 6px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .meal-kcal-burn-bar {
   position: absolute;
@@ -578,12 +591,30 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   transition: left 0.35s ease, width 0.35s ease;
   z-index: 2;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.meal-kcal-bar-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: rgba(20, 30, 20, 0.92);
+  white-space: nowrap;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.55);
+}
+.meal-kcal-burn-bar .meal-kcal-bar-label {
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 0 3px rgba(0, 40, 20, 0.45);
 }
 .meal-kcal-need-mark {
   position: absolute;
   top: -3px;
   bottom: -3px;
-  left: 100%;
+  left: 50%;
   width: 2px;
   margin-left: -1px;
   background: rgba(40, 40, 40, 0.75);
@@ -591,11 +622,24 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   pointer-events: none;
 }
 .meal-kcal-ruler-labels {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 1.2rem;
   margin-top: 4px;
   font-size: 0.8rem;
   color: var(--muted);
+}
+.meal-kcal-ruler-labels > span:first-child {
+  position: absolute;
+  left: 0;
+}
+.meal-kcal-ruler-need {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .meal-kcal-net {
   margin: 4px 0 8px;

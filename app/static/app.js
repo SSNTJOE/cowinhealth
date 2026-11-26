@@ -2087,6 +2087,8 @@ function renderMealSteps(day) {
   const formulaEl = document.getElementById("meal-steps-formula");
   const intakeBar = document.getElementById("meal-kcal-intake-bar");
   const burnBar = document.getElementById("meal-kcal-burn-bar");
+  const intakeLabelEl = document.getElementById("meal-kcal-intake-label");
+  const burnLabelEl = document.getElementById("meal-kcal-burn-label");
   const needMark = document.getElementById("meal-kcal-need-mark");
   const needLabel = document.getElementById("meal-kcal-ruler-need");
   const netEl = document.getElementById("meal-kcal-net");
@@ -2137,26 +2139,43 @@ function renderMealSteps(day) {
     }
   }
 
-  // Horizontal scale = daily calorie need. Yellow = intake L→R.
-  // Green burn starts at yellow's right tip and draws R→L as overlay.
-  const scale = targetNum != null ? targetNum : Math.max(intake, burnedSafe, 1);
-  const intakePct = Math.max(0, (100 * intake) / scale);
-  const burnPct = Math.max(0, (100 * burnedSafe) / scale);
-  const burnLeftPct = Math.max(0, intakePct - burnPct);
+  // Daily need spans ~half the track; remaining half absorbs intake overflow.
+  // Yellow = intake L→R. Green burn from yellow tip R→L as overlay. Never >100%.
+  const halfScale = targetNum != null ? targetNum * 2 : null;
+  const scale = Math.max(halfScale || 0, intake, burnedSafe, 1);
+  const intakePct = Math.min(100, Math.max(0, (100 * intake) / scale));
+  const burnPctRaw = Math.max(0, (100 * burnedSafe) / scale);
+  const burnWidthPct = Math.min(burnPctRaw, intakePct);
+  const burnLeftPct = Math.max(0, intakePct - burnWidthPct);
+  const needPct = targetNum != null
+    ? Math.min(100, Math.max(0, (100 * targetNum) / scale))
+    : 50;
   if (intakeBar) intakeBar.style.width = `${intakePct}%`;
   if (burnBar) {
     burnBar.style.left = `${burnLeftPct}%`;
-    burnBar.style.width = `${Math.min(burnPct, intakePct)}%`;
+    burnBar.style.width = `${burnWidthPct}%`;
+  }
+  if (intakeLabelEl) {
+    intakeLabelEl.textContent = intake > 0
+      ? uiText("mealKcalBarIntake").replace("{n}", String(Math.round(intake)))
+      : "";
+    intakeLabelEl.style.display = intake > 0 ? "" : "none";
+  }
+  if (burnLabelEl) {
+    burnLabelEl.textContent = burnedSafe > 0
+      ? uiText("mealKcalBarBurn").replace("{n}", String(Math.round(burnedSafe)))
+      : "";
+    burnLabelEl.style.display = burnedSafe > 0 ? "" : "none";
   }
   if (needMark) {
-    // Mark sits at daily-need (100% of scale when scale === target).
-    needMark.style.left = targetNum != null ? `${(100 * targetNum) / scale}%` : "100%";
+    needMark.style.left = `${needPct}%`;
     needMark.style.display = targetNum != null ? "" : "none";
   }
   if (needLabel) {
     needLabel.textContent = targetNum != null
       ? uiText("mealKcalRulerNeed").replace("{target}", String(target))
       : "— kcal";
+    needLabel.style.left = `${needPct}%`;
   }
 
   if (netEl) {
