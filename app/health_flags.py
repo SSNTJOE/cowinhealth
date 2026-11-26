@@ -14,6 +14,71 @@ CONDITION_OPTIONS = (
     "服用抗凝血劑",
 )
 
+# 特殊疾病 → 中醫受損臟腑 (organ keys). Unaffected organs keep quiet floor 4.
+# 服用抗凝血劑 is a condition checkbox but not a TCM organ-damage disease.
+DISEASE_AFFECTED_ORGANS: dict[str, frozenset[str]] = {
+    "糖尿病": frozenset({"spleen", "lung", "kidney"}),
+    "中風": frozenset({"liver", "heart", "kidney"}),
+    "痛風": frozenset({"spleen", "kidney"}),
+    "腎臟病": frozenset({"kidney", "spleen", "lung", "heart"}),
+    "肝病": frozenset({"liver", "gallbladder", "spleen", "stomach"}),
+    "高血壓": frozenset({"liver", "kidney", "heart"}),
+}
+
+# Aliases / English tokens → canonical CONDITION_OPTIONS label.
+CONDITION_ALIASES: dict[str, str] = {
+    "diabetes": "糖尿病",
+    "diabetic": "糖尿病",
+    "stroke": "中風",
+    "cva": "中風",
+    "gout": "痛風",
+    "kidney disease": "腎臟病",
+    "kidney": "腎臟病",
+    "renal": "腎臟病",
+    "liver disease": "肝病",
+    "hepatitis": "肝病",
+    "liver": "肝病",
+    "hypertension": "高血壓",
+    "high blood pressure": "高血壓",
+    "htn": "高血壓",
+}
+
+
+def canonicalize_condition_label(label: str | None) -> str | None:
+    """Map alias / English tokens onto CONDITION_OPTIONS labels."""
+    text = (label or "").strip()
+    if not text:
+        return None
+    if text in CONDITION_SET:
+        return text
+    lower = text.lower()
+    mapped = CONDITION_ALIASES.get(lower)
+    if mapped:
+        return mapped
+    for alias, canon in CONDITION_ALIASES.items():
+        if alias in lower:
+            return canon
+    for canon in CONDITION_OPTIONS:
+        if canon in text:
+            return canon
+    return None
+
+
+def disease_affected_organs(
+    conditions: list[str] | tuple[str, ...] | None = None,
+) -> frozenset[str]:
+    """Union of TCM organs damaged by checked special diseases (not anticoagulant)."""
+    affected: set[str] = set()
+    for raw in conditions or ():
+        canon = canonicalize_condition_label(str(raw or ""))
+        if not canon:
+            continue
+        organs = DISEASE_AFFECTED_ORGANS.get(canon)
+        if organs:
+            affected.update(organs)
+    return frozenset(affected)
+
+
 BASE_ALLERGY_OPTIONS = (
     "蝦蟹",
     "魚",

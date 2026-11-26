@@ -7,7 +7,11 @@ from typing import Any
 
 from PIL import Image, ImageFilter
 
-from .health_flags import CONDITION_OPTIONS
+from .health_flags import (
+    CONDITION_OPTIONS,
+    canonicalize_condition_label,
+    disease_affected_organs,
+)
 from .syndrome import (
     ORGAN_META,
     add,
@@ -42,6 +46,8 @@ SEVERE_DELTA_E_FRAC = 0.65
 # Quiet cohort (no special disease / severe wording): never show 1–3.
 QUIET_HEALTH_FLOOR = 4
 HEALTHY_SCORE_MIN = 8
+# Score 1 needs face+tongue+stool+urine all ≤ this (severe band).
+SCORE_ONE_AGREE_MAX = 3
 # Opens the 1–3 band when ΔE is extreme (checked conditions or severe symptom wording).
 SEVERE_SYMPTOM_KEYWORDS = (
     "很痛",
@@ -64,6 +70,7 @@ FACE_ZH_TO_ORGAN = {
     "心": "heart",
     "腎": "kidney",
 }
+SCORE_KEY_TO_ORGAN = {score_key: key for key, _name, score_key, _pk in ORGAN_META}
 
 
 def organs_from_zh(text: str) -> list[str]:
@@ -105,27 +112,134 @@ def relative_delta_health_score(
     return clamp(10 - 9 * (delta_e - d_min) / span)
 
 
+def severe_symptom_wording(symptoms: str = "", discomfort: str = "") -> bool:
+    """True when今日感覺／不舒服 wording alone opens the severe 1–3 band."""
+    blob = f"{symptoms or ''} {discomfort or ''}"
+    return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
+
+
 def severe_health_gate(
     conditions: list[str] | tuple[str, ...] | None = None,
     symptoms: str = "",
     discomfort: str = "",
 ) -> bool:
-    """True when 1–3 scores may open: any checked special disease or severe wording."""
+    """True when extreme ΔE may enter 1–3 before per-organ floors apply.
+
+    Any checked CONDITION_OPTIONS label (aliases OK) or severe wording opens the
+    color band; organ_allows_severe then floors organs outside the disease map.
+    """
+    if severe_symptom_wording(symptoms, discomfort):
+        return True
     allowed = set(CONDITION_OPTIONS)
     for label in conditions or ():
-        text = str(label or "").strip()
+        canon = canonicalize_condition_label(str(label or ""))
+        text = canon or str(label or "").strip()
         if text and text in allowed:
             return True
-    blob = f"{symptoms or ''} {discomfort or ''}"
-    return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
+    return False
 
 
-def clamp_organ_health_score(score: int | float, severe_gate: bool = False) -> int:
-    """1–10 organ health; without severe_gate never below QUIET_HEALTH_FLOOR (4)."""
+def organ_allows_severe(
+    organ_key: str,
+    conditions: list[str] | tuple[str, ...] | None = None,
+    symptoms: str = "",
+    discomfort: str = "",
+) -> bool:
+    """Whether this organ may score below quiet floor 4.
+
+    Severe symptom wording → all organs. Special disease → only TCM-affected set.
+    """
+    if severe_symptom_wording(symptoms, discomfort):
+        return True
+    if not organ_key:
+        return False
+    return organ_key in disease_affected_organs(conditions)
+
+
+def modalities_agree_organ_damage(
+    score_key: str,
+    source_maps: dict[str, dict[str, int] | None] | None,
+    *,
+    agree_max: int = SCORE_ONE_AGREE_MAX,
+) -> bool:
+    """True when face + tongue + stool + urine all score this organ ≤ agree_max.
+
+    Tongue = min(tongue_body, tongue_coat) when either is present. Missing any of
+    the four modalities → no score-1 consensus.
+    """
+    if not score_key or not isinstance(source_maps, dict):
+        return False
+    face = source_maps.get("face") or {}
+    stool = source_maps.get("stool") or {}
+    urine = source_maps.get("urine") or {}
+    body = source_maps.get("tongue_body") or {}
+    coat = source_maps.get("tongue_coat") or {}
+    if score_key not in face or score_key not in stool or score_key not in urine:
+        return False
+    tongue_vals = [int(body[score_key])] if score_key in body else []
+    if score_key in coat:
+        tongue_vals.append(int(coat[score_key]))
+    if not tongue_vals:
+        return False
+    try:
+        face_v = int(face[score_key])
+        stool_v = int(stool[score_key])
+        urine_v = int(urine[score_key])
+        tongue_v = min(tongue_vals)
+    except (TypeError, ValueError):
+        return False
+    return (
+        face_v <= agree_max
+        and tongue_v <= agree_max
+        and stool_v <= agree_max
+        and urine_v <= agree_max
+    )
+
+
+def clamp_organ_health_score(
+    score: int | float,
+    severe_gate: bool = False,
+    *,
+    allow_one: bool = True,
+) -> int:
+    """1–10 organ health; without severe_gate never below QUIET_HEALTH_FLOOR (4).
+
+    When severe_gate is open but allow_one is False, floor at 2 (score 1 needs
+    face+tongue+stool+urine consensus).
+    """
     n = max(1, min(10, int(round(float(score)))))
     if not severe_gate and n < QUIET_HEALTH_FLOOR:
         return QUIET_HEALTH_FLOOR
+    if n < 2 and not allow_one:
+        return 2
     return n
+
+
+def clamp_score_map_for_conditions(
+    scores: dict[str, int] | None,
+    conditions: list[str] | tuple[str, ...] | None,
+    symptoms: str = "",
+    discomfort: str = "",
+    *,
+    source_maps: dict[str, dict[str, int] | None] | None = None,
+    apply_one_consensus: bool = False,
+) -> dict[str, int] | None:
+    """Clamp *_score ints with per-organ disease floors and optional score-1 gate."""
+    if not scores:
+        return scores
+    out: dict[str, int] = {}
+    for score_key, value in scores.items():
+        if value is None:
+            continue
+        organ_key = SCORE_KEY_TO_ORGAN.get(score_key, "")
+        gate = organ_allows_severe(organ_key, conditions, symptoms, discomfort)
+        allow_one = True
+        if apply_one_consensus and gate:
+            allow_one = modalities_agree_organ_damage(score_key, source_maps)
+        out[score_key] = clamp_organ_health_score(
+            value, severe_gate=gate, allow_one=allow_one
+        )
+    return out
 
 
 def delta_e_ref_health_score(
@@ -179,7 +293,8 @@ def apply_relative_color_scores(
             )
     return {
         "formula": (
-            "規格內（ΔE≤3）10→8；超出規格 7→4；嚴重門開啟且 ΔE≳0.65·ref 才 3→1。"
+            "規格內（ΔE≤3）10→8；超出規格 7→4；嚴重門開啟且 ΔE≳0.65·ref 才 3→1；"
+            "特殊疾病僅對應臟腑可留在 1–3，其餘地板 4；1 分須四模態同意。"
             "8–10 健康。"
             if mode != "minmax"
             else "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；近基準→10，最大ΔE→1。"
@@ -4274,28 +4389,41 @@ def analyze_session(
     body_scores = body_color.get("organ_scores") if tongue_grid else None
     coat_scores = coat_color.get("organ_scores") if tongue_grid else None
     # Modality organ scores only when this session actually captured them with numerics.
+    # Per-organ disease floors: unaffected organs stay ≥4 even when special disease opens
+    # the global ΔE severe band. Score-1 consensus applied after compose.
     stool_scores = None
     urine_scores = None
     if isinstance(stool_note, dict):
         raw = stool_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            stool_scores = {
-                k: clamp_organ_health_score(v, severe_gate=gate)
-                for k, v in raw.items()
-                if v is not None
-            }
+            stool_scores = clamp_score_map_for_conditions(
+                {k: v for k, v in raw.items() if v is not None},
+                conditions,
+                symptoms,
+                discomfort,
+            )
             if not stool_scores:
                 stool_scores = None
     if isinstance(urine_note, dict):
         raw = urine_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            urine_scores = {
-                k: clamp_organ_health_score(v, severe_gate=gate)
-                for k, v in raw.items()
-                if v is not None
-            }
+            urine_scores = clamp_score_map_for_conditions(
+                {k: v for k, v in raw.items() if v is not None},
+                conditions,
+                symptoms,
+                discomfort,
+            )
             if not urine_scores:
                 urine_scores = None
+    face_scores = clamp_score_map_for_conditions(
+        face_scores, conditions, symptoms, discomfort
+    )
+    body_scores = clamp_score_map_for_conditions(
+        body_scores, conditions, symptoms, discomfort
+    )
+    coat_scores = clamp_score_map_for_conditions(
+        coat_scores, conditions, symptoms, discomfort
+    )
     # Denominator per organ = sources present this session (unshot modalities omitted).
     source_maps = {
         "face": face_scores,
@@ -4305,10 +4433,14 @@ def analyze_session(
         "urine": urine_scores,
     }
     scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
-    scores = {
-        key: clamp_organ_health_score(value, severe_gate=gate)
-        for key, value in scores.items()
-    }
+    scores = clamp_score_map_for_conditions(
+        scores,
+        conditions,
+        symptoms,
+        discomfort,
+        source_maps=source_maps,
+        apply_one_consensus=True,
+    ) or {}
     used_sources = [key for key, value in source_maps.items() if value is not None]
 
     # Aggregate lighting from this session's shots (mean CCT / brightness).
@@ -4334,6 +4466,17 @@ def analyze_session(
     scores, stabilize_meta = stabilize_organ_scores(
         scores, prior_scores, session_lighting, prior_lighting, severe_gate=gate
     )
+    # Stabilize still uses the global gate; re-apply disease floors + score-1 consensus.
+    scores = clamp_score_map_for_conditions(
+        scores,
+        conditions,
+        symptoms,
+        discomfort,
+        source_maps=source_maps,
+        apply_one_consensus=True,
+    ) or {}
+    stabilize_meta["disease_affected_organs"] = sorted(disease_affected_organs(conditions))
+    stabilize_meta["symptom_severe"] = bool(severe_symptom_wording(symptoms, discomfort))
     for key, info in breakdown.items():
         score_key = next((sk for k, _n, sk, _pk in ORGAN_META if k == key), None)
         if score_key and score_key in scores:
