@@ -4202,6 +4202,7 @@ def analyze_session(
                     if color_label and color_label != "尚未拍照"
                     else str(prior_tongue["color_label"])
                 )
+        # Carry the other modality only. Re-shot modality keeps the fresh report note/findings.
         if "stool" not in shot_types_present and isinstance(prior_su.get("stool"), dict):
             stool_note = prior_su["stool"]
             prior_stool_findings = prior_su.get("findings") or []
@@ -4222,7 +4223,6 @@ def analyze_session(
             if not urine_bits and isinstance(prior_day.get("urine"), dict):
                 urine_bits = list(prior_day["urine"].get("findings") or [])
             stool_urine_findings = list(stool_urine_findings) + list(urine_bits)
-
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}", include_uterus=female)
     pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")

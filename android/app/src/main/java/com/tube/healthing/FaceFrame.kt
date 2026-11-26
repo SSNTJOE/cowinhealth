@@ -19,7 +19,9 @@ import kotlin.math.roundToInt
 
 /**
  * Face preview is drawn at [PREVIEW_ZOOM] (view scale around the center).
- * The saved JPEG is that same visible region, mirrored like the front preview.
+ * The yellow guide uses the center [GUIDE_WIDTH_FRAC] of that window so
+ * inter-eye spacing is ~1/3 narrower than a full-width guide.
+ * The saved JPEG is that same guide region, mirrored like the front preview.
  *
  * 12-cell grid matches analysis.crop_cell: 3 columns × 4 rows.
  * Bottom row is 10 | 12 lips | 11. Guides use viewBox 300×400 (cell 100×100):
@@ -31,6 +33,9 @@ import kotlin.math.roundToInt
  */
 object FaceFrame {
     const val PREVIEW_ZOOM = 2f
+
+    /** On-screen face guide width vs the zoomed preview (eyes ~1/3 closer). */
+    const val GUIDE_WIDTH_FRAC = 2f / 3f
 
     /** Face size in the color JPEG relative to the yellow-guide window. */
     const val FACE_SCALE = 0.9f
@@ -50,7 +55,7 @@ object FaceFrame {
     }
 
     /**
-     * Color-analysis crop: the visible preview (what the yellow guides sit on),
+     * Color-analysis crop: the yellow-guide window on the zoomed preview,
      * expanded so the face is 0.9×, then sampled lower so the face sits
      * 1/4 of a cell higher. Guide drawing is unchanged.
      */
@@ -69,9 +74,12 @@ object FaceFrame {
         val visBottom = viewH * (1f - margin)
         val visW = visRight - visLeft
         val visH = visBottom - visTop
-        val scaledW = visW / FACE_SCALE
+        val guideW = visW * GUIDE_WIDTH_FRAC
+        val guideLeft = (visLeft + visRight) / 2f - guideW / 2f
+        val guideRight = guideLeft + guideW
+        val scaledW = guideW / FACE_SCALE
         val scaledH = visH / FACE_SCALE
-        val cx = (visLeft + visRight) / 2f
+        val cx = (guideLeft + guideRight) / 2f
         val cy = (visTop + visBottom) / 2f
         val shiftDown = scaledH * (FACE_SHIFT_UP_CELLS / 4f)
         val left = cx - scaledW / 2f
@@ -175,13 +183,28 @@ class FaceGuideView @JvmOverloads constructor(
         stroke.strokeWidth = 3f * resources.displayMetrics.density
         val inset = stroke.strokeWidth / 2f
         val radius = 18f * resources.displayMetrics.density
-        canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, stroke)
+        // Guide is center 2/3 width so eye marks sit ~1/3 closer than full-bleed.
+        val guideW = width * FaceFrame.GUIDE_WIDTH_FRAC
+        val guideLeft = (width - guideW) / 2f
+        canvas.drawRoundRect(
+            guideLeft + inset,
+            inset,
+            guideLeft + guideW - inset,
+            height - inset,
+            radius,
+            radius,
+            stroke
+        )
 
         canvas.save()
-        canvas.scale(width / 300f, height / 400f)
+        canvas.translate(guideLeft, 0f)
+        canvas.scale(guideW / 300f, height / 400f)
         stroke.strokeWidth = 2.4f
-        drawEye(canvas, 0f, 100f, mirror = false)
-        drawEye(canvas, 300f, 100f, mirror = true)
+        // Eye path spans ~15–85 (width 70). Shift each frame toward center by 1/4 of that width.
+        val eyeBoxW = 70f
+        val eyeInward = eyeBoxW / 4f
+        drawEye(canvas, 0f + eyeInward, 100f, mirror = false) // left → right
+        drawEye(canvas, 300f - eyeInward, 100f, mirror = true) // right → left
         canvas.save()
         // Nose path y is 6–88.90 (mid 47.45). Mark center is y=200, half a cell above the cell 8 midline.
         canvas.translate(100f, 152.55f)

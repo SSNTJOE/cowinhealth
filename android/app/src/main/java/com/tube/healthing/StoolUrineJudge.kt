@@ -1,5 +1,6 @@
 package com.tube.healthing
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -128,37 +129,32 @@ object StoolUrineJudge {
         return null
     }
 
-    /** First findings line for this modality (server often writes 「大便：…」/「尿尿：…」). */
+    /** Newest findings line for this modality (server writes 「大便：…」/「尿尿：…」). */
     fun findingLine(json: JSONObject, kind: String): String? {
         val isUrine = kind == CameraFacing.URINE || kind == "urine"
+        // Prefer exact modality tags; avoid bare 「尿」 which is too broad.
         val prefixes = if (isUrine) {
-            listOf("尿尿", "尿")
+            listOf("尿尿")
         } else {
             listOf("大便", "大便色")
         }
-        val arr = json.optJSONArray("findings")
-        if (arr != null) {
+        fun lastMatch(arr: JSONArray?): String? {
+            if (arr == null) return null
+            var hit: String? = null
             for (i in 0 until arr.length()) {
                 val raw = arr.optString(i).trim()
                 if (raw.isBlank()) continue
                 if (prefixes.any { raw.startsWith(it) }) {
-                    return raw.split("（").first().trim()
+                    hit = raw.split("（").first().trim()
                 }
             }
+            return hit
         }
+        lastMatch(json.optJSONArray("findings"))?.let { return it }
         val dm = json.optJSONObject("organ_health")
             ?.optJSONObject("day_modalities")
             ?.optJSONObject(if (isUrine) "urine" else "stool")
-        val nested = dm?.optJSONArray("findings")
-        if (nested != null) {
-            for (i in 0 until nested.length()) {
-                val raw = nested.optString(i).trim()
-                if (raw.isBlank()) continue
-                if (prefixes.any { raw.startsWith(it) }) {
-                    return raw.split("（").first().trim()
-                }
-            }
-        }
+        lastMatch(dm?.optJSONArray("findings"))?.let { return it }
         val label = dm?.optString("color_label")?.trim().orEmpty()
         if (label.isNotBlank()) {
             val tag = if (isUrine) "尿尿" else "大便"

@@ -877,7 +877,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "鏡頭啟動中（$mode 用${lens}鏡頭），請稍候再按一次", Toast.LENGTH_SHORT).show()
             return
         }
-        val file = File(cacheDir, "$mode.jpg")
+        // Unique file per capture so re-shots cannot upload a stale cached JPEG.
+        val file = File(cacheDir, "${mode}_${System.currentTimeMillis()}.jpg")
         val options = ImageCapture.OutputFileOptions.Builder(file).build()
         val previewW = binding.preview.width
         val previewH = binding.preview.height
@@ -1149,18 +1150,26 @@ class MainActivity : AppCompatActivity() {
     /**
      * Dedicated day judgment panel under stool/urine buttons.
      * Layout: activity_main.xml → @id/circleResult (TextView below @id/circleNote).
+     * Re-shot of stool/urine always replaces that modality's line from the fresh API JSON.
      */
     private fun showDayResult(json: JSONObject, focusKind: String? = null) {
         val panel = binding.circleResult
         val prior = panel.text?.toString().orEmpty()
         val lines = linkedMapOf<String, String>()
+        val focusKey = when (focusKind) {
+            CameraFacing.STOOL, "stool" -> "stool"
+            CameraFacing.URINE, "urine" -> "urine"
+            CameraFacing.FACE, "face" -> "face"
+            CameraFacing.TONGUE, "tongue" -> "tongue"
+            else -> null
+        }
         prior.lineSequence().forEach { line ->
             val t = line.trim()
             when {
-                t.startsWith("臉") -> lines["face"] = t
-                t.startsWith("舌") -> lines["tongue"] = t
-                t.startsWith("大便") -> lines["stool"] = t
-                t.startsWith("尿尿") -> lines["urine"] = t
+                t.startsWith("臉") -> if (focusKey != "face") lines["face"] = t
+                t.startsWith("舌") -> if (focusKey != "tongue") lines["tongue"] = t
+                t.startsWith("大便") -> if (focusKey != "stool") lines["stool"] = t
+                t.startsWith("尿尿") -> if (focusKey != "urine") lines["urine"] = t
                 t.startsWith("脈") -> lines["pulse"] = t
             }
         }
@@ -1174,11 +1183,15 @@ class MainActivity : AppCompatActivity() {
                 t.startsWith("脈") -> lines["pulse"] = t
             }
         }
+        // Force fresh judgment for the modality just captured (never keep stale prior line).
+        when (focusKey) {
+            "stool" -> lines["stool"] = StoolUrineJudge.briefStatus(json, "stool")
+            "urine" -> lines["urine"] = StoolUrineJudge.briefStatus(json, "urine")
+        }
         val text = listOfNotNull(
             lines["face"], lines["tongue"], lines["stool"], lines["urine"], lines["pulse"],
         ).joinToString("\n")
         if (text.isBlank()) {
-            // Last resort: still show something so the panel is not silently gone.
             val fallback = focusKind?.let { StoolUrineJudge.briefStatus(json, it) }.orEmpty()
             if (fallback.isBlank()) {
                 panel.visibility = View.GONE
