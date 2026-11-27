@@ -16,7 +16,8 @@ from .syndrome import PATTERN_KEYS
 
 logger = logging.getLogger(__name__)
 _schema_ready = False
-_schema_lock = threading.Lock()
+# RLock so ensure_schema → seed → connect(ensure=True) can re-enter safely.
+_schema_lock = threading.RLock()
 _retry_started = False
 
 

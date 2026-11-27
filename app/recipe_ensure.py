@@ -359,38 +359,120 @@ def _find_existing(country: str, name: str, lang: str) -> dict[str, str] | None:
     return None
 
 
-def _find_existing_by_name(name: str, lang: str) -> dict[str, str] | None:
-    """Exact name match across all countries; prefer rows that already have recipe text.
+def _normalize_dish_key(name: str) -> str:
+    """Casefold + unify common noodle/script variants for fuzzy catalog match."""
+    text = (name or "").strip().casefold()
+    if not text:
+        return ""
+    # Traditional/simplified / JP noodle variants and whitespace noise.
+    for src, dst in (
+        ("麵", "面"),
+        ("麺", "面"),
+        ("鷄", "雞"),
+        ("鶏", "雞"),
+        (" ", ""),
+        ("\u3000", ""),
+        ("·", ""),
+        ("・", ""),
+    ):
+        text = text.replace(src, dst)
+    return text
 
-    Ranking prefers an exact hit on the UI language column, then name_zh, then other
-    name_* columns — so a polluted foreign-name cell does not beat the real dish.
+
+def _name_lookup_candidates(name: str) -> list[str]:
+    """Exact typed form plus normalized noodle-script variants for SQL/XLS lookup."""
+    raw = (name or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in (
+        raw,
+        raw.replace("面", "麵").replace("麺", "麵"),
+        raw.replace("麵", "面").replace("麺", "面"),
+        raw.replace("麵", "麺").replace("面", "麺"),
+    ):
+        key = candidate.strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _score_name_row(
+    row: dict[str, str], needle: str, needle_norm: str, name_field: str
+) -> tuple | None:
+    labels = {
+        "lang": (row.get(name_field) or "").strip().casefold(),
+        "zh": (row.get("name_zh") or "").strip().casefold(),
+        "en": (row.get("name_en") or "").strip().casefold(),
+        "ja": (row.get("name_ja") or "").strip().casefold(),
+        "ko": (row.get("name_ko") or "").strip().casefold(),
+    }
+    norms = {key: _normalize_dish_key(val) for key, val in labels.items() if val}
+    exact = any(label == needle for label in labels.values() if label)
+    fuzzy = bool(needle_norm) and any(val == needle_norm for val in norms.values())
+    if not exact and not fuzzy:
+        return None
+    return (
+        0 if exact else 1,
+        0 if labels.get("lang") == needle or norms.get("lang") == needle_norm else 1,
+        0 if labels.get("zh") == needle or norms.get("zh") == needle_norm else 1,
+        0 if labels.get("en") == needle or norms.get("en") == needle_norm else 1,
+        0
+        if labels.get("ja") == needle
+        or labels.get("ko") == needle
+        or norms.get("ja") == needle_norm
+        or norms.get("ko") == needle_norm
+        else 1,
+        0 if (row.get("recipe") or "").strip() else 1,
+        0 if (row.get("method") or "").strip() else 1,
+        row.get("country") or "",
+        str(row.get("id") or ""),
+    )
+
+
+def _find_existing_by_name(name: str, lang: str) -> dict[str, str] | None:
+    """Global zh/en/ja/ko name match (exact, then noodle-script fuzzy).
+
+    Prefers MySQL name query, then full catalog scan. Ranking prefers an exact hit
+    on the UI language column, then name_zh, then other name_* columns — so a
+    polluted foreign-name cell does not beat the real dish.
     """
     needle = (name or "").strip().casefold()
     if not needle:
         return None
+    needle_norm = _normalize_dish_key(name)
     name_field = NAME_FIELDS.get(lang, "name_zh")
     scored: list[tuple[tuple, dict[str, str]]] = []
-    for row in recipe_rows():
-        labels = {
-            "lang": (row.get(name_field) or "").strip().casefold(),
-            "zh": (row.get("name_zh") or "").strip().casefold(),
-            "en": (row.get("name_en") or "").strip().casefold(),
-            "ja": (row.get("name_ja") or "").strip().casefold(),
-            "ko": (row.get("name_ko") or "").strip().casefold(),
-        }
-        if not any(label == needle for label in labels.values() if label):
-            continue
-        rank = (
-            0 if labels["lang"] == needle else 1,
-            0 if labels["zh"] == needle else 1,
-            0 if labels["en"] == needle else 1,
-            0 if labels["ja"] == needle or labels["ko"] == needle else 1,
-            0 if (row.get("recipe") or "").strip() else 1,
-            0 if (row.get("method") or "").strip() else 1,
-            row.get("country") or "",
-            str(row.get("id") or ""),
-        )
+    seen_ids: set[str] = set()
+
+    def consider(row: dict[str, str]) -> None:
+        rid = str(row.get("id") or "")
+        if rid and rid in seen_ids:
+            return
+        rank = _score_name_row(row, needle, needle_norm, name_field)
+        if rank is None:
+            return
+        if rid:
+            seen_ids.add(rid)
         scored.append((rank, row))
+
+    # Fast path: exact (+ script-variant) SQL hits across countries.
+    try:
+        from .shared_catalog import fetch_recipe_rows_by_names
+
+        mysql_hits = fetch_recipe_rows_by_names(_name_lookup_candidates(name))
+        if mysql_hits:
+            for row in mysql_hits:
+                consider(row)
+    except Exception:
+        pass
+
+    if not scored:
+        for row in recipe_rows():
+            consider(row)
+
     if not scored:
         return None
     scored.sort(key=lambda item: item[0])

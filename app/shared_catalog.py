@@ -26,7 +26,9 @@ DAILY_XLSX = ROOT / "daily_nutrient.xlsx"
 DEVIATION_XLS = ROOT / "deviation.xls"
 DEVIATION_SQLITE = ROOT / "deviation.db"
 
-_SEED_LOCK = threading.Lock()
+# RLock: init_schema() may call seed_from_excel_if_empty while a fetch already
+# holds the seed lock via mysql_ready() → ensure_schema() → init_schema().
+_SEED_LOCK = threading.RLock()
 _seeded = False
 
 # Keep field maps local to avoid circular imports with recipes.py.
@@ -197,9 +199,10 @@ CATALOG_SCHEMA_SQL = [
 
 
 def _connect():
+    """Open MySQL without re-entering ensure_schema (avoids seed/init deadlock)."""
     from .db import connect
 
-    return connect()
+    return connect(ensure=False)
 
 
 def _cell_number(raw) -> float | None:
@@ -607,8 +610,82 @@ def fetch_recipe_rows() -> tuple[dict, ...] | None:
         return None
 
 
+@lru_cache(maxsize=64)
+def _fetch_recipes_for_country_cached(country: str, count: int, token: int) -> tuple[dict, ...]:
+    """Country-scoped catalog rows — avoids rebuilding the full 24k cache for dropdowns."""
+    del count, token
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM catalog_recipes WHERE country=%s ORDER BY recipe_id",
+                (wanted,),
+            )
+            rows = cur.fetchall() or []
+        return tuple(_row_to_recipe_item(r) for r in rows)
+    finally:
+        conn.close()
+
+
+def fetch_recipe_rows_for_country(country: str) -> tuple[dict, ...] | None:
+    """Return MySQL recipes for one country, or None to fall back to Excel scan."""
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    seed_from_excel_if_empty()
+    if not mysql_ready():
+        return None
+    try:
+        if table_count("catalog_recipes") == 0:
+            return None
+        return _fetch_recipes_for_country_cached(wanted, *_recipe_token())
+    except Exception:
+        logger.exception("read catalog_recipes by country failed")
+        return None
+
+
+def fetch_recipe_rows_by_names(names: list[str]) -> tuple[dict, ...] | None:
+    """Exact zh/en/ja/ko name hits across all countries (ensure global lookup)."""
+    needles = [str(n or "").strip() for n in names if str(n or "").strip()]
+    if not needles:
+        return ()
+    seed_from_excel_if_empty()
+    if not mysql_ready():
+        return None
+    try:
+        if table_count("catalog_recipes") == 0:
+            return None
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                clauses = []
+                params: list[str] = []
+                for needle in needles:
+                    clauses.append(
+                        "(name_zh=%s OR name_en=%s OR name_ja=%s OR name_ko=%s)"
+                    )
+                    params.extend([needle, needle, needle, needle])
+                sql = (
+                    "SELECT * FROM catalog_recipes WHERE "
+                    + " OR ".join(clauses)
+                    + " ORDER BY recipe_id"
+                )
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+            return tuple(_row_to_recipe_item(r) for r in rows)
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("read catalog_recipes by name failed")
+        return None
+
+
 def invalidate_recipe_mysql_cache() -> None:
     _fetch_recipes_cached.cache_clear()
+    _fetch_recipes_for_country_cached.cache_clear()
 
 
 def insert_recipe(fields: dict[str, Any]) -> dict[str, Any]:

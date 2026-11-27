@@ -469,7 +469,7 @@
             android:id="@+id/recipeEnsure"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="建立／補齊此食譜（寫入 Recipe.xls，與網站相同）"/>
+            android:text="建立食譜"/>
         <TextView
             android:id="@+id/recipeDetail"
             android:layout_width="match_parent"

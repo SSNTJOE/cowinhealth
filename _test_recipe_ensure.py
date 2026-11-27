@@ -60,11 +60,14 @@ def main() -> None:
         "recipeSearching",
         "recipeEnsuring",
         "recipeCreateAction",
+        "recipeCreateHint",
+        "recipeListLoading",
         "recipeLangUnsupported",
         "recipeCountryCorrected",
         "搜尋中",
         "搜尋建檔中",
         "建立此食譜",
+        "載入該國食譜中",
         "以中文進行",
         "目前僅支援中文",
     ):
@@ -85,6 +88,26 @@ def main() -> None:
     assert resolved.get("country_corrected") is True, resolved
     assert resolved["recipe"]["country"] == "Taiwan", resolved["recipe"]
     assert len(recipes.recipe_rows()) == before_resolve
+
+    # Regression: wrong country + 牛肉麵 / Beef noodle soup must hit Taiwan, never create.
+    before_beef = len(recipes.recipe_rows())
+    beef = recipe_ensure.ensure_recipe("Japan", "牛肉麵", "zh", research_fn=fake_research)
+    assert beef.get("created") is False, beef
+    assert beef.get("country_corrected") is True, beef
+    assert beef["recipe"]["country"] == "Taiwan", beef["recipe"]
+    assert "牛肉" in (beef["recipe"].get("name") or ""), beef["recipe"]
+    beef_en = recipe_ensure.ensure_recipe("France", "Beef noodle soup", "en", research_fn=fake_research)
+    assert beef_en.get("created") is False, beef_en
+    assert beef_en["recipe"]["country"] == "Taiwan", beef_en["recipe"]
+    beef_simp = recipe_ensure.ensure_recipe("Korea", "牛肉面", "zh", research_fn=fake_research)
+    assert beef_simp.get("created") is False, beef_simp
+    assert beef_simp["recipe"]["country"] == "Taiwan", beef_simp["recipe"]
+    assert len(recipes.recipe_rows()) == before_beef
+
+    # Country-scoped list helper must return Taiwan dishes without full-catalog scan path only.
+    tw = recipes.filter_recipes(country="Taiwan", lang="zh", by_body=False)
+    assert tw["count"] > 0, tw
+    assert any("牛肉麵" in (r.get("name") or "") for r in tw["recipes"]), "Taiwan list missing 牛肉麵"
 
     en_hit = recipe_ensure.ensure_recipe("France", "Kimchi stew", "en", research_fn=fake_research)
     assert en_hit.get("created") is False, en_hit

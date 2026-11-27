@@ -1375,7 +1375,10 @@ function isRecipeStatusMessage(text) {
   if (!value) return false;
   return value === uiText("recipeSearching")
     || value === uiText("recipeEnsuring")
-    || value === uiText("recipeEnsureFailed");
+    || value === uiText("recipeCreateHint")
+    || value === uiText("recipeListLoading")
+    || value === uiText("recipeEnsureFailed")
+    || value.startsWith(uiText("recipeEnsureFailed"));
 }
 
 function showSelectedRecipe(extraNote) {
@@ -1433,7 +1436,8 @@ function showRecipeSearchStatus(typed) {
     return;
   }
   if (!recipeHasSubstringMatch(typed)) {
-    detail.textContent = uiText("recipeSearching");
+    // Do not auto-create — user must tap「建立此食譜」.
+    detail.textContent = uiText("recipeCreateHint");
     return;
   }
   // Substring hits exist but exact dish not selected — drop stale detail from another dish.
@@ -1696,11 +1700,11 @@ async function loadRecipesForCountry(options) {
       showSelectedRecipe();
       return;
     }
-    // Typed dish is not in this country list yet — keep name + status; caller may ensure.
+    // Typed dish is not in this country list — keep name; user taps create explicitly.
     selectedRecipeId = null;
     pick.value = typedBefore;
     if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
-      detail.textContent = uiText("recipeSearching");
+      detail.textContent = uiText("recipeCreateHint");
     }
     return;
   }
@@ -1709,21 +1713,27 @@ async function loadRecipesForCountry(options) {
   detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
 }
 
-/** Country just became valid: reload list without dropping a typed dish; ensure if missing. */
+/** Country just became valid: reload that country's recipe list into the dropdown. */
 function onRecipeCountryChosen() {
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   const pickList = document.getElementById("recipe-name-list");
   const typed = pick ? recipeNamePlain(pick.value) : "";
+  if (detail && !recipeEnsureBusy) detail.textContent = uiText("recipeListLoading");
   loadRecipesForCountry({ preserveTyped: typed || true })
     .then(() => {
+      // Always open/refresh the country recipe dropdown after a successful load.
+      if (pick && pickList && recipeRows.length) {
+        renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
+          rememberRecipeChoice(label);
+          showSelectedRecipe();
+        }, "all");
+      } else if (pick && pickList) {
+        renderCombo(pick, pickList, [], () => {}, "all", uiText("emptyRecipes"));
+      }
       if (!typed) {
-        // Open recipe dropdown after country so the filtered list is visible.
-        if (pick && pickList && recipeRows.length) {
-          renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
-            rememberRecipeChoice(label);
-            showSelectedRecipe();
-          }, "all");
+        if (detail && !recipeEnsureBusy) {
+          detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
         }
         return;
       }
@@ -1731,15 +1741,8 @@ function onRecipeCountryChosen() {
         showSelectedRecipe();
         return;
       }
-      // Country filled after name: ensure this dish under the chosen country.
-      // If an ensure is already running (often started before country was set),
-      // queue a follow-up with the new country instead of racing the write lock.
-      if (recipeEnsureBusy) {
-        recipeEnsureFollowUp = { name: typed, forceCreate: true };
-        if (detail) detail.textContent = uiText("recipeEnsuring");
-        return;
-      }
-      return ensureRecipeFromInput({ name: typed, forceCreate: true });
+      // Missing from this country's list — hint to tap create; do not silent-create.
+      if (detail && !recipeEnsureBusy) detail.textContent = uiText("recipeCreateHint");
     })
     .catch((err) => {
       if (detail) detail.textContent = formatApiError(err);
@@ -1889,10 +1892,8 @@ function bindRecipePickers() {
       return;
     }
     closeCombo(pick, pickList);
-    if (!recipeHasSubstringMatch(typed)) {
-      startCreateRecipe(typed);
-      return;
-    }
+    // Enter without an exact list pick: open filter + create button; never silent-create.
+    filterRecipes();
     showRecipeSearchStatus(typed);
   });
   pick.addEventListener("input", () => {
@@ -1906,20 +1907,7 @@ function bindRecipePickers() {
     closeCombo(pick, pickList);
     const typed = pick.value.trim();
     if (!typed || findRecipeByTypedName(typed)) return;
-    if (!recipeHasSubstringMatch(typed)) {
-      // Blur with no list hit → ensure/search/fill (雞腿便當 flow).
-      if (recipeEnsureBusy) {
-        recipeEnsureFollowUp = { name: recipeNamePlain(typed), forceCreate: true };
-        const detail = document.getElementById("recipe-detail");
-        if (detail) detail.textContent = uiText("recipeEnsuring");
-        return;
-      }
-      ensureRecipeFromInput({ name: typed, forceCreate: true }).catch((err) => {
-        const box = document.getElementById("recipe-detail");
-        if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
-      });
-      return;
-    }
+    // No silent create on blur — user taps「建立此食譜」explicitly.
     showRecipeSearchStatus(typed);
   });
 }

@@ -202,6 +202,24 @@ def recipe_rows() -> tuple[dict, ...]:
     return _rows_cached(mtime)
 
 
+def recipe_rows_for_country(country: str) -> tuple[dict, ...]:
+    """Rows for one country — prefer indexed MySQL country query for dropdown speed."""
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    try:
+        from .shared_catalog import fetch_recipe_rows_for_country
+
+        mysql_rows = fetch_recipe_rows_for_country(wanted)
+        if mysql_rows is not None:
+            return mysql_rows
+    except Exception:
+        pass
+    return tuple(
+        row for row in recipe_rows() if (row.get("country") or "").strip() == wanted
+    )
+
+
 def recipe_by_id(recipe_id: int | str | None) -> dict | None:
     if recipe_id is None or recipe_id == "":
         return None
@@ -941,7 +959,13 @@ def nutrient_line(row: dict | None) -> str:
     return "、".join(parts)
 
 
-def public_recipe(row: dict, lang: str, score: int) -> dict:
+def public_recipe(row: dict, lang: str, score: int, *, simplify: bool = True) -> dict:
+    """Serialize a catalog row for API clients.
+
+    ``simplify=False`` skips Foods.xls organ-effect rewriting — required for
+    country dropdown lists (100+ rows) so /api/recipes stays under a second.
+    Single-recipe ensure/detail may keep ``simplify=True``.
+    """
     mapped = recipe_nutrient_map(row)
     line = nutrient_line(row)
     stored_benefit = row.get("benefit") or ""
@@ -949,10 +973,12 @@ def public_recipe(row: dict, lang: str, score: int) -> dict:
     # Prefer columns already rewritten to plain teaching copy; else derive from Foods.xls.
     if stored_benefit.startswith("依主要食材") and stored_ban.startswith("依主要食材"):
         benefit, ban = stored_benefit, stored_ban
-    else:
+    elif simplify:
         plain_benefit, plain_ban = simplify_organ_effects(row)
         benefit = plain_benefit or stored_benefit
         ban = plain_ban or stored_ban
+    else:
+        benefit, ban = stored_benefit, stored_ban
     payload = {
         "id": int(row["id"]),
         "country": row.get("country") or "",
@@ -999,9 +1025,7 @@ def filter_recipes(
     foods = foods_index()
     matched: list[tuple[int, dict[str, str]]] = []
     safe: list[tuple[int, dict[str, str]]] = []
-    for row in recipe_rows():
-        if (row.get("country") or "") != wanted:
-            continue
+    for row in recipe_rows_for_country(wanted):
         if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags, foods):
             continue
         score = benefit_score(recipe_filter_benefit_blob(row, foods), organ_tags)
@@ -1015,7 +1039,8 @@ def filter_recipes(
     picked = matched + safe
     if limit is not None:
         picked = picked[: max(1, limit)]
-    recipes = [public_recipe(row, lang, score) for score, row in picked]
+    # List/dropdown path: skip per-row Foods.xls rewrite (was ~15s for Taiwan).
+    recipes = [public_recipe(row, lang, score, simplify=False) for score, row in picked]
     return {
         "country": wanted,
         "lang": lang,
@@ -1085,7 +1110,9 @@ def find_recipes_by_name(
         )
         if limit is not None:
             ranked = ranked[: max(1, int(limit))]
-    recipes = [public_recipe(row, lang, benefit) for _rank, benefit, row in ranked]
+    recipes = [
+        public_recipe(row, lang, benefit, simplify=False) for _rank, benefit, row in ranked
+    ]
     return {
         "name": (name or "").strip(),
         "lang": lang,
