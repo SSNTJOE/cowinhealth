@@ -3150,6 +3150,115 @@ class MainActivity : AppCompatActivity() {
         return row.optString("name") + star
     }
 
+    private fun clearAffiliatePanels() {
+        binding.recipeAffiliatePanel.removeAllViews()
+        binding.recipeAffiliatePanel.visibility = View.GONE
+        binding.foodAffiliatePanel.removeAllViews()
+        binding.foodAffiliatePanel.visibility = View.GONE
+    }
+
+    private fun openAffiliateGo(goUrl: String) {
+        val base = normalizeServerUrl(binding.server.text.toString()).ifBlank {
+            prefs.getString("base_url", "") ?: ""
+        }
+        val path = goUrl.trim()
+        if (path.isBlank()) return
+        val absolute = when {
+            path.startsWith("http://") || path.startsWith("https://") -> path
+            base.isBlank() -> return
+            path.startsWith("/") -> base.trimEnd('/') + path
+            else -> base.trimEnd('/') + "/" + path
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(absolute)))
+        } catch (_: Exception) {
+            Toast.makeText(this, absolute, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun addAffiliateButton(panel: LinearLayout, label: String, goUrl: String) {
+        val btn = Button(this)
+        btn.text = label
+        btn.isAllCaps = false
+        btn.setOnClickListener { openAffiliateGo(goUrl) }
+        panel.addView(
+            btn,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        panel.visibility = View.VISIBLE
+    }
+
+    private fun renderAffiliatePanels(row: JSONObject) {
+        clearAffiliatePanels()
+        val aff = row.optJSONObject("affiliate")
+        if (aff != null) {
+            val go = aff.optString("go_url").ifBlank {
+                val slug = aff.optString("slug")
+                if (slug.isBlank()) "" else "/go/$slug"
+            }
+            if (go.isNotBlank()) {
+                val heading = TextView(this)
+                heading.text = t(
+                    "懶人外食／體驗替代方案",
+                    "Quick eats / experience alternatives",
+                    "外食・体験の代替案",
+                    "외식／체험 대안"
+                )
+                heading.setTypeface(heading.typeface, Typeface.BOLD)
+                binding.recipeAffiliatePanel.addView(heading)
+                addAffiliateButton(
+                    binding.recipeAffiliatePanel,
+                    t(
+                        "沒時間自己煮？👉 預訂周邊健康蔬食餐廳（OpenTable / Klook 優惠餐券）",
+                        "No time to cook? Book nearby healthy restaurants",
+                        "自炊が面倒？近隣のヘルシー店を予約",
+                        "요리할 시간 없나요? 근처 건강 식당 예약"
+                    ),
+                    go
+                )
+                addAffiliateButton(
+                    binding.recipeAffiliatePanel,
+                    t(
+                        "想學更多道地料理？👉 報名健康烹飪體驗課（Viator / GetYourGuide）",
+                        "Want more dishes? Book a cooking experience",
+                        "もっと学びたい？料理体験を予約",
+                        "더 배우고 싶나요? 요리 체험 신청"
+                    ),
+                    go
+                )
+                val btnText = aff.optString("button_text").ifBlank { "前往查看優惠" }
+                val platform = aff.optString("platform_name")
+                addAffiliateButton(
+                    binding.recipeAffiliatePanel,
+                    if (platform.isBlank()) btnText else "$btnText（$platform）",
+                    go
+                )
+            }
+        }
+        val foods = row.optJSONArray("ingredient_affiliates") ?: JSONArray()
+        for (i in 0 until foods.length()) {
+            val item = foods.optJSONObject(i) ?: continue
+            val foodAff = item.optJSONObject("affiliate")
+            val slug = foodAff?.optString("slug")?.ifBlank { null }
+                ?: item.optString("affiliate_slug").ifBlank { null }
+                ?: continue
+            val go = foodAff?.optString("go_url")?.ifBlank { null } ?: "/go/$slug"
+            val name = item.optString("name").ifBlank { foodAff?.optString("title") ?: slug }
+            val bits = mutableListOf<String>()
+            if (item.has("kcal") && !item.isNull("kcal")) bits += "${Math.round(item.optDouble("kcal"))} kcal"
+            if (item.has("protein_g") && !item.isNull("protein_g")) {
+                bits += "蛋白 ${item.optDouble("protein_g")} g"
+            }
+            val meta = if (bits.isEmpty()) "" else " · " + bits.joinToString(" · ")
+            val label = foodAff?.optString("button_text")?.ifBlank { null }
+                ?: "🛒 購買推薦食材（iHerb / Amazon）"
+            addAffiliateButton(binding.foodAffiliatePanel, "$name$meta\n$label", go)
+        }
+    }
+
     private fun showRecipeDetail(label: String) {
         val plain = recipeNamePlain(label)
         val row = when {
@@ -3164,6 +3273,7 @@ class MainActivity : AppCompatActivity() {
             if (!recipeEnsureBusy && !isRecipeStatusMessage(binding.recipeDetail.text?.toString())) {
                 binding.recipeDetail.text = ""
             }
+            clearAffiliatePanels()
             return
         }
         selectedRecipeId = row.optInt("id", -1)
@@ -3183,6 +3293,7 @@ class MainActivity : AppCompatActivity() {
         ).filter { it.second.isNotBlank() }
             .joinToString("\n\n") { it.first + "\n" + it.second } +
             "\n\n" + t("教學示範，非診斷。", "Teaching demo, not a diagnosis.", "教材デモであり診断ではありません。", "교육 시연이며 진단이 아닙니다.")
+        renderAffiliatePanels(row)
     }
 
     private fun withoutMaleUterus(source: JSONObject?): JSONObject? {

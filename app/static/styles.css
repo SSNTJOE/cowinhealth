@@ -419,6 +419,54 @@ button.recipe-body-toggle[aria-pressed="true"]::before {
   margin-top: 12px;
   line-height: 1.55;
 }
+.recipe-affiliate {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffaf3;
+}
+.recipe-affiliate h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.recipe-affiliate a {
+  display: block;
+  color: var(--ok);
+  text-decoration: none;
+  margin: 6px 0;
+  line-height: 1.45;
+}
+.recipe-affiliate a:hover { text-decoration: underline; }
+.food-affiliate {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.food-affiliate-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.food-affiliate-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+a.food-affiliate-cta,
+button.food-affiliate-cta {
+  display: inline-block;
+  background: var(--ok);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+a.food-affiliate-cta:hover { filter: brightness(1.05); }
 .bmi-live {
   margin: 8px 0 0;
   min-height: 1.4em;

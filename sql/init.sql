@@ -130,3 +130,37 @@ CREATE TABLE IF NOT EXISTS color_calib_state (
   INDEX idx_calib_state_scope_mod (scope, modality),
   INDEX idx_calib_state_tag (tag)
 );
+
+CREATE TABLE IF NOT EXISTS affiliate_links (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(100) NOT NULL UNIQUE COMMENT '短網址代稱，例如 olive-oil-01',
+  title VARCHAR(255) NOT NULL COMMENT '商品或餐廳名稱',
+  platform_name VARCHAR(50) NOT NULL COMMENT '主要平台，如 iHerb / Amazon / Klook',
+  button_text VARCHAR(100) DEFAULT '前往查看優惠' COMMENT '按鈕顯示文字',
+  url_tw TEXT NULL COMMENT '台灣訪客專屬網址',
+  url_us TEXT NULL COMMENT '美國/英語系訪客網址',
+  url_jp TEXT NULL COMMENT '日本訪客網址',
+  url_default TEXT NOT NULL COMMENT '預設全球通用網址 (必填防呆)',
+  is_active TINYINT(1) DEFAULT 1 COMMENT '1=啟用, 0=停用',
+  click_count INT DEFAULT 0 COMMENT '點擊次數統計',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO affiliate_links (slug, title, platform_name, button_text, url_tw, url_us, url_default)
+VALUES (
+  'test-olive-oil',
+  '冷壓初榨橄欖油',
+  'iHerb / Amazon',
+  '購買推薦健康好油',
+  'https://iherb.com',
+  'https://amazon.com',
+  'https://iherb.com'
+)
+ON DUPLICATE KEY UPDATE
+  title=VALUES(title),
+  platform_name=VALUES(platform_name),
+  button_text=VALUES(button_text),
+  url_tw=VALUES(url_tw),
+  url_us=VALUES(url_us),
+  url_default=VALUES(url_default),
+  is_active=1;

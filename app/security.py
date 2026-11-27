@@ -37,6 +37,7 @@ ALLOWED_TABLES = frozenset(
         "catalog_deviations",
         "color_calib_samples",
         "color_calib_state",
+        "affiliate_links",
     }
 )
 

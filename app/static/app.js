@@ -1630,6 +1630,86 @@ function isRecipeStatusMessage(text) {
     || value.startsWith(uiText("recipeEnsureFailed"));
 }
 
+function clearAffiliatePanels() {
+  const recipeAff = document.getElementById("recipe-affiliate");
+  const foodAff = document.getElementById("food-affiliate");
+  if (recipeAff) {
+    recipeAff.hidden = true;
+    recipeAff.innerHTML = "";
+  }
+  if (foodAff) {
+    foodAff.hidden = true;
+    foodAff.innerHTML = "";
+  }
+}
+
+function affiliateCtaHtml(aff, extraClass) {
+  if (!aff || !aff.go_url) return "";
+  const label = `${aff.button_text || "前往查看優惠"}${aff.platform_name ? `（${aff.platform_name}）` : ""}`;
+  const cls = extraClass ? ` class="${extraClass}"` : "";
+  return `<a${cls} href="${aff.go_url}" target="_blank" rel="nofollow sponsored noopener">${label}</a>`;
+}
+
+function renderRecipeAffiliate(aff) {
+  const box = document.getElementById("recipe-affiliate");
+  if (!box) return;
+  if (!aff || !aff.go_url) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  const href = aff.go_url;
+  box.innerHTML = `
+    <h4>懶人外食／體驗替代方案</h4>
+    <a href="${href}" target="_blank" rel="nofollow sponsored noopener">沒時間自己煮？👉 預訂周邊健康蔬食餐廳（OpenTable / Klook 優惠餐券）</a>
+    <a href="${href}" target="_blank" rel="nofollow sponsored noopener">想學更多道地料理？👉 報名健康烹飪體驗課（Viator / GetYourGuide）</a>
+    <div class="food-affiliate-item" style="margin-top:8px">${affiliateCtaHtml(aff, "food-affiliate-cta")}</div>
+  `;
+  box.hidden = false;
+}
+
+function renderFoodAffiliates(items, recipeAffiliate) {
+  const box = document.getElementById("food-affiliate");
+  if (!box) return;
+  const list = Array.isArray(items) ? items.filter((item) => item && (item.affiliate || item.affiliate_slug)) : [];
+  // Prefer JOIN affiliate objects; fall back to slug-only ingredient rows.
+  const blocks = [];
+  for (const item of list) {
+    const aff = item.affiliate || (item.affiliate_slug ? {
+      slug: item.affiliate_slug,
+      go_url: `/go/${encodeURIComponent(item.affiliate_slug)}`,
+      button_text: "🛒 購買推薦食材（iHerb / Amazon）",
+      platform_name: "",
+      title: item.name || "",
+    } : null);
+    if (!aff || !aff.go_url) continue;
+    const name = String(item.name || aff.title || "").trim();
+    const bits = [];
+    if (item.kcal != null && item.kcal !== "") bits.push(`${Math.round(Number(item.kcal))} kcal`);
+    if (item.protein_g != null && item.protein_g !== "") {
+      const p = Number(item.protein_g);
+      bits.push(`蛋白 ${Number.isFinite(p) ? (Math.abs(p) >= 1 ? Math.round(p) : p.toFixed(2)) : item.protein_g} g`);
+    }
+    const meta = bits.length ? `<span class="food-affiliate-meta">${bits.join(" · ")}</span>` : "";
+    const cta = affiliateCtaHtml(
+      Object.assign({}, aff, {
+        button_text: aff.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
+      }),
+      "food-affiliate-cta"
+    );
+    blocks.push(`<div class="food-affiliate-item"><strong>${name}</strong>${meta}${cta}</div>`);
+  }
+  // If recipe has no ingredient affiliates but foods detail CTA needed via recipe.affiliate alone, skip here.
+  void recipeAffiliate;
+  if (!blocks.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = blocks.join("");
+  box.hidden = false;
+}
+
 function showSelectedRecipe(extraNote) {
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
@@ -1643,22 +1723,40 @@ function showSelectedRecipe(extraNote) {
     // Never keep another dish's ingredients/method under a different typed name.
     if (!label) detail.textContent = "";
     else if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) detail.textContent = "";
+    clearAffiliatePanels();
     return;
   }
   selectedRecipeId = row.id;
-  const lines = [
+  const beforeAffiliate = [
     ["fieldRecipe", row.recipe],
     ["fieldMethod", row.method],
+  ].filter((item) => item[1]);
+  const afterAffiliate = [
     ["fieldBenefit", row.benefit],
     ["fieldNutrient", row.nutrient],
     ["fieldBan", row.ban],
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
-  let text = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  let text = beforeAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  // Recipe affiliate card sits visually below steps (method).
+  renderRecipeAffiliate(row.affiliate);
+  const rest = afterAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  if (rest) text = (text ? text + "\n\n" : "") + rest;
   const nutrientLine = row.nutrient_line || formatRecipeNutrients(row.nutrients);
   if (nutrientLine) text = (text ? text + "\n\n" : "") + nutrientLine;
   if (extraNote) text = (text ? text + "\n\n" : "") + extraNote;
   detail.textContent = text;
+  // Food CTAs sit below nutrition (kcal/protein).
+  const foodItems = (row.ingredient_affiliates || []).map((item) => Object.assign({}, item, {
+    affiliate: item.affiliate || (item.affiliate_slug ? {
+      slug: item.affiliate_slug,
+      title: item.name,
+      platform_name: "iHerb / Amazon",
+      button_text: "🛒 購買推薦食材（iHerb / Amazon）",
+      go_url: `/go/${encodeURIComponent(item.affiliate_slug)}`,
+    } : null),
+  }));
+  renderFoodAffiliates(foodItems, row.affiliate);
 }
 
 function recipeHasSubstringMatch(typed) {
@@ -1674,6 +1772,7 @@ function showRecipeSearchStatus(typed) {
   if (!plain) {
     selectedRecipeId = null;
     if (!recipeEnsureBusy) detail.textContent = "";
+    clearAffiliatePanels();
     return;
   }
   if (findRecipeByTypedName(typed)) {

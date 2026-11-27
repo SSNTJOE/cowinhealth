@@ -13,3 +13,5 @@ MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "healthing")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "healthing")
 SECRET_KEY = os.getenv("SECRET_KEY", "health-ing-dev-secret-change-me")
 COOKIE_NAME = "healthing_session"
+AFFILIATE_ADMIN_USER = os.getenv("AFFILIATE_ADMIN_USER", "admin")
+AFFILIATE_ADMIN_PASSWORD = os.getenv("AFFILIATE_ADMIN_PASSWORD", SECRET_KEY)

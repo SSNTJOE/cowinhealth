@@ -959,6 +959,52 @@ def nutrient_line(row: dict | None) -> str:
     return "、".join(parts)
 
 
+def ingredient_affiliates(row: dict, *, limit: int = 4) -> list[dict]:
+    """Top recipe ingredients that have an affiliate_slug on catalog_foods."""
+    foods = foods_index() or {}
+    out: list[dict] = []
+    seen: set[str] = set()
+    for name in top_ingredient_names(row.get("recipe") or "", limit=max(limit, 8)):
+        item = foods.get(name) or {}
+        slug = str(item.get("affiliate_slug") or "").strip()
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        kcal = item.get("kcal")
+        protein = item.get("protein_g")
+        try:
+            kcal_num = float(kcal) if kcal is not None and kcal != "" else None
+        except (TypeError, ValueError):
+            kcal_num = None
+        try:
+            protein_num = float(protein) if protein is not None and protein != "" else None
+        except (TypeError, ValueError):
+            protein_num = None
+        aff = item.get("affiliate") if isinstance(item.get("affiliate"), dict) else None
+        if not aff:
+            from .affiliate import affiliate_payload_from_join
+
+            aff = affiliate_payload_from_join({"aff_slug": slug, **item}) or {
+                "slug": slug,
+                "title": str(item.get("name_zh") or name).strip() or name,
+                "platform_name": str(item.get("platform_name") or "").strip(),
+                "button_text": "🛒 購買推薦食材（iHerb / Amazon）",
+                "go_url": "/go/" + slug,
+            }
+        out.append(
+            {
+                "name": str(item.get("name_zh") or name).strip() or name,
+                "affiliate_slug": slug,
+                "affiliate": aff,
+                "kcal": kcal_num,
+                "protein_g": protein_num,
+            }
+        )
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
 def public_recipe(row: dict, lang: str, score: int, *, simplify: bool = True) -> dict:
     """Serialize a catalog row for API clients.
 
@@ -994,7 +1040,16 @@ def public_recipe(row: dict, lang: str, score: int, *, simplify: bool = True) ->
         "nutrient_line": line,
         "benefit_match": score > 0,
         "benefit_score": score,
+        "affiliate_slug": str(row.get("affiliate_slug") or "").strip(),
+        "affiliate": row.get("affiliate")
+        if isinstance(row.get("affiliate"), dict)
+        else None,
+        "ingredient_affiliates": ingredient_affiliates(row),
     }
+    if not payload["affiliate"]:
+        from .affiliate import affiliate_payload_from_join
+
+        payload["affiliate"] = affiliate_payload_from_join(row)
     del lang  # plain summary is Traditional Chinese teaching copy for all UI langs
     for field, _header in NUTRIENT_FIELDS:
         payload[field] = row.get(field)

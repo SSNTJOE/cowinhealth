@@ -19,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from .advice import build_advice, enrich_stored_advice
+from .affiliate import router as affiliate_router
 from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
@@ -83,6 +84,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(affiliate_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -95,6 +97,15 @@ def startup():
         seed_from_excel_if_empty()
     except Exception:
         logger.exception("startup catalog seed failed")
+    try:
+        from .affiliate import seed_demo_affiliate_rows
+        from .shared_catalog import invalidate_foods_mysql_cache, invalidate_recipe_mysql_cache
+
+        seed_demo_affiliate_rows()
+        invalidate_recipe_mysql_cache()
+        invalidate_foods_mysql_cache()
+    except Exception:
+        logger.exception("startup affiliate seed failed")
 
 
 GENDER_VALUES = {"female", "male", "other"}
@@ -462,6 +473,11 @@ def register_page():
 @app.get("/profile")
 def profile_page():
     return _html_page("profile.html")
+
+
+@app.get("/admin-affiliate")
+def admin_affiliate_page():
+    return _html_page("admin-affiliate.html")
 
 
 @app.get("/media/{name}")
@@ -877,6 +893,48 @@ def api_recipe_countries(
         "by_body": bool(by_body),
         "disclaimer": TEACHING_DISCLAIMER,
     }
+
+
+@app.get("/api/foods")
+def api_foods(q: str | None = None, limit: int = 50):
+    """List catalog foods with affiliate JOIN payload (active links only)."""
+    from .shared_catalog import fetch_foods_index
+
+    index = fetch_foods_index() or {}
+    needle = (q or "").strip().lower()
+    seen: set[str] = set()
+    foods: list[dict] = []
+    for key, item in index.items():
+        zh = str(item.get("name_zh") or "").strip()
+        if not zh or zh in seen:
+            continue
+        # Skip alias keys that point at the same row.
+        if key != zh and key in (item.get("name_en"), item.get("name_ja"), item.get("name_ko")):
+            continue
+        seen.add(zh)
+        if needle and needle not in zh.lower() and needle not in str(item.get("name_en") or "").lower():
+            continue
+        foods.append(
+            {
+                "id": item.get("_id"),
+                "name_zh": zh,
+                "name_en": item.get("name_en") or "",
+                "name_ja": item.get("name_ja") or "",
+                "name_ko": item.get("name_ko") or "",
+                "benefit": item.get("benefit") or "",
+                "ban": item.get("ban") or "",
+                "nutrient": item.get("nutrient") or "",
+                "kcal": item.get("kcal"),
+                "protein_g": item.get("protein_g"),
+                "affiliate_slug": item.get("affiliate_slug") or "",
+                "affiliate": item.get("affiliate")
+                if isinstance(item.get("affiliate"), dict)
+                else None,
+            }
+        )
+        if len(foods) >= max(1, min(int(limit or 50), 200)):
+            break
+    return {"foods": foods, "count": len(foods)}
 
 
 @app.get("/api/recipes")

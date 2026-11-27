@@ -121,6 +121,22 @@ SCHEMA_SQL = [
       CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS affiliate_links (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      slug VARCHAR(100) NOT NULL UNIQUE COMMENT '短網址代稱，例如 olive-oil-01',
+      title VARCHAR(255) NOT NULL COMMENT '商品或餐廳名稱',
+      platform_name VARCHAR(50) NOT NULL COMMENT '主要平台，如 iHerb / Amazon / Klook',
+      button_text VARCHAR(100) DEFAULT '前往查看優惠' COMMENT '按鈕顯示文字',
+      url_tw TEXT NULL COMMENT '台灣訪客專屬網址',
+      url_us TEXT NULL COMMENT '美國/英語系訪客網址',
+      url_jp TEXT NULL COMMENT '日本訪客網址',
+      url_default TEXT NOT NULL COMMENT '預設全球通用網址 (必填防呆)',
+      is_active TINYINT(1) DEFAULT 1 COMMENT '1=啟用, 0=停用',
+      click_count INT DEFAULT 0 COMMENT '點擊次數統計',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
 
 EXTRA_COLUMNS = [
@@ -152,6 +168,16 @@ EXTRA_COLUMNS = [
     ("health_records", "tongue_measurements_json", "TEXT NULL"),
     ("health_records", "organ_composite_json", "TEXT NULL"),
     ("health_records", "stomach_score", "INT NOT NULL DEFAULT 5"),
+    (
+        "catalog_recipes",
+        "affiliate_slug",
+        "VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug'",
+    ),
+    (
+        "catalog_foods",
+        "affiliate_slug",
+        "VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug'",
+    ),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS

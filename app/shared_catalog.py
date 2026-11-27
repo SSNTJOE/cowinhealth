@@ -125,6 +125,7 @@ CATALOG_SCHEMA_SQL = [
       protein_g DOUBLE NULL,
       fat_g DOUBLE NULL,
       water_g DOUBLE NULL,
+      affiliate_slug VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug',
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_recipes_country (country),
       INDEX idx_recipes_name_zh (name_zh)
@@ -154,6 +155,7 @@ CATALOG_SCHEMA_SQL = [
       protein_g DOUBLE NULL,
       fat_g DOUBLE NULL,
       water_g DOUBLE NULL,
+      affiliate_slug VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug',
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_foods_zh (name_zh)
     )
@@ -562,6 +564,12 @@ def _daily_token() -> tuple[int, int]:
         conn.close()
 
 
+def _affiliate_from_join(db_row: dict[str, Any]) -> dict[str, Any] | None:
+    from .affiliate import affiliate_payload_from_join
+
+    return affiliate_payload_from_join(db_row)
+
+
 def _row_to_recipe_item(db_row: dict[str, Any]) -> dict[str, Any]:
     item: dict[str, Any] = {
         "id": str(db_row["recipe_id"]),
@@ -581,7 +589,20 @@ def _row_to_recipe_item(db_row: dict[str, Any]) -> dict[str, Any]:
             has_any = True
     item["nutrients"] = nutrients
     item["has_nutrients"] = has_any
+    item["affiliate_slug"] = str(db_row.get("affiliate_slug") or "").strip()
+    item["affiliate"] = _affiliate_from_join(db_row)
     return item
+
+
+_RECIPE_AFFILIATE_SQL = """
+SELECT r.*,
+  a.slug AS aff_slug,
+  a.title AS aff_title,
+  a.platform_name AS aff_platform_name,
+  a.button_text AS aff_button_text
+FROM catalog_recipes r
+LEFT JOIN affiliate_links a ON r.affiliate_slug = a.slug AND a.is_active = 1
+"""
 
 
 @lru_cache(maxsize=4)
@@ -590,7 +611,7 @@ def _fetch_recipes_cached(count: int, token: int) -> tuple[dict, ...]:
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM catalog_recipes ORDER BY recipe_id")
+            cur.execute(_RECIPE_AFFILIATE_SQL + " ORDER BY r.recipe_id")
             rows = cur.fetchall() or []
         return tuple(_row_to_recipe_item(r) for r in rows)
     finally:
@@ -621,7 +642,8 @@ def _fetch_recipes_for_country_cached(country: str, count: int, token: int) -> t
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM catalog_recipes WHERE country=%s ORDER BY recipe_id",
+                _RECIPE_AFFILIATE_SQL
+                + " WHERE r.country=%s ORDER BY r.recipe_id",
                 (wanted,),
             )
             rows = cur.fetchall() or []
@@ -665,13 +687,14 @@ def fetch_recipe_rows_by_names(names: list[str]) -> tuple[dict, ...] | None:
                 params: list[str] = []
                 for needle in needles:
                     clauses.append(
-                        "(name_zh=%s OR name_en=%s OR name_ja=%s OR name_ko=%s)"
+                        "(r.name_zh=%s OR r.name_en=%s OR r.name_ja=%s OR r.name_ko=%s)"
                     )
                     params.extend([needle, needle, needle, needle])
                 sql = (
-                    "SELECT * FROM catalog_recipes WHERE "
+                    _RECIPE_AFFILIATE_SQL
+                    + " WHERE "
                     + " OR ".join(clauses)
-                    + " ORDER BY recipe_id"
+                    + " ORDER BY r.recipe_id"
                 )
                 cur.execute(sql, params)
                 rows = cur.fetchall() or []
@@ -713,7 +736,10 @@ def insert_recipe(fields: dict[str, Any]) -> dict[str, Any]:
                 payload,
             )
             recipe_id = int(cur.lastrowid)
-            cur.execute("SELECT * FROM catalog_recipes WHERE recipe_id=%s", (recipe_id,))
+            cur.execute(
+                _RECIPE_AFFILIATE_SQL + " WHERE r.recipe_id=%s",
+                (recipe_id,),
+            )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -750,7 +776,10 @@ def update_recipe(recipe_id: str | int, fields: dict[str, Any]) -> dict[str, Any
             )
             if cur.rowcount == 0:
                 raise RuntimeError(f"找不到要更新的食譜列：{recipe_id}")
-            cur.execute("SELECT * FROM catalog_recipes WHERE recipe_id=%s", (rid,))
+            cur.execute(
+                _RECIPE_AFFILIATE_SQL + " WHERE r.recipe_id=%s",
+                (rid,),
+            )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -758,17 +787,28 @@ def update_recipe(recipe_id: str | int, fields: dict[str, Any]) -> dict[str, Any
     return _row_to_recipe_item(row)
 
 
+_FOOD_AFFILIATE_SQL = """
+SELECT f.*,
+  a.slug AS aff_slug,
+  a.title AS aff_title,
+  a.platform_name AS aff_platform_name,
+  a.button_text AS aff_button_text
+FROM catalog_foods f
+LEFT JOIN affiliate_links a ON f.affiliate_slug = a.slug AND a.is_active = 1
+"""
+
+
 @lru_cache(maxsize=4)
-def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, str]]:
+def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, Any]]:
     del count, token
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM catalog_foods ORDER BY food_id")
+            cur.execute(_FOOD_AFFILIATE_SQL + " ORDER BY f.food_id")
             rows = cur.fetchall() or []
     finally:
         conn.close()
-    foods: dict[str, dict[str, str]] = {}
+    foods: dict[str, dict[str, Any]] = {}
     for db_row in rows:
         zh = str(db_row.get("name_zh") or "").strip()
         if not zh:
@@ -781,6 +821,10 @@ def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, str]]:
             "benefit": str(db_row.get("benefit") or "").strip(),
             "ban": str(db_row.get("ban") or "").strip(),
             "nutrient": str(db_row.get("nutrient") or "").strip(),
+            "affiliate_slug": str(db_row.get("affiliate_slug") or "").strip(),
+            "affiliate": _affiliate_from_join(db_row),
+            "kcal": db_row.get("kcal"),
+            "protein_g": db_row.get("protein_g"),
             "_id": str(db_row.get("food_id")),
         }
         foods[zh] = item
