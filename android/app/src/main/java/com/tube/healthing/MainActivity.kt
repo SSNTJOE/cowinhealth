@@ -91,6 +91,8 @@ class MainActivity : AppCompatActivity() {
     private var countryNames: List<String> = emptyList()
     private var loadedCountry = ""
     private var recipeLoadToken = 0
+    /** Invalidates in-flight global name searches so they cannot rewrite recipePick while editing. */
+    private var recipeNameSearchGen = 0
     private var recipeEnsureToken = 0
     @Volatile private var recipeEnsureBusy = false
     private var recipeEnsureFollowUpName: String? = null
@@ -2229,17 +2231,24 @@ class MainActivity : AppCompatActivity() {
                     }
                     requestRecipes(name, keepSelection = false, preserveTypedName = true)
                 } else {
+                    // Country cleared / incomplete: drop in-flight country + name loads so they
+                    // cannot rewrite recipePick (stuck field after clearing country).
+                    cancelRecipeDebounce()
                     loadedCountry = ""
                     recipeLoadToken += 1
+                    recipeNameSearchGen += 1
                     selectedRecipeId = -1
                     recipeRows = emptyList()
-                    // Keep pending dish text when country is cleared/incomplete.
-                    val typed = binding.recipePick.text?.toString()?.trim().orEmpty()
+                    ensureRecipePickEditable()
+                    binding.recipePick.dismissDropDown()
+                    // Keep pending dish text; do not setText on recipePick here.
+                    val typed = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
                     bindSearch(binding.recipePick, emptyList(), revealAll = true)
                     if (typed.isEmpty()) {
                         binding.recipeDetail.text = ""
                     } else {
                         // No valid country: search dish name across Recipe.xls (web parity).
+                        showRecipeSearchingStatus()
                         scheduleRecipeNameSearch(typed)
                     }
                 }
@@ -2267,6 +2276,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.recipePick.setOnClickListener { revealRecipeList() }
+        binding.recipePick.setOnItemClickListener { _, _, position, _ ->
+            val adapter = binding.recipePick.adapter ?: return@setOnItemClickListener
+            val label = adapter.getItem(position)?.toString().orEmpty()
+            if (label.isEmpty()) return@setOnItemClickListener
+            applyRecipePickSelection(label)
+        }
         binding.recipePick.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
                 maybeEnsureTypedRecipe(fromSubmit = true)
@@ -2280,6 +2295,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Keep recipe AutoCompleteTextView editable after country clear / adapter rebinds. */
+    private fun ensureRecipePickEditable() {
+        binding.recipePick.isEnabled = true
+        binding.recipePick.isFocusable = true
+        binding.recipePick.isFocusableInTouchMode = true
+        binding.recipePick.isClickable = true
+        binding.recipePick.isCursorVisible = true
+    }
+
+    /** User picked a dropdown row (possibly `name（country）` from global search). */
+    private fun applyRecipePickSelection(label: String) {
+        val row = recipeRows.firstOrNull { recipeLabelWithCountry(it) == label }
+            ?: recipeRows.firstOrNull { recipeLabel(it) == label }
+            ?: findRecipeByTypedName(label)
+        if (row == null) {
+            showRecipeDetail(label)
+            return
+        }
+        selectedRecipeId = row.optInt("id", -1)
+        val country = row.optString("country").trim()
+        val base = recipeLabel(row)
+        // Explicit pick may fill country; set loadedCountry first so the watcher does not reload.
+        if (country.isNotEmpty() && selectedCountry().isEmpty()) {
+            if (country !in countryNames) {
+                countryNames = listOf(country) + countryNames
+                bindSearch(binding.recipeCountry, countryNames, prefix = true)
+            }
+            loadedCountry = country
+            binding.recipeCountry.setText(country, false)
+        }
+        binding.recipePick.setText(base, false)
+        showRecipeDetail(base)
+    }
+
     private fun cancelRecipeDebounce() {
         recipeNameSearchRunnable?.let { recipeUiHandler.removeCallbacks(it) }
         recipeNameSearchRunnable = null
@@ -2290,9 +2339,13 @@ class MainActivity : AppCompatActivity() {
     private fun onRecipePickTextChanged(raw: String) {
         val label = raw.trim()
         cancelRecipeDebounce()
+        // Drop any in-flight empty-country name search before it can restore old text.
+        recipeNameSearchGen += 1
         if (label.isEmpty()) {
             (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter("")
             selectedRecipeId = -1
+            recipeRows = emptyList()
+            bindSearch(binding.recipePick, emptyList(), revealAll = true)
             if (!recipeEnsureBusy) binding.recipeDetail.text = ""
             return
         }
@@ -2958,10 +3011,14 @@ class MainActivity : AppCompatActivity() {
                 rows.add(row)
                 labels.add(recipeLabel(row))
             }
-            recipeRows = rows
             runOnUiThread {
                 if (token != recipeLoadToken) return@runOnUiThread
+                // User cleared/changed country while this load was in flight — do not touch recipePick.
+                if (selectedCountry() != countryName) return@runOnUiThread
+                recipeRows = rows
+                ensureRecipePickEditable()
                 bindSearch(binding.recipePick, labels, revealAll = true)
+                val currentPlain = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
                 val kept = if (keepId >= 0) rows.firstOrNull { it.optInt("id", -1) == keepId } else null
                 val typedMatch = if (typedName.isNotEmpty()) {
                     rows.firstOrNull { recipeNamePlain(recipeLabel(it)).equals(typedName, ignoreCase = true) }
@@ -2970,17 +3027,29 @@ class MainActivity : AppCompatActivity() {
                 val chosen = kept ?: typedMatch
                 if (chosen != null) {
                     val label = recipeLabel(chosen)
-                    binding.recipePick.setText(label, false)
+                    if (!currentPlain.equals(recipeNamePlain(label), ignoreCase = true)) {
+                        binding.recipePick.setText(label, false)
+                    }
                     showRecipeDetail(label)
                 } else if (typedName.isNotEmpty()) {
                     // Keep pending dish — never silently switch to first country recipe
                     // and never silent-create; user taps「建立食譜」explicitly.
                     selectedRecipeId = -1
-                    binding.recipePick.setText(typedName, false)
+                    // Only rewrite when the field still matches the snapshot we loaded for;
+                    // never restore a stale typedName over newer edits / country-clear.
+                    if (currentPlain.equals(typedName, ignoreCase = true) || currentPlain.isEmpty()) {
+                        if (currentPlain.isEmpty()) binding.recipePick.setText(typedName, false)
+                    } else {
+                        return@runOnUiThread
+                    }
                     if (!recipeEnsureBusy) showRecipeCreateHint()
                 } else {
                     selectedRecipeId = -1
-                    binding.recipePick.setText("", false)
+                    if (currentPlain.isNotEmpty()) {
+                        // User typed while load ran with empty snapshot — leave their text.
+                    } else {
+                        binding.recipePick.setText("", false)
+                    }
                     binding.recipeDetail.text = if (rows.isEmpty()) {
                         if (byBody) {
                             t(
@@ -3016,7 +3085,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadRecipesByName(name: String) {
         val plain = recipeNamePlain(name)
         if (plain.isEmpty()) return
-        val token = ++recipeLoadToken
+        val gen = ++recipeNameSearchGen
         val byBody = binding.recipeBodyAdvice.isChecked
         try {
             rememberServer()
@@ -3031,7 +3100,7 @@ class MainActivity : AppCompatActivity() {
                 byBody = byBody,
                 name = plain,
             )
-            if (token != recipeLoadToken) return
+            if (gen != recipeNameSearchGen) return
             val arr = data.optJSONArray("recipes") ?: JSONArray()
             val rows = ArrayList<JSONObject>(arr.length())
             val labels = ArrayList<String>(arr.length())
@@ -3040,30 +3109,29 @@ class MainActivity : AppCompatActivity() {
                 rows.add(row)
                 labels.add(recipeLabelWithCountry(row))
             }
-            recipeRows = rows
             runOnUiThread {
-                if (token != recipeLoadToken) return@runOnUiThread
+                if (gen != recipeNameSearchGen) return@runOnUiThread
                 // Country may have been filled while the name search was in flight.
                 if (selectedCountry().isNotEmpty()) return@runOnUiThread
+                // User cleared/retyped while this search was in flight — never restore old text.
+                val current = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
+                if (!current.equals(plain, ignoreCase = true)) return@runOnUiThread
+                recipeRows = rows
+                ensureRecipePickEditable()
                 bindSearch(binding.recipePick, labels, revealAll = true)
                 val exact = findRecipeByTypedName(plain)
                 if (exact != null) {
-                    val label = recipeLabelWithCountry(exact)
-                    binding.recipePick.setText(label, false)
-                    val country = exact.optString("country").trim()
-                    if (country.isNotEmpty()) {
-                        if (country !in countryNames) {
-                            countryNames = listOf(country) + countryNames
-                            bindSearch(binding.recipeCountry, countryNames, prefix = true)
-                        }
-                        binding.recipeCountry.setText(country, false)
-                        loadedCountry = country
-                    }
+                    // Do NOT auto-fill country here: that undoes a user clear and kicks
+                    // requestRecipes → setText, which sticks the recipe field. Country is
+                    // applied only when the user picks a dropdown row.
+                    selectedRecipeId = exact.optInt("id", -1)
                     showRecipeDetail(recipeLabel(exact))
+                    if (rows.size > 1) {
+                        binding.recipePick.post { revealRecipeList() }
+                    }
                     return@runOnUiThread
                 }
-                // Keep typed multilingual name; open matches if any, else hint create button.
-                binding.recipePick.setText(plain, false)
+                // Leave recipePick alone — setText(plain) fought delete/retype and stuck the field.
                 if (rows.isNotEmpty()) {
                     if (!recipeEnsureBusy) binding.recipeDetail.text = ""
                     binding.recipePick.post { revealRecipeList() }
@@ -3072,7 +3140,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            if (token != recipeLoadToken) return
+            if (gen != recipeNameSearchGen) return
             runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
         }
     }
