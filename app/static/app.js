@@ -992,8 +992,22 @@ function briefCircleLine(note, kind) {
   const label = String((hit && hit.label) || "").trim();
   if (!label) return "";
   const tag = kind === "urine" ? "尿尿" : "大便";
+  // Stool nearest-standard: show class +「接近判定標準」, never「無法對照」.
+  const nearStd = Boolean(
+    hit &&
+      (hit.near_standard ||
+        label.includes("接近判定標準"))
+  );
+  if (nearStd && kind !== "urine") {
+    const abnormal = Boolean(hit && hit.abnormal);
+    return abnormal
+      ? `${tag}：需留意 — ${label}`
+      : `${tag}：正常 — ${label}`;
+  }
   const outside = Boolean(
-    hit && (hit.id === "outside_palette" || hit.far_from_palette)
+    hit &&
+      (hit.id === "outside_palette" ||
+        (hit.far_from_palette && !nearStd))
   );
   if (outside) {
     const hint = String((hit && hit.hint) || "").trim();

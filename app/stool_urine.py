@@ -1000,24 +1000,124 @@ def _nearest_stool_palette(L: float, a: float, b: float) -> tuple[str | None, fl
     return nearest_id, float(nearest_de)
 
 
-def _stool_outside_palette_class(L: float, a: float, b: float) -> dict[str, Any]:
-    nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
-    nearest_label = STOOL_PALETTE_LABELS.get(nearest_id or "", nearest_id or "未知")
-    measured = f"測得 L*{L:.0f} a*{a:.0f} b*{b:.0f}"
-    return {
-        "id": "outside_palette",
-        "label": "偏離教學色盤（無法對照已知糞色）",
-        "organs": "未對照",
-        "organ_keys": [],
-        "hint": f"{measured}；最近教學色「{nearest_label}」ΔE≈{nearest_de:.0f}，不強制黃褐／正常",
-        "confounders": "飲食／藥物染色、光線、取景",
-        "abnormal": True,
-        "health_score": 5,
-        "far_from_palette": True,
-        "palette_delta_e": round(nearest_de, 1),
-        "nearest_palette_id": nearest_id,
-        "measured_lab": {"L": round(L, 1), "a_star": round(a, 1), "b_star": round(b, 1)},
+def _stool_class_payload_from_id(
+    pid: str,
+    *,
+    nearest_de: float,
+    near_standard: bool = False,
+    measured: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
+    """Build a stool class from a teaching-palette id.
+
+    near_standard=True → label annotated with「接近判定標準」(never 無法對照／偏離教學色盤).
+    """
+    base_label = STOOL_PALETTE_LABELS.get(pid, pid or "未知")
+    meta = {
+        "black_tarry": (
+            "食道／胃／十二指腸",
+            ["stomach", "small_intestine"],
+            "上消化道出血教學提示",
+            "血品食物、鐵劑、鉍劑",
+            True,
+            3,
+        ),
+        "clay_gray": (
+            "肝／膽道／胰",
+            ["liver", "gallbladder", "spleen"],
+            "膽汁排出受阻教學警示",
+            "鋇劑、制酸劑",
+            True,
+            3,
+        ),
+        "bright_dark_red": (
+            "結腸／直腸／肛門",
+            ["large_intestine"],
+            "下消化道出血教學提示",
+            "紅色蔬果",
+            True,
+            3,
+        ),
+        "dark_green": (
+            "小腸／大腸",
+            ["small_intestine", "large_intestine"],
+            "感染／發炎／通過過快教學提示",
+            "深綠色蔬菜、鐵劑、抗生素",
+            True,
+            5,
+        ),
+        "normal_yellow_brown": (
+            "肝膽膽汁正常、腸道通暢（教學）",
+            ["liver", "gallbladder", "large_intestine", "small_intestine"],
+            "相對健康糞色教學示範",
+            "一般飲食",
+            False,
+            7 if near_standard else 8,
+        ),
+        "pale_oily": (
+            "胰臟／膽囊／小腸",
+            ["gallbladder", "spleen", "small_intestine"],
+            "脂肪消化不良／膽汁不足可能；酸臭易浮水面（教學）",
+            "高油脂飲食",
+            True,
+            5,
+        ),
     }
+    organs, keys, hint, conf, abnormal, score = meta.get(
+        pid,
+        ("未對照", [], "教學色盤最近類", "飲食／藥物染色、光線、取景", True, 5),
+    )
+    if near_standard:
+        label = f"{base_label}（接近判定標準）"
+        hint = f"{hint}；接近判定標準（ΔE≈{nearest_de:.0f}）"
+    else:
+        label = f"{base_label}（近似）"
+        hint = f"{hint}（ΔE≈{nearest_de:.0f}）"
+    out: dict[str, Any] = {
+        "id": pid,
+        "label": label,
+        "organs": organs,
+        "organ_keys": keys,
+        "hint": hint,
+        "confounders": conf,
+        "abnormal": abnormal,
+        "health_score": score,
+        "palette_delta_e": round(nearest_de, 1),
+        "nearest_palette_id": pid,
+    }
+    if near_standard:
+        out["near_standard"] = True
+        out["far_from_palette"] = True  # ΔE above soft gate; still a nearest class
+        if measured is not None:
+            L, a, b = measured
+            out["measured_lab"] = {
+                "L": round(L, 1),
+                "a_star": round(a, 1),
+                "b_star": round(b, 1),
+            }
+    return out
+
+
+def _stool_nearest_standard_class(L: float, a: float, b: float) -> dict[str, Any]:
+    """Fallback when hard/soft rules miss: nearest palette class +「接近判定標準」."""
+    nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
+    pid = nearest_id or "normal_yellow_brown"
+    if pid == "pale_oily":
+        hit = _stool_pale_oily_class(approx=True)
+        hit["label"] = f"{STOOL_PALETTE_LABELS['pale_oily']}（接近判定標準）"
+        hit["hint"] = f"{hit['hint']}；接近判定標準（ΔE≈{nearest_de:.0f}）"
+        hit["palette_delta_e"] = round(nearest_de, 1)
+        hit["nearest_palette_id"] = pid
+        hit["near_standard"] = True
+        hit["far_from_palette"] = True
+        hit["measured_lab"] = {
+            "L": round(L, 1),
+            "a_star": round(a, 1),
+            "b_star": round(b, 1),
+        }
+        return hit
+    return _stool_class_payload_from_id(
+        pid, nearest_de=nearest_de, near_standard=True, measured=(L, a, b)
+    )
 
 
 def _ba_ratio(a: float, b: float) -> float:
@@ -1261,57 +1361,15 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
     ):
         soft_ok = False
     if soft_ok:
-        approx_map = {
-            "black_tarry": (
-                "黑色／瀝青色（近似）",
-                "食道／胃／十二指腸",
-                ["stomach", "small_intestine"],
-                "上消化道出血教學提示",
-                "血品食物、鐵劑、鉍劑",
-                3,
-            ),
-            "clay_gray": (
-                "灰白色／陶土色（近似）",
-                "肝／膽道／胰",
-                ["liver", "gallbladder", "spleen"],
-                "膽汁排出受阻教學警示",
-                "鋇劑、制酸劑",
-                3,
-            ),
-            "bright_dark_red": (
-                "鮮紅色／暗紅色（近似）",
-                "結腸／直腸／肛門",
-                ["large_intestine"],
-                "下消化道出血教學提示",
-                "紅色蔬果",
-                3,
-            ),
-            "dark_green": (
-                "墨綠色／深綠色（近似）",
-                "小腸／大腸",
-                ["small_intestine", "large_intestine"],
-                "感染／發炎／通過過快教學提示",
-                "深綠色蔬菜、鐵劑、抗生素",
-                5,
-            ),
-        }
         if nearest_id == "pale_oily":
             hit = _stool_pale_oily_class(approx=True)
             hit["palette_delta_e"] = round(nearest_de, 1)
             return hit
-        label, organs, keys, hint, conf, score = approx_map[nearest_id]
-        return {
-            "id": nearest_id,
-            "label": label,
-            "organs": organs,
-            "organ_keys": keys,
-            "hint": f"{hint}（ΔE≈{nearest_de:.0f}）",
-            "confounders": conf,
-            "abnormal": True,
-            "health_score": score,
-            "palette_delta_e": round(nearest_de, 1),
-        }
-    return _stool_outside_palette_class(L, a, b)
+        return _stool_class_payload_from_id(
+            nearest_id, nearest_de=nearest_de, near_standard=False
+        )
+    # Always report nearest class — never「無法對照／偏離教學色盤」for stool.
+    return _stool_nearest_standard_class(L, a, b)
 
 
 def _hsv_gate_ok(pid: str, h: float, s: float, v: float) -> bool:

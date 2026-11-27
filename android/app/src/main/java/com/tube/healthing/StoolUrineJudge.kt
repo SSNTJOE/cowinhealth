@@ -235,9 +235,16 @@ object StoolUrineJudge {
             }
         }
         val classObj = note?.optJSONObject("class")
+        // Stool nearest-standard: show class +「接近判定標準」, never「無法對照」.
+        val nearStd = classObj?.optBoolean("near_standard", false) == true ||
+            label.contains("接近判定標準")
+        if (nearStd && !isUrine) {
+            return if (hit?.abnormal == true) "$tag：需留意 — $label"
+            else "$tag：正常 — $label"
+        }
         val offPalette = hit?.id == "outside_palette" ||
             hit?.id == "possible_stain" ||
-            classObj?.optBoolean("far_from_palette", false) == true ||
+            (!nearStd && classObj?.optBoolean("far_from_palette", false) == true) ||
             label.contains("偏離教學色盤") ||
             label.contains("無法對照") ||
             label.contains("可能染色")
