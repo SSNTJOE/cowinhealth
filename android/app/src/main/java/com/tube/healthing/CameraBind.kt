@@ -43,13 +43,19 @@ object CameraBind {
             .build()
     }
 
+    /**
+     * Bind [facing] after [ProcessCameraProvider.unbindAll].
+     *
+     * Do **not** gate on [ProcessCameraProvider.hasCamera]: on some OEMs (e.g. vivo)
+     * `hasCamera(FRONT)` is false until the camera HAL has been touched once, which
+     * made face/tongue appear broken until stool/urine opened the rear lens first.
+     */
     fun bindFacing(
         owner: LifecycleOwner,
         provider: ProcessCameraProvider,
         facing: CameraSelector,
         vararg useCases: UseCase
     ): Camera? {
-        if (!provider.hasCamera(facing)) return null
         return try {
             provider.unbindAll()
             provider.bindToLifecycle(owner, facing, *useCases)
@@ -65,7 +71,7 @@ object CameraBind {
         vararg useCases: UseCase
     ): Camera? = bindFacing(owner, provider, CameraSelector.DEFAULT_FRONT_CAMERA, *useCases)
 
-    /** Pulse / PPG: rear camera only. Never silently switch to the selfie lens. */
+    /** Stool / urine (and legacy): rear camera only. Never silently switch to the selfie lens. */
     fun bindRearOnly(
         owner: LifecycleOwner,
         provider: ProcessCameraProvider,

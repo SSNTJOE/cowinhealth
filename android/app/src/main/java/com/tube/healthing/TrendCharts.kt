@@ -23,7 +23,17 @@ import com.github.mikephil.charting.utils.ViewPortHandler
 import org.json.JSONObject
 
 object TrendCharts {
-    fun bind(chart: CombinedChart, trend: JSONObject?, female: Boolean = true) {
+    /**
+     * Bind `/api/records` → `trend` (same shape as web `renderTrend`): per-organ
+     * color + marker time series, y 1–10. Shows [emptyView] when no history yet.
+     */
+    fun bind(
+        chart: CombinedChart,
+        trend: JSONObject?,
+        female: Boolean = true,
+        emptyView: android.widget.TextView? = null,
+        noDataText: String = "尚無足夠紀錄可畫趨勢",
+    ) {
         chart.description.isEnabled = false
         chart.setDrawGridBackground(false)
         chart.axisRight.isEnabled = false
@@ -33,29 +43,56 @@ object TrendCharts {
         chart.legend.setDrawInside(false)
         chart.legend.isWordWrapEnabled = true
         chart.legend.form = Legend.LegendForm.CIRCLE
-        chart.setNoDataText("尚無足夠紀錄可畫趨勢")
+        chart.setNoDataText(noDataText)
         chart.drawOrder = arrayOf(
             CombinedChart.DrawOrder.LINE,
             CombinedChart.DrawOrder.SCATTER,
         )
+
+        fun showEmpty() {
+            chart.clear()
+            chart.invalidate()
+            emptyView?.visibility = android.view.View.VISIBLE
+            chart.visibility = android.view.View.GONE
+        }
+
         val organs = trend?.optJSONArray("organs")
         if (organs == null || organs.length() == 0) {
-            chart.clear()
-            chart.invalidate()
+            showEmpty()
             return
         }
-        val labels = mutableListOf<String>()
-        val first = organs.optJSONObject(0)
-        val firstPoints = first?.optJSONArray("points")
-        if (firstPoints != null) {
-            for (i in 0 until firstPoints.length()) {
-                val t = firstPoints.optJSONObject(i)?.optString("t").orEmpty()
-                labels.add(t.replace("T", " ").take(16))
+        var hasPoints = false
+        for (i in 0 until organs.length()) {
+            val organ = organs.optJSONObject(i) ?: continue
+            if (!female && organ.optString("key") == "uterus") continue
+            val points = organ.optJSONArray("points")
+            if (points != null && points.length() > 0) {
+                hasPoints = true
+                break
             }
         }
+        if (!hasPoints) {
+            showEmpty()
+            return
+        }
+
+        emptyView?.visibility = android.view.View.GONE
+        chart.visibility = android.view.View.VISIBLE
+
+        val labels = mutableListOf<String>()
+        // Prefer the first visible organ's timestamps (same as web: trendOrgans[0].points).
+        for (i in 0 until organs.length()) {
+            val organ = organs.optJSONObject(i) ?: continue
+            if (!female && organ.optString("key") == "uterus") continue
+            val firstPoints = organ.optJSONArray("points") ?: continue
+            for (p in 0 until firstPoints.length()) {
+                val t = firstPoints.optJSONObject(p)?.optString("t").orEmpty()
+                labels.add(t.replace("T", " ").take(16))
+            }
+            break
+        }
         if (labels.isEmpty()) {
-            chart.clear()
-            chart.invalidate()
+            showEmpty()
             return
         }
         val lineData = LineData()
@@ -73,6 +110,7 @@ object TrendCharts {
                 lineEntries.add(Entry(p.toFloat(), y))
                 scatterEntries.add(Entry(p.toFloat(), y))
             }
+            if (lineEntries.isEmpty()) continue
             val label = organ.optString("label")
             val line = LineDataSet(lineEntries, "").apply {
                 this.color = color
@@ -82,6 +120,8 @@ object TrendCharts {
                 setDrawHighlightIndicators(false)
                 form = Legend.LegendForm.NONE
                 axisDependency = YAxis.AxisDependency.LEFT
+                mode = LineDataSet.Mode.CUBIC_BEZIER
+                cubicIntensity = 0.15f
             }
             val scatter = ScatterDataSet(scatterEntries, label).apply {
                 this.color = color
@@ -92,6 +132,10 @@ object TrendCharts {
             }
             lineData.addDataSet(line)
             scatterData.addDataSet(scatter)
+        }
+        if (lineData.dataSetCount == 0) {
+            showEmpty()
+            return
         }
         // Avoid duplicate legend entries from lines + markers.
         for (set in lineData.dataSets) set.isHighlightEnabled = false

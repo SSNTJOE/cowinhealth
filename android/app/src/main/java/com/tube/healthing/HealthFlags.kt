@@ -1,7 +1,8 @@
 package com.tube.healthing
 
+import android.view.ViewGroup
 import android.widget.CheckBox
-import android.widget.LinearLayout
+import android.widget.GridLayout
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -100,19 +101,32 @@ object HealthFlags {
         }
     }
 
-    fun inflate(parent: LinearLayout, options: List<String>) {
+    /** Inflate checkboxes; if [parent] is a [GridLayout], use equal-width columns. */
+    fun inflate(parent: ViewGroup, options: List<String>, columns: Int = 1) {
         parent.removeAllViews()
+        val grid = parent as? GridLayout
+        if (grid != null && columns > 1) {
+            grid.columnCount = columns
+        }
         options.forEach { label ->
-            parent.addView(
-                CheckBox(parent.context).apply {
-                    text = label
-                    tag = label
+            val box = CheckBox(parent.context).apply {
+                text = label
+                tag = label
+            }
+            if (grid != null) {
+                val lp = GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = ViewGroup.LayoutParams.WRAP_CONTENT
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
                 }
-            )
+                parent.addView(box, lp)
+            } else {
+                parent.addView(box)
+            }
         }
     }
 
-    fun selectedJson(parent: LinearLayout): String {
+    fun selectedJson(parent: ViewGroup): String {
         val arr = JSONArray()
         for (i in 0 until parent.childCount) {
             val box = parent.getChildAt(i) as? CheckBox ?: continue
@@ -121,7 +135,7 @@ object HealthFlags {
         return arr.toString()
     }
 
-    fun apply(parent: LinearLayout, selected: JSONArray?) {
+    fun apply(parent: ViewGroup, selected: JSONArray?) {
         val picked = mutableSetOf<String>()
         if (selected != null) {
             for (i in 0 until selected.length()) {
