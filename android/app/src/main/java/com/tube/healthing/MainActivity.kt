@@ -2797,7 +2797,7 @@ class MainActivity : AppCompatActivity() {
             showRecipeEnsuringStatus()
             return
         }
-        binding.recipeDetail.text = t("搜尋中", "Searching", "検索中", "검색 중")
+        setRecipeStatus(t("搜尋中", "Searching", "検索中", "검색 중"))
     }
 
     private fun showRecipeCreateHint() {
@@ -2805,20 +2805,24 @@ class MainActivity : AppCompatActivity() {
             showRecipeEnsuringStatus()
             return
         }
-        binding.recipeDetail.text = t(
-            "清單中沒有此食譜，請點「建立食譜」",
-            "Not in list — tap Create recipe",
-            "一覧にありません。「レシピを作成」を押してください",
-            "목록에 없습니다. 레시피 만들기를 누르세요"
+        setRecipeStatus(
+            t(
+                "清單中沒有此食譜，請點「建立食譜」",
+                "Not in list — tap Create recipe",
+                "一覧にありません。「レシピを作成」を押してください",
+                "목록에 없습니다. 레시피 만들기를 누르세요"
+            )
         )
     }
 
     private fun showRecipeEnsuringStatus() {
-        binding.recipeDetail.text = t(
-            "搜尋建檔中",
-            "Searching and creating data",
-            "検索してデータを作成中",
-            "검색하며 데이터 작성 중"
+        setRecipeStatus(
+            t(
+                "搜尋建檔中",
+                "Searching and creating data",
+                "検索してデータを作成中",
+                "검색하며 데이터 작성 중"
+            )
         )
     }
 
@@ -3157,6 +3161,12 @@ class MainActivity : AppCompatActivity() {
         binding.foodAffiliatePanel.visibility = View.GONE
     }
 
+    private fun setRecipeStatus(text: String) {
+        binding.recipeDetailTop.text = ""
+        clearAffiliatePanels()
+        binding.recipeDetail.text = text
+    }
+
     private fun openAffiliateGo(goUrl: String) {
         val base = normalizeServerUrl(binding.server.text.toString()).ifBlank {
             prefs.getString("base_url", "") ?: ""
@@ -3239,6 +3249,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val foods = row.optJSONArray("ingredient_affiliates") ?: JSONArray()
+        var foodCount = 0
         for (i in 0 until foods.length()) {
             val item = foods.optJSONObject(i) ?: continue
             val foodAff = item.optJSONObject("affiliate")
@@ -3256,6 +3267,19 @@ class MainActivity : AppCompatActivity() {
             val label = foodAff?.optString("button_text")?.ifBlank { null }
                 ?: "🛒 購買推薦食材（iHerb / Amazon）"
             addAffiliateButton(binding.foodAffiliatePanel, "$name$meta\n$label", go)
+            foodCount += 1
+        }
+        // Fallback: recipe-level affiliate also as a buy CTA under nutrients.
+        if (foodCount == 0 && aff != null) {
+            val go = aff.optString("go_url").ifBlank {
+                val slug = aff.optString("slug")
+                if (slug.isBlank()) "" else "/go/$slug"
+            }
+            if (go.isNotBlank()) {
+                val btnText = aff.optString("button_text").ifBlank { "🛒 購買推薦食材（iHerb / Amazon）" }
+                val title = aff.optString("title").ifBlank { "推薦食材" }
+                addAffiliateButton(binding.foodAffiliatePanel, "$title\n$btnText", go)
+            }
         }
     }
 
@@ -3271,6 +3295,7 @@ class MainActivity : AppCompatActivity() {
             selectedRecipeId = -1
             // Keep ensuring/search status; never leave another dish's detail under this name.
             if (!recipeEnsureBusy && !isRecipeStatusMessage(binding.recipeDetail.text?.toString())) {
+                binding.recipeDetailTop.text = ""
                 binding.recipeDetail.text = ""
             }
             clearAffiliatePanels()
@@ -3283,9 +3308,12 @@ class MainActivity : AppCompatActivity() {
         val ban = t("禁忌", "Contraindications", "禁忌", "금기")
         val nutrient = t("元素", "Nutrients", "栄養素", "영양소")
         val allergens = t("過敏原", "Allergens", "アレルゲン", "알레르기 유발 물질")
-        binding.recipeDetail.text = listOf(
+        val top = listOf(
             recipe to row.optString("recipe"),
-            method to row.optString("method"),
+            method to row.optString("method")
+        ).filter { it.second.isNotBlank() }
+            .joinToString("\n\n") { it.first + "\n" + it.second }
+        val bottom = listOf(
             benefit to row.optString("benefit"),
             ban to row.optString("ban"),
             nutrient to row.optString("nutrient"),
@@ -3293,6 +3321,8 @@ class MainActivity : AppCompatActivity() {
         ).filter { it.second.isNotBlank() }
             .joinToString("\n\n") { it.first + "\n" + it.second } +
             "\n\n" + t("教學示範，非診斷。", "Teaching demo, not a diagnosis.", "教材デモであり診断ではありません。", "교육 시연이며 진단이 아닙니다.")
+        binding.recipeDetailTop.text = top
+        binding.recipeDetail.text = bottom
         renderAffiliatePanels(row)
     }
 
@@ -3414,3 +3444,4 @@ class MainActivity : AppCompatActivity() {
         return parts.joinToString("\n")
     }
 }
+

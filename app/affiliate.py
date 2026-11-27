@@ -301,7 +301,7 @@ def admin_toggle_affiliate(
 
 
 def seed_demo_affiliate_rows() -> None:
-    """Idempotent seed for test-olive-oil (+ optional catalog slug links)."""
+    """Idempotent seed for test-olive-oil (+ easy-to-find Taiwan demo links)."""
     conn = connect(ensure=False)
     try:
         with conn.cursor() as cur:
@@ -328,26 +328,33 @@ def seed_demo_affiliate_rows() -> None:
                   is_active=1
                 """
             )
-            # Demo: attach slug to one olive-oil-like food and one recipe if present.
+            # Prefer the cooking oil food users actually see in Taiwan recipes.
             cur.execute(
                 """
                 UPDATE catalog_foods
                 SET affiliate_slug = 'test-olive-oil'
-                WHERE affiliate_slug IS NULL
-                  AND (name_zh LIKE %s OR name_en LIKE %s)
-                LIMIT 1
-                """,
-                ("%橄欖%", "%olive%"),
+                WHERE name_zh IN ('橄欖油', '橄欖', '油橄欖')
+                """
             )
+            # Easy demos: Taiwan dishes that list 橄欖油 in ingredients.
+            cur.execute(
+                """
+                UPDATE catalog_recipes
+                SET affiliate_slug = 'test-olive-oil'
+                WHERE country = 'Taiwan'
+                  AND name_zh IN ('番茄炒蛋', '蔬菜沙拉', '家常燉雞')
+                """
+            )
+            # Keep a couple of non-TW fallbacks if TW rows missing.
             cur.execute(
                 """
                 UPDATE catalog_recipes
                 SET affiliate_slug = 'test-olive-oil'
                 WHERE affiliate_slug IS NULL
-                  AND (name_zh LIKE %s OR recipe LIKE %s OR name_en LIKE %s)
-                LIMIT 1
+                  AND (name_zh LIKE %s OR recipe LIKE %s)
+                LIMIT 2
                 """,
-                ("%橄欖%", "%橄欖%", "%olive%"),
+                ("%橄欖%", "%橄欖油%"),
             )
     except Exception:
         logger.exception("seed_demo_affiliate_rows failed")

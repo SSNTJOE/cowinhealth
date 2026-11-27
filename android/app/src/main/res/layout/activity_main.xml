@@ -471,7 +471,7 @@
             android:layout_height="wrap_content"
             android:text="建立食譜"/>
         <TextView
-            android:id="@+id/recipeDetail"
+            android:id="@+id/recipeDetailTop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="6dp"
@@ -483,6 +483,12 @@
             android:layout_height="wrap_content"
             android:paddingTop="8dp"
             android:visibility="gone"/>
+        <TextView
+            android:id="@+id/recipeDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"/>
         <LinearLayout
             android:id="@+id/foodAffiliatePanel"
             android:orientation="vertical"

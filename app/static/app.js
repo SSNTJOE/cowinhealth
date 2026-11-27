@@ -1712,6 +1712,7 @@ function renderFoodAffiliates(items, recipeAffiliate) {
 
 function showSelectedRecipe(extraNote) {
   const pick = document.getElementById("recipe-name");
+  const detailTop = document.getElementById("recipe-detail-top");
   const detail = document.getElementById("recipe-detail");
   if (!pick || !detail) return;
   const label = pick.value.trim();
@@ -1721,8 +1722,13 @@ function showSelectedRecipe(extraNote) {
   if (!row) {
     selectedRecipeId = null;
     // Never keep another dish's ingredients/method under a different typed name.
-    if (!label) detail.textContent = "";
-    else if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) detail.textContent = "";
+    if (!label) {
+      detail.textContent = "";
+      if (detailTop) detailTop.textContent = "";
+    } else if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+      detail.textContent = "";
+      if (detailTop) detailTop.textContent = "";
+    }
     clearAffiliatePanels();
     return;
   }
@@ -1737,25 +1743,37 @@ function showSelectedRecipe(extraNote) {
     ["fieldBan", row.ban],
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
-  let text = beforeAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  const topText = beforeAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  if (detailTop) detailTop.textContent = topText;
+  else detail.textContent = topText;
   // Recipe affiliate card sits visually below steps (method).
   renderRecipeAffiliate(row.affiliate);
-  const rest = afterAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
-  if (rest) text = (text ? text + "\n\n" : "") + rest;
+  let rest = afterAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
   const nutrientLine = row.nutrient_line || formatRecipeNutrients(row.nutrients);
-  if (nutrientLine) text = (text ? text + "\n\n" : "") + nutrientLine;
-  if (extraNote) text = (text ? text + "\n\n" : "") + extraNote;
-  detail.textContent = text;
+  if (nutrientLine) rest = (rest ? rest + "\n\n" : "") + nutrientLine;
+  if (extraNote) rest = (rest ? rest + "\n\n" : "") + extraNote;
+  // Keep status/search messages in #recipe-detail; body copy goes below the CTA.
+  detail.textContent = detailTop ? rest : ((topText ? topText + "\n\n" : "") + rest);
   // Food CTAs sit below nutrition (kcal/protein).
   const foodItems = (row.ingredient_affiliates || []).map((item) => Object.assign({}, item, {
     affiliate: item.affiliate || (item.affiliate_slug ? {
       slug: item.affiliate_slug,
       title: item.name,
-      platform_name: "iHerb / Amazon",
-      button_text: "🛒 購買推薦食材（iHerb / Amazon）",
+      platform_name: item.platform_name || "iHerb / Amazon",
+      button_text: item.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
       go_url: `/go/${encodeURIComponent(item.affiliate_slug)}`,
     } : null),
   }));
+  // If recipe has affiliate but no ingredient hits, still show a buy CTA under nutrients.
+  if (!foodItems.length && row.affiliate && row.affiliate.go_url) {
+    foodItems.push({
+      name: row.affiliate.title || "推薦食材",
+      affiliate_slug: row.affiliate.slug,
+      affiliate: Object.assign({}, row.affiliate, {
+        button_text: row.affiliate.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
+      }),
+    });
+  }
   renderFoodAffiliates(foodItems, row.affiliate);
 }
 
