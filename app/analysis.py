@@ -4727,7 +4727,10 @@ def analyze_session(
     for key, _name, score_key, pattern_key in ORGAN_META:
         if not female and key == "uterus":
             continue
-        score = scores[score_key]
+        if score_key not in scores or scores.get(score_key) is None:
+            # No real source this session — leave pattern unset; UI shows shoot prompt.
+            continue
+        score = int(scores[score_key])
         if score >= HEALTHY_SCORE_MIN:
             patterns[pattern_key] = "健康"
             overlays[key] = None
@@ -4750,7 +4753,7 @@ def analyze_session(
     if not female:
         all_findings = [item for item in all_findings if "子宮" not in str(item)]
     if not all_findings:
-        all_findings = ["資料不足，各臟腑先記 10 分（正常），不放置證型圖"]
+        all_findings = ["資料不足：尚未有可判分來源的臟腑不記分，請依各格提示拍攝"]
 
     result = {
         "dominant_color": dominant,

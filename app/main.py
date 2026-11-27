@@ -302,11 +302,15 @@ def decode_image(upload: UploadFile | None, image_base64: str | None) -> bytes |
 
 
 def _stored_organ_score(scores: dict, key: str):
+    """Persist organ score; 0 = no real source this session (DB columns are NOT NULL)."""
     if isinstance(scores, dict) and key in scores and scores[key] is not None:
-        return scores[key]
-    if key == "uterus_score":
-        return 0
-    raise KeyError(key)
+        try:
+            n = int(scores[key])
+        except (TypeError, ValueError):
+            n = 0
+        # Only 1–10 are real composites; 0 means missing source (same sentinel as male uterus).
+        return n if 1 <= n <= 10 else 0
+    return 0
 
 
 def _stored_organ_pattern(patterns: dict, key: str) -> str:
@@ -613,9 +617,12 @@ def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]
         if raw is None or raw == "":
             continue
         try:
-            scores[key] = int(raw)
+            n = int(raw)
         except (TypeError, ValueError):
             continue
+        if n < 1:
+            continue
+        scores[key] = n
     patterns = {key: (row.get(key) or "") for key in PATTERN_KEYS}
     return scores, patterns
 
@@ -720,19 +727,29 @@ def fetch_prior_session_context(user_id: str) -> dict | None:
         if raw is None or raw == "":
             continue
         try:
-            scores[key] = int(raw)
+            n = int(raw)
         except (TypeError, ValueError):
             continue
+        # 0 = no real source (do not invent / stabilize from sentinel).
+        if n < 1:
+            continue
+        scores[key] = n
     lighting = None
     composite = _parse_json_dict(row.get("organ_composite_json"))
     if composite:
         lighting = composite.get("lighting")
-        if not scores and isinstance(composite.get("scores"), dict):
+        # Prefer composite scores (only real sources) when present.
+        if isinstance(composite.get("scores"), dict):
+            from_json: dict[str, int] = {}
             for key, value in composite["scores"].items():
                 try:
-                    scores[key] = int(value)
+                    n = int(value)
                 except (TypeError, ValueError):
                     continue
+                if n >= 1:
+                    from_json[key] = n
+            if from_json:
+                scores = from_json
     same_day = _is_same_local_day(row.get("record_date"))
     out: dict = {
         "scores": scores,

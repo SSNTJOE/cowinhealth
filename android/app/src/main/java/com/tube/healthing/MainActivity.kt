@@ -2459,8 +2459,14 @@ class MainActivity : AppCompatActivity() {
                 json.has(scoreKey) -> json.opt(scoreKey)
                 else -> null
             }
-            if (scoreValue != null && scoreValue != JSONObject.NULL && scoreValue.toString().isNotBlank()) {
-                scores.put(scoreKey, scoreValue)
+            // Only keep real 1–10 composites; 0 / blank = no source → shoot prompt in UI.
+            val scoreInt = when (scoreValue) {
+                null, JSONObject.NULL -> null
+                is Number -> scoreValue.toInt()
+                else -> scoreValue.toString().trim().toIntOrNull()
+            }
+            if (scoreInt != null && scoreInt in 1..10) {
+                scores.put(scoreKey, scoreInt)
             }
             val patternValue = when {
                 nestedPatterns != null && nestedPatterns.has(patternKey) -> nestedPatterns.optString(patternKey)
@@ -2496,8 +2502,14 @@ class MainActivity : AppCompatActivity() {
                 json.has(scoreKey) -> json.opt(scoreKey)
                 else -> null
             }
-            if (scoreValue != null && scoreValue != JSONObject.NULL && scoreValue.toString().isNotBlank()) {
-                scores.put(scoreKey, scoreValue)
+            // Only keep real 1–10 composites; 0 / blank = no source → shoot prompt in UI.
+            val scoreInt = when (scoreValue) {
+                null, JSONObject.NULL -> null
+                is Number -> scoreValue.toInt()
+                else -> scoreValue.toString().trim().toIntOrNull()
+            }
+            if (scoreInt != null && scoreInt in 1..10) {
+                scores.put(scoreKey, scoreInt)
             }
             val patternValue = when {
                 nestedPatterns != null && nestedPatterns.has(patternKey) -> nestedPatterns.optString(patternKey)
@@ -2508,9 +2520,14 @@ class MainActivity : AppCompatActivity() {
         }
         val shownScores = withoutMaleUterus(scores)
         val shownPatterns = withoutMaleUterus(patterns)
-        bindOrganScores(binding.organScores, shownScores, shownPatterns, female) { key ->
-            UiLang.organName(currentLang(), key)
-        }
+        bindOrganScores(
+            binding.organScores,
+            shownScores,
+            shownPatterns,
+            female,
+            organLabel = { key -> UiLang.organName(currentLang(), key) },
+            organHealth = json.optJSONObject("organ_health"),
+        )
         val summaryJson = JSONObject(json.toString())
         summaryJson.put("scores", shownScores ?: JSONObject())
         summaryJson.put("patterns", shownPatterns ?: JSONObject())

@@ -256,6 +256,35 @@ fun patternDisplayLabel(score: Int?, pattern: String?): String {
     return pattern.orEmpty()
 }
 
+/** Default shoot prompts when server omits missing_source_prompts (offline / old records). */
+fun defaultOrganShootPrompt(organKey: String): String = when (organKey) {
+    "heart", "lung", "uterus" -> "請拍攝臉／舌以便判讀"
+    "liver", "spleen", "stomach", "gallbladder", "large_intestine", "small_intestine" ->
+        "請拍攝臉／舌／大便以便判讀"
+    "kidney" -> "請拍攝臉／舌／尿尿以便判讀"
+    "bladder" -> "請拍攝尿尿以便判讀"
+    else -> "請拍攝以便判讀"
+}
+
+fun organShootPrompt(
+    organKey: String,
+    scoreKey: String,
+    organHealth: JSONObject?,
+): String {
+    val prompts = organHealth?.optJSONObject("missing_source_prompts")
+    if (prompts != null) {
+        val byScore = prompts.optString(scoreKey).trim()
+        if (byScore.isNotEmpty()) return byScore
+        val byKey = prompts.optString(organKey).trim()
+        if (byKey.isNotEmpty()) return byKey
+    }
+    val organs = organHealth?.optJSONObject("organs")
+    val info = organs?.optJSONObject(organKey)
+    val nested = info?.optString("shoot_prompt").orEmpty().trim()
+    if (nested.isNotEmpty()) return nested
+    return defaultOrganShootPrompt(organKey)
+}
+
 /** Bind per-organ average scores (server averages measured modalities only). */
 fun bindOrganScores(
     grid: GridLayout,
@@ -265,6 +294,7 @@ fun bindOrganScores(
     organLabel: (String) -> String = { key ->
         ORGAN_SCORE_META.firstOrNull { it.key == key }?.name ?: key
     },
+    organHealth: JSONObject? = null,
 ) {
     grid.removeAllViews()
     val ctx = grid.context
@@ -272,7 +302,7 @@ fun bindOrganScores(
         if (meta.femaleOnly && !female) return@forEach
         val score = when {
             scores == null -> null
-            scores.has(meta.scoreKey) -> scores.optInt(meta.scoreKey, -1).takeIf { it >= 0 }
+            scores.has(meta.scoreKey) -> scores.optInt(meta.scoreKey, -1).takeIf { it in 1..10 }
             else -> null
         }
         val rawPattern = patterns?.optString(meta.patternKey).orEmpty()
@@ -287,17 +317,26 @@ fun bindOrganScores(
             textSize = 12f
             setTextColor(Color.parseColor("#616161"))
         })
-        cell.addView(TextView(ctx).apply {
-            text = score?.toString() ?: "—"
-            textSize = 18f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        })
-        if (pattern.isNotBlank()) {
+        if (score == null) {
             cell.addView(TextView(ctx).apply {
-                text = pattern
-                textSize = 11f
-                setTextColor(Color.parseColor("#424242"))
+                text = organShootPrompt(meta.key, meta.scoreKey, organHealth)
+                textSize = 12f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(Color.parseColor("#616161"))
             })
+        } else {
+            cell.addView(TextView(ctx).apply {
+                text = score.toString()
+                textSize = 18f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            if (pattern.isNotBlank()) {
+                cell.addView(TextView(ctx).apply {
+                    text = pattern
+                    textSize = 11f
+                    setTextColor(Color.parseColor("#424242"))
+                })
+            }
         }
         val lp = GridLayout.LayoutParams().apply {
             width = 0
@@ -353,7 +392,7 @@ fun buildSessionSummary(
         if (meta.femaleOnly && !female) return@mapNotNull null
         if (scores == null || !scores.has(meta.scoreKey)) return@mapNotNull null
         val n = scores.optInt(meta.scoreKey, -1)
-        if (n < 0) return@mapNotNull null
+        if (n !in 1..10) return@mapNotNull null
         organLabel(meta.key) to n
     }
     if (scored.isNotEmpty()) {

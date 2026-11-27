@@ -51,12 +51,70 @@ COLOR_HEALTH_FORMULA = (
     "8–10 健康，4–7 一般色差，1–3 嚴重。臉正常 L*65 a*12 b*20；舌質 L*53 a*23 b*12；舌苔 L*70 a*4 b*8。"
     "證型取有判分來源裡分數最低者；濕熱／寒濕用 mositure。8–10 不放證型圖。"
 )
+# Modalities that can contribute a numeric score for each organ (teaching UI prompts).
+# tongue_body + tongue_coat are both shown as「舌」in shoot prompts.
+ORGAN_SHOOT_MODALITIES: dict[str, tuple[str, ...]] = {
+    "heart": ("face", "tongue"),
+    "liver": ("face", "tongue", "stool"),
+    "spleen": ("face", "tongue", "stool"),
+    "stomach": ("face", "tongue", "stool"),
+    "lung": ("face", "tongue"),
+    "kidney": ("face", "tongue", "urine"),
+    "gallbladder": ("face", "tongue", "stool"),
+    "large_intestine": ("face", "tongue", "stool"),
+    "small_intestine": ("face", "tongue", "stool"),
+    "bladder": ("urine",),
+    "uterus": ("face", "tongue"),
+}
+
+_MODALITY_SHOOT_LABEL = {
+    "face": "臉",
+    "tongue": "舌",
+    "tongue_body": "舌",
+    "tongue_coat": "舌",
+    "stool": "大便",
+    "urine": "尿尿",
+}
+
+# 膀胱受他臟影響（權重；有尿尿時一併加權，無尿尿亦可由他臟推估）。
+# 三焦無獨立臟腑鍵，脈診 right_chi_light 已併入膀胱，此處不重複。
+BLADDER_URINE_WEIGHT = 10
+BLADDER_RELATED_WEIGHTS: tuple[tuple[str, str, int], ...] = (
+    ("kidney_score", "kidney", 8),  # 腎：表裡／气化开关（最重）
+    ("lung_score", "lung", 4),  # 肺：水之上源／通调水道
+    ("spleen_score", "spleen", 3),  # 脾：中州运化
+    ("liver_score", "liver", 2),  # 肝：气滞→尿频尿急
+)
+BLADDER_FORMULA = (
+    "膀胱分=weighted_mean(尿尿膀胱訊號×10, 腎×8, 肺×4, 脾×3, 肝×2；只計本場有分者)。"
+    "有尿尿與他臟皆可；無尿尿時仍可由腎／肺／脾／肝推估。"
+    "尿尿與相關臟腑皆無分時不記分（顯示請拍攝尿尿以便判讀）。三焦無獨立鍵（脈診已併膀胱）。"
+)
+
 HEALTH_FORMULA = (
     "臟腑分=round(mean(本場有拍到且有分數的來源：臉色、舌色、舌苔、大便、尿尿))。"
     "只平均實際拍攝的模態；未拍者不列入分母。一項用該分，多項再平均。"
-    "都沒有則記 10（正常，不放圖）。大便／尿尿若僅文字教學而無 organ_scores 則不進平均。"
+    "都沒有則不記分（UI 顯示拍攝提示，不發明 10）。大便／尿尿若僅文字教學而無 organ_scores 則不進平均。"
+    + BLADDER_FORMULA
     + COLOR_HEALTH_FORMULA
 )
+
+
+def shoot_prompt_for_organ(organ_key: str) -> str:
+    """Short Traditional-Chinese cue for what to photograph when an organ has no source."""
+    modalities = ORGAN_SHOOT_MODALITIES.get(organ_key) or ("face", "tongue")
+    labels: list[str] = []
+    seen: set[str] = set()
+    for mod in modalities:
+        label = _MODALITY_SHOOT_LABEL.get(mod, mod)
+        if label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+    if organ_key == "bladder" and labels == ["尿尿"]:
+        return "請拍攝尿尿以便判讀"
+    joined = "／".join(labels)
+    return f"請拍攝{joined}以便判讀"
 
 SYMPTOM_RULES = [
     (("心悸", "失眠", "胸悶", "心煩"), "heart", "熱證", 1.4),
@@ -478,6 +536,61 @@ def organ_patterns_from_color_blocks(blocks: list[dict[str, Any]] | None) -> dic
     return {organ: label for organ, (_health, label) in chosen.items()}
 
 
+def _apply_bladder_related_scores(
+    composites: dict[str, int],
+    breakdown: dict[str, Any],
+) -> None:
+    """Blend urine bladder signal with 腎/肺/脾/肝 (weights favor 腎). Skip 三焦 (no key)."""
+    info = breakdown.get("bladder")
+    if not isinstance(info, dict):
+        return
+    sources = info.get("sources") if isinstance(info.get("sources"), dict) else {}
+    weighted: list[tuple[int, int]] = []
+    related_detail: dict[str, Any] = {}
+
+    urine_val = sources.get("urine")
+    if isinstance(urine_val, int):
+        weighted.append((urine_val, BLADDER_URINE_WEIGHT))
+        related_detail["urine"] = {"score": urine_val, "weight": BLADDER_URINE_WEIGHT}
+    else:
+        # Rare non-urine direct bladder scores (e.g. face) — same slot weight, no double urine.
+        other_direct = [
+            int(v)
+            for src, v in sources.items()
+            if src != "urine" and isinstance(v, int)
+        ]
+        if other_direct:
+            mean_direct = max(1, min(10, int(round(sum(other_direct) / len(other_direct)))))
+            weighted.append((mean_direct, BLADDER_URINE_WEIGHT))
+            related_detail["direct"] = {
+                "score": mean_direct,
+                "weight": BLADDER_URINE_WEIGHT,
+                "n": len(other_direct),
+            }
+
+    for score_key, organ_key, weight in BLADDER_RELATED_WEIGHTS:
+        if score_key not in composites:
+            continue
+        score = int(composites[score_key])
+        weighted.append((score, weight))
+        related_detail[organ_key] = {"score": score, "weight": weight}
+
+    if not weighted:
+        # Keep missing + shoot prompt (no invented 10).
+        info["bladder_related"] = {}
+        info["bladder_formula"] = BLADDER_FORMULA
+        return
+
+    total_w = sum(w for _s, w in weighted)
+    final = max(1, min(10, int(round(sum(s * w for s, w in weighted) / total_w))))
+    composites["bladder_score"] = final
+    info["composite"] = final
+    info["n_sources"] = max(int(info.get("n_sources") or 0), len(weighted))
+    info["shoot_prompt"] = None
+    info["bladder_related"] = related_detail
+    info["bladder_formula"] = BLADDER_FORMULA
+
+
 def compose_organ_health(
     source_scores: dict[str, dict[str, int] | None],
     include_uterus: bool = True,
@@ -486,6 +599,8 @@ def compose_organ_health(
 
     Denominator = count of sources that actually have a score for that organ this session.
     Unshot or text-only modalities are omitted (None / missing key).
+    Organs with zero sources are omitted from the score map (no invented 10).
+    Bladder additionally blends 腎/肺/脾/肝 when those have scores (even without urine).
     """
     composites: dict[str, int] = {}
     breakdown: dict[str, Any] = {}
@@ -501,17 +616,26 @@ def compose_organ_health(
             value = int(scores[score_key])
             parts[source] = value
             values.append(value)
+        prompt = shoot_prompt_for_organ(key)
         if values:
             composite = max(1, min(10, int(round(sum(values) / len(values)))))
+            composites[score_key] = composite
+            breakdown[key] = {
+                "organ": name,
+                "composite": composite,
+                "n_sources": len(values),
+                "sources": parts,
+                "shoot_prompt": None,
+            }
         else:
-            composite = 10
-        composites[score_key] = composite
-        breakdown[key] = {
-            "organ": name,
-            "composite": composite,
-            "n_sources": len(values),
-            "sources": parts,
-        }
+            breakdown[key] = {
+                "organ": name,
+                "composite": None,
+                "n_sources": 0,
+                "sources": parts,
+                "shoot_prompt": prompt,
+            }
+    _apply_bladder_related_scores(composites, breakdown)
     return composites, breakdown
 
 
@@ -520,14 +644,30 @@ def serialize_organ_health(
     breakdown: dict[str, Any],
     source_keys: list[str],
 ) -> dict[str, Any]:
+    missing_prompts: dict[str, str] = {}
+    for key, info in breakdown.items():
+        if not isinstance(info, dict):
+            continue
+        # Prefer composite presence (bladder may be filled via related organs with n_sources quirks).
+        if info.get("composite") is not None:
+            continue
+        prompt = info.get("shoot_prompt") or shoot_prompt_for_organ(key)
+        if not prompt:
+            continue
+        missing_prompts[key] = prompt
+        score_key = next((sk for k, _n, sk, _pk in ORGAN_META if k == key), None)
+        if score_key:
+            missing_prompts[score_key] = prompt
     return {
         "formula": HEALTH_FORMULA,
         "color_formula": COLOR_HEALTH_FORMULA,
+        "bladder_formula": BLADDER_FORMULA,
         "pulse_organ_map": dict(PULSE_TO_ORGAN),
         "pulse_organ_note": PULSE_ORGAN_NOTE,
         "source_keys": source_keys,
         "scores": scores,
         "organs": breakdown,
+        "missing_source_prompts": missing_prompts,
         "disclaimer": "教學示範，非中醫診斷",
     }
 

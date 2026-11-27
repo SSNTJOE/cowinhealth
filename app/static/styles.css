@@ -308,6 +308,19 @@ video, canvas, img.preview {
   text-align: center;
 }
 .score b { display: block; font-size: 22px; }
+.score.score-missing b.shoot-prompt,
+.score b.shoot-prompt {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted, #666);
+}
+td.score-missing {
+  white-space: normal;
+  font-size: 11px;
+  color: var(--muted, #666);
+  max-width: 7.5em;
+}
 .color-chip {
   width: 28px; height: 28px; border-radius: 50%;
   border: 1px solid #ccc; display: inline-block; vertical-align: middle;

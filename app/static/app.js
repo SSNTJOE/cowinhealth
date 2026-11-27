@@ -949,9 +949,42 @@ function renderComplexionHistory(records) {
   box.innerHTML = `<table><thead><tr><th>日期</th><th>臉色色碼</th><th>偏色</th><th>證型傾向</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function shownScore(score) {
+function isRealOrganScore(score) {
   const n = Number(score);
-  return Number.isFinite(n) ? String(n) : "10";
+  return Number.isFinite(n) && n >= 1 && n <= 10;
+}
+
+function shownScore(score) {
+  return isRealOrganScore(score) ? String(Math.round(Number(score))) : "—";
+}
+
+/** Server missing_source_prompts, or a sensible local fallback by organ key. */
+function organShootPrompt(result, org) {
+  const oh = (result && result.organ_health) || {};
+  const prompts = oh.missing_source_prompts || {};
+  if (prompts[org.score]) return String(prompts[org.score]);
+  if (prompts[org.key]) return String(prompts[org.key]);
+  const info = (oh.organs || {})[org.key];
+  if (info && info.shoot_prompt) return String(info.shoot_prompt);
+  if (info && Number(info.n_sources) === 0 && info.composite == null) {
+    // Fall through to defaults below.
+  } else if (isRealOrganScore(result && result.scores ? result.scores[org.score] : result && result[org.score])) {
+    return "";
+  }
+  const defaults = {
+    heart: "請拍攝臉／舌以便判讀",
+    liver: "請拍攝臉／舌／大便以便判讀",
+    spleen: "請拍攝臉／舌／大便以便判讀",
+    stomach: "請拍攝臉／舌／大便以便判讀",
+    lung: "請拍攝臉／舌以便判讀",
+    kidney: "請拍攝臉／舌／尿尿以便判讀",
+    gallbladder: "請拍攝臉／舌／大便以便判讀",
+    large_intestine: "請拍攝臉／舌／大便以便判讀",
+    small_intestine: "請拍攝臉／舌／大便以便判讀",
+    bladder: "請拍攝尿尿以便判讀",
+    uterus: "請拍攝臉／舌以便判讀",
+  };
+  return defaults[org.key] || "請拍攝以便判讀";
 }
 
 function hidesSpleenStomachPatternList(text) {
@@ -965,8 +998,9 @@ function hidesSpleenStomachPatternList(text) {
 }
 
 function patternLabel(score, pattern) {
+  if (!isRealOrganScore(score)) return "";
   const n = Number(score);
-  if (!Number.isFinite(n) || n >= 8) return "健康";
+  if (n >= 8) return "健康";
   if (n === 5 && (pattern === "未定" || pattern == null || pattern === "")) return "待觀察";
   return pattern || "";
 }
@@ -979,7 +1013,14 @@ function renderScoreCards(result) {
     const div = document.createElement("div");
     div.className = "score";
     const score = result.scores ? result.scores[org.score] : result[org.score];
-    const rawPattern = result.patterns ? result.patterns[org.pattern] : "";
+    const rawPattern = result.patterns ? result.patterns[org.pattern] : result[org.pattern];
+    if (!isRealOrganScore(score)) {
+      const prompt = organShootPrompt(result, org);
+      div.classList.add("score-missing");
+      div.innerHTML = `<span>${org.name}</span><b class="shoot-prompt">${prompt}</b>`;
+      scores.appendChild(div);
+      return;
+    }
     div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
     scores.appendChild(div);
   });
@@ -1977,8 +2018,13 @@ async function loadRecords(opts = {}) {
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
       const cells = shownOrgans.map((o) => {
-        const pattern = patternLabel(r[o.score], r[o.pattern]);
-        return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
+        const score = r[o.score];
+        if (!isRealOrganScore(score)) {
+          const prompt = organShootPrompt({ organ_health: r.organ_health, scores: r, ...r }, o);
+          return `<td class="score-missing">${prompt}</td>`;
+        }
+        const pattern = patternLabel(score, r[o.pattern]);
+        return `<td>${shownScore(score)} ${pattern}</td>`;
       }).join("");
       return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${withoutUterusStatement(r.diet_advice || "")}</td></tr>`;
     })
