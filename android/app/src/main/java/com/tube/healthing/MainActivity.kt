@@ -1517,6 +1517,7 @@ class MainActivity : AppCompatActivity() {
         binding.trendNote.text = t("trendNote")
         binding.trendEmpty.text = t("trendEmpty")
         binding.affiliateCarouselLabel.text = t("affiliateCarouselLabel")
+        binding.fitnessAffiliateCarouselLabel.text = t("fitnessAffiliateCarouselLabel")
         refreshSyndromeLegend()
         binding.recipeHeading.text = t("recipeHeading")
         binding.recipeNote.text = ""
@@ -2667,11 +2668,50 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 rememberServer()
-                val data = api.affiliates()
-                val rows = data.optJSONArray("affiliates") ?: JSONArray()
-                runOnUiThread { renderAffiliateCarousel(rows) }
+                val diet = api.affiliates("diet").optJSONArray("affiliates") ?: JSONArray()
+                val fitness = api.affiliates("fitness").optJSONArray("affiliates") ?: JSONArray()
+                runOnUiThread {
+                    renderAffiliateCarousel(
+                        diet,
+                        binding.affiliateCarouselLabel,
+                        binding.affiliateCarouselScroll,
+                        binding.affiliateCarouselTrack,
+                        t("affiliateCarouselLabel"),
+                        cardBg = "#F4FAF6",
+                        titleColor = "#244834",
+                        ctaColor = "#2F6F4E",
+                    )
+                    renderAffiliateCarousel(
+                        fitness,
+                        binding.fitnessAffiliateCarouselLabel,
+                        binding.fitnessAffiliateCarouselScroll,
+                        binding.fitnessAffiliateCarouselTrack,
+                        t("fitnessAffiliateCarouselLabel"),
+                        cardBg = "#F3F8FB",
+                        titleColor = "#1F3F52",
+                        ctaColor = "#2A6A8A",
+                    )
+                }
             } catch (_: Exception) {
-                runOnUiThread { renderAffiliateCarousel(JSONArray()) }
+                runOnUiThread {
+                    renderAffiliateCarousel(
+                        JSONArray(),
+                        binding.affiliateCarouselLabel,
+                        binding.affiliateCarouselScroll,
+                        binding.affiliateCarouselTrack,
+                        t("affiliateCarouselLabel"),
+                    )
+                    renderAffiliateCarousel(
+                        JSONArray(),
+                        binding.fitnessAffiliateCarouselLabel,
+                        binding.fitnessAffiliateCarouselScroll,
+                        binding.fitnessAffiliateCarouselTrack,
+                        t("fitnessAffiliateCarouselLabel"),
+                        cardBg = "#F3F8FB",
+                        titleColor = "#1F3F52",
+                        ctaColor = "#2A6A8A",
+                    )
+                }
             }
         }.start()
     }
@@ -2683,12 +2723,21 @@ class MainActivity : AppCompatActivity() {
             resources.displayMetrics,
         ).toInt()
 
-    private fun renderAffiliateCarousel(rows: JSONArray) {
-        binding.affiliateCarouselLabel.text = t("affiliateCarouselLabel")
-        binding.affiliateCarouselTrack.removeAllViews()
+    private fun renderAffiliateCarousel(
+        rows: JSONArray,
+        labelView: TextView,
+        scrollView: View,
+        track: LinearLayout,
+        labelText: String,
+        cardBg: String = "#F4FAF6",
+        titleColor: String = "#244834",
+        ctaColor: String = "#2F6F4E",
+    ) {
+        labelView.text = labelText
+        track.removeAllViews()
         if (rows.length() == 0) {
-            binding.affiliateCarouselLabel.visibility = View.GONE
-            binding.affiliateCarouselScroll.visibility = View.GONE
+            labelView.visibility = View.GONE
+            scrollView.visibility = View.GONE
             return
         }
         for (i in 0 until rows.length()) {
@@ -2704,13 +2753,13 @@ class MainActivity : AppCompatActivity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), dp(10), dp(12), dp(10))
-                setBackgroundColor(Color.parseColor("#F4FAF6"))
+                setBackgroundColor(Color.parseColor(cardBg))
                 minimumWidth = dp(168)
             }
             val titleView = TextView(this).apply {
                 text = title
                 setTypeface(typeface, Typeface.BOLD)
-                setTextColor(Color.parseColor("#244834"))
+                setTextColor(Color.parseColor(titleColor))
                 textSize = 14f
             }
             card.addView(titleView)
@@ -2727,7 +2776,7 @@ class MainActivity : AppCompatActivity() {
             card.addView(
                 TextView(this).apply {
                     text = cta
-                    setTextColor(Color.parseColor("#2F6F4E"))
+                    setTextColor(Color.parseColor(ctaColor))
                     setTypeface(typeface, Typeface.BOLD)
                     textSize = 13f
                 }
@@ -2737,11 +2786,11 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { marginEnd = dp(10) }
-            binding.affiliateCarouselTrack.addView(card, lp)
+            track.addView(card, lp)
         }
-        val visible = binding.affiliateCarouselTrack.childCount > 0
-        binding.affiliateCarouselLabel.visibility = if (visible) View.VISIBLE else View.GONE
-        binding.affiliateCarouselScroll.visibility = if (visible) View.VISIBLE else View.GONE
+        val visible = track.childCount > 0
+        labelView.visibility = if (visible) View.VISIBLE else View.GONE
+        scrollView.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     private fun loadLatestAdvice() {

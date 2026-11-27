@@ -447,6 +447,32 @@
                 android:layout_weight="1"/>
         </LinearLayout>
         <TextView
+            android:id="@+id/fitnessAffiliateCarouselLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#2A6A8A"
+            android:visibility="gone"
+            android:text="健身／運動用品推薦"/>
+        <HorizontalScrollView
+            android:id="@+id/fitnessAffiliateCarouselScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fadeScrollbars="true"
+            android:visibility="gone"
+            android:paddingBottom="4dp">
+            <LinearLayout
+                android:id="@+id/fitnessAffiliateCarouselTrack"
+                android:orientation="horizontal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingEnd="8dp"/>
+        </HorizontalScrollView>
+        <TextView
             android:id="@+id/recipeHeading"
             android:text="今日食譜（教學示範）"
             android:layout_width="wrap_content"

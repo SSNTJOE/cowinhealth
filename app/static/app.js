@@ -1646,27 +1646,35 @@ function clearAffiliatePanels() {
   }
 }
 
-let affiliateCarouselCache = null;
-let affiliateCarouselPromise = null;
+const affiliateCarouselCacheByCategory = Object.create(null);
+const affiliateCarouselPromiseByCategory = Object.create(null);
 
-async function fetchAffiliateCarouselItems() {
-  if (Array.isArray(affiliateCarouselCache)) return affiliateCarouselCache;
-  if (affiliateCarouselPromise) return affiliateCarouselPromise;
-  affiliateCarouselPromise = fetch("/api/affiliates", { credentials: "same-origin" })
+async function fetchAffiliateCarouselItems(category) {
+  const key = category || "all";
+  if (Array.isArray(affiliateCarouselCacheByCategory[key])) {
+    return affiliateCarouselCacheByCategory[key];
+  }
+  if (affiliateCarouselPromiseByCategory[key]) {
+    return affiliateCarouselPromiseByCategory[key];
+  }
+  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+  affiliateCarouselPromiseByCategory[key] = fetch(`/api/affiliates${qs}`, {
+    credentials: "same-origin",
+  })
     .then((resp) => (resp.ok ? resp.json() : { affiliates: [] }))
     .then((data) => {
       const list = Array.isArray(data.affiliates) ? data.affiliates : [];
-      affiliateCarouselCache = list.filter((item) => item && item.go_url);
-      return affiliateCarouselCache;
+      affiliateCarouselCacheByCategory[key] = list.filter((item) => item && item.go_url);
+      return affiliateCarouselCacheByCategory[key];
     })
     .catch(() => {
-      affiliateCarouselCache = [];
-      return affiliateCarouselCache;
+      affiliateCarouselCacheByCategory[key] = [];
+      return affiliateCarouselCacheByCategory[key];
     })
     .finally(() => {
-      affiliateCarouselPromise = null;
+      affiliateCarouselPromiseByCategory[key] = null;
     });
-  return affiliateCarouselPromise;
+  return affiliateCarouselPromiseByCategory[key];
 }
 
 function affiliateCarouselCardHtml(aff) {
@@ -1681,13 +1689,13 @@ function affiliateCarouselCardHtml(aff) {
   </a>`;
 }
 
-async function renderAffiliateCarousel() {
-  const box = document.getElementById("affiliate-carousel");
-  const track = document.getElementById("affiliate-carousel-track");
+async function renderAffiliateCarouselBox(boxId, trackId, labelKey, category) {
+  const box = document.getElementById(boxId);
+  const track = document.getElementById(trackId);
   if (!box || !track) return;
   const label = box.querySelector(".affiliate-carousel-label");
-  if (label) label.textContent = uiText("affiliateCarouselLabel");
-  const items = await fetchAffiliateCarouselItems();
+  if (label) label.textContent = uiText(labelKey);
+  const items = await fetchAffiliateCarouselItems(category);
   if (!items.length) {
     track.innerHTML = "";
     box.hidden = true;
@@ -1695,6 +1703,23 @@ async function renderAffiliateCarousel() {
   }
   track.innerHTML = items.map(affiliateCarouselCardHtml).join("");
   box.hidden = false;
+}
+
+async function renderAffiliateCarousel() {
+  await Promise.all([
+    renderAffiliateCarouselBox(
+      "affiliate-carousel",
+      "affiliate-carousel-track",
+      "affiliateCarouselLabel",
+      "diet",
+    ),
+    renderAffiliateCarouselBox(
+      "fitness-affiliate-carousel",
+      "fitness-affiliate-carousel-track",
+      "fitnessAffiliateCarouselLabel",
+      "fitness",
+    ),
+  ]);
 }
 
 function affiliateCtaHtml(aff, extraClass) {

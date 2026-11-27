@@ -31,6 +31,12 @@
         <label>title<input id="title" /></label>
         <label>platform_name<input id="platform_name" /></label>
         <label>button_text<input id="button_text" value="前往查看優惠" /></label>
+        <label>category
+          <select id="category">
+            <option value="diet">diet</option>
+            <option value="fitness">fitness</option>
+          </select>
+        </label>
         <label>url_tw<input id="url_tw" /></label>
         <label>url_us<input id="url_us" /></label>
         <label>url_jp<input id="url_jp" /></label>
@@ -52,6 +58,7 @@
               <th>id</th>
               <th>slug / title</th>
               <th>platform</th>
+              <th>category</th>
               <th>URLs</th>
               <th>clicks</th>
               <th>active</th>
@@ -66,13 +73,14 @@
   <script>
     const msg = document.getElementById("aff-msg");
     const editId = document.getElementById("edit-id");
-    const fields = ["slug","title","platform_name","button_text","url_tw","url_us","url_jp","url_default"];
+    const fields = ["slug","title","platform_name","button_text","category","url_tw","url_us","url_jp","url_default"];
 
     function setMsg(text) { msg.textContent = text || ""; }
 
     function formBody() {
       const body = {};
       for (const key of fields) body[key] = document.getElementById(key).value.trim();
+      if (!body.category) body.category = "diet";
       return body;
     }
 
@@ -80,7 +88,10 @@
       editId.value = row ? String(row.id) : "";
       document.getElementById("form-title").textContent = row ? `編輯 #${row.id}` : "新增 affiliate";
       for (const key of fields) {
-        document.getElementById(key).value = row && row[key] != null ? row[key] : (key === "button_text" ? "前往查看優惠" : "");
+        let fallback = "";
+        if (key === "button_text") fallback = "前往查看優惠";
+        if (key === "category") fallback = "diet";
+        document.getElementById(key).value = row && row[key] != null ? row[key] : fallback;
       }
     }
 
@@ -109,6 +120,7 @@
           <td>${row.id}</td>
           <td><strong>${row.slug}</strong><br>${row.title || ""}</td>
           <td>${row.platform_name || ""}<br><span class="urls">${row.button_text || ""}</span></td>
+          <td>${row.category || "diet"}</td>
           <td class="urls">${urls}</td>
           <td>${row.click_count}</td>
           <td>${row.is_active ? "yes" : "no"}</td>
@@ -117,7 +129,7 @@
             <button type="button" class="ghost" data-toggle="${row.id}">切換</button>
           </td>
         </tr>`;
-      }).join("") || `<tr><td colspan="7">尚無資料</td></tr>`;
+      }).join("") || `<tr><td colspan="8">尚無資料</td></tr>`;
       tbody.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const row = (data.affiliates || []).find((item) => String(item.id) === btn.getAttribute("data-edit"));

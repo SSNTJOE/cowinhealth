@@ -128,6 +128,7 @@ SCHEMA_SQL = [
       title VARCHAR(255) NOT NULL COMMENT '商品或餐廳名稱',
       platform_name VARCHAR(50) NOT NULL COMMENT '主要平台，如 iHerb / Amazon / Klook',
       button_text VARCHAR(100) DEFAULT '前往查看優惠' COMMENT '按鈕顯示文字',
+      category VARCHAR(32) NOT NULL DEFAULT 'diet' COMMENT 'carousel bucket: diet | fitness',
       url_tw TEXT NULL COMMENT '台灣訪客專屬網址',
       url_us TEXT NULL COMMENT '美國/英語系訪客網址',
       url_jp TEXT NULL COMMENT '日本訪客網址',
@@ -177,6 +178,11 @@ EXTRA_COLUMNS = [
         "catalog_foods",
         "affiliate_slug",
         "VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug'",
+    ),
+    (
+        "affiliate_links",
+        "category",
+        "VARCHAR(32) NOT NULL DEFAULT 'diet' COMMENT 'carousel bucket: diet | fitness'",
     ),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")

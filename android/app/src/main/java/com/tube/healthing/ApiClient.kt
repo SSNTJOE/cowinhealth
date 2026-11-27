@@ -251,8 +251,13 @@ class ApiClient(
         }
     }
 
-    fun affiliates(): JSONObject {
-        val req = Request.Builder().url("$baseUrl/api/affiliates").get().build()
+    fun affiliates(category: String? = null): JSONObject {
+        val url = if (category.isNullOrBlank()) {
+            "$baseUrl/api/affiliates"
+        } else {
+            "$baseUrl/api/affiliates?category=${java.net.URLEncoder.encode(category, "UTF-8")}"
+        }
+        val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取導購推薦失敗"))
