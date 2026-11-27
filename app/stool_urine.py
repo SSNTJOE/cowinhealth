@@ -6,6 +6,7 @@ Optional numeric organ_scores feed compose_organ_health when present.
 
 from __future__ import annotations
 
+import colorsys
 from typing import Any
 
 from PIL import Image, ImageFilter
@@ -113,12 +114,13 @@ URINE_HSV_GATES = {
 }
 
 # Stool teaching palette centers — off-palette must NOT force 黃褐／正常.
+# normal_yellow_brown center ≈ mid of user healthy gamut / HEX #8B5A2B.
 STOOL_PALETTE = {
     "black_tarry": (12.0, 1.0, 2.0),
     "clay_gray": (78.0, 0.0, 6.0),
     "bright_dark_red": (40.0, 32.0, 14.0),
     "dark_green": (38.0, -10.0, 18.0),
-    "normal_yellow_brown": (48.0, 12.0, 32.0),
+    "normal_yellow_brown": (47.5, 12.0, 35.0),
     "pale_oily": (66.0, 3.0, 30.0),
 }
 STOOL_OUTSIDE_PALETTE_DE = 22.0
@@ -130,6 +132,49 @@ STOOL_PALETTE_LABELS = {
     "normal_yellow_brown": "黃褐色／金黃色",
     "pale_oily": "淡黃色／帶油光",
 }
+
+# User healthy yellow-brown / golden stool baseline (shared web+App).
+# Spec: internal/normal-stool-lab-ranges-057.md
+STOOL_NORMAL_LAB = {
+    "L_lo": 35.0,
+    "L_hi": 60.0,
+    "a_lo": 5.0,
+    "a_hi": 18.0,
+    "b_lo": 20.0,
+    "b_hi": 45.0,
+    "ba_min": 1.8,
+}
+# Soft lighting / phone / shadow tolerance around the core gamut (still not black).
+# Shadowed brown medians often land L~28–34, b*~12–18 — keep them 黃褐, not 瀝青.
+STOOL_NORMAL_LAB_SOFT = {
+    "L_lo": 28.0,
+    "L_hi": 65.0,
+    "a_lo": 4.0,
+    "a_hi": 20.0,
+    "b_lo": 12.0,
+    "b_hi": 50.0,
+    "ba_min": 1.3,
+    "de_max": 32.0,
+}
+# Supporting sRGB / HSV gates (same spec).
+STOOL_NORMAL_SRGB = {
+    "r_lo": 110,
+    "r_hi": 185,
+    "g_lo": 75,
+    "g_hi": 135,
+    "b_lo": 25,
+    "b_hi": 70,
+}
+STOOL_NORMAL_HSV = {
+    "h_lo": 25.0,
+    "h_hi": 42.0,
+    "s_lo": 0.45,
+    "s_hi": 0.80,
+    "v_lo": 0.40,
+    "v_hi": 0.72,
+}
+STOOL_BLACK_HSV_V_ALERT = 0.25  # V<25% → black alert
+STOOL_PALE_HSV_S_ALERT = 0.30  # S<30% → pale / bile-low cue
 
 
 def _median(values: list[float]) -> float:
@@ -320,12 +365,26 @@ def _lab_from_roi(
             # Drop toilet porcelain / water and yellow UI ring contamination.
             # Do NOT drop mid-pale chalky stool (L~62–78, low chroma) here —
             # that emptied the ROI onto shadows and locked 黑色／墨绿.
+            # Do NOT drop user-normal 黃褐 (L 35–60, a +5–+18, b +20–+45):
+            # the old L≥55∧b>28∧a>8∧s>0.35 gate erased healthy brown body
+            # and left water/shadows → 黑色／瀝青 or porcelain 灰白.
             if L >= 82 and chroma < 14:
                 continue
             if L >= 78 and chroma < 8:
                 continue
-            if L >= 55 and bb > 28 and a > 8 and s > 0.35:
-                # Saturated yellow (guide ring / urine splash), not stool body.
+            in_normal_soft = (
+                STOOL_NORMAL_LAB_SOFT["L_lo"] <= L <= STOOL_NORMAL_LAB_SOFT["L_hi"]
+                and STOOL_NORMAL_LAB_SOFT["a_lo"] <= a <= STOOL_NORMAL_LAB_SOFT["a_hi"]
+                and STOOL_NORMAL_LAB_SOFT["b_lo"] <= bb <= STOOL_NORMAL_LAB_SOFT["b_hi"]
+            )
+            if (
+                not in_normal_soft
+                and L >= 62
+                and bb > 48
+                and a > 10
+                and s > 0.45
+            ):
+                # Saturated yellow UI ring / urine splash only (outside normal stool).
                 continue
         kept.append((L, a, bb))
     if not kept:
@@ -336,9 +395,27 @@ def _lab_from_roi(
         all_L = [p[0] for p in kept]
         med_all = _median(all_L)
         pale_frac = sum(1 for lv in all_L if lv >= 58) / float(len(all_L))
-        # Pale/white stool fills the circle: keep the pale majority. Minority
-        # green water / creases must not become dark_cluster → 墨绿／瀝青.
-        if med_all >= 58.0 and pale_frac >= 0.55:
+        # Warm brown body (user normal Lab soft gamut): prefer mid-L warm chroma
+        # over minority toilet shadows / creases — those locked 黑色／瀝青.
+        nsoft = STOOL_NORMAL_LAB_SOFT
+        warm_brown = [
+            p
+            for p in kept
+            if nsoft["L_lo"] <= p[0] <= nsoft["L_hi"]
+            and nsoft["a_lo"] <= p[1] <= nsoft["a_hi"]
+            and nsoft["b_lo"] <= p[2] <= nsoft["b_hi"]
+            and (p[1] <= 0 or (p[2] / max(p[1], 1e-6)) >= nsoft["ba_min"])
+        ]
+        warm_frac = len(warm_brown) / float(len(kept))
+        # Brown body before pale majority: porcelain/water often inflate L so
+        # pale_majority used to erase warm stool → wrong class after CCT.
+        # True chalky white has low warm_frac and still takes pale_majority.
+        if warm_frac >= 0.28 and len(warm_brown) >= max(50, len(kept) // 10):
+            cluster = warm_brown
+            cluster_mode = "brown_majority"
+        elif med_all >= 58.0 and pale_frac >= 0.55:
+            # Pale/white stool fills the circle: keep the pale majority. Minority
+            # green water / creases must not become dark_cluster → 墨绿／瀝青.
             pale = [p for p in kept if p[0] >= 55]
             cluster = pale if len(pale) >= max(40, len(kept) // 8) else kept
             cluster_mode = "pale_majority"
@@ -346,7 +423,21 @@ def _lab_from_roi(
             dark = [p for p in kept if p[0] < 40]
             mid = [p for p in kept if p[0] < 55]
             need = max(60, len(kept) // 12)
-            if len(dark) >= need:
+            # If "dark" pixels are still warm brown (shadowed 黃褐), do not
+            # collapse onto them — use mid or warm subset instead.
+            dark_warm = [
+                p
+                for p in dark
+                if p[1] >= 5.0 and p[2] >= 14.0 and p[2] >= p[1] * 1.3
+            ]
+            if (
+                len(dark) >= need
+                and len(dark_warm) >= max(30, int(0.45 * len(dark)))
+                and warm_brown
+            ):
+                cluster = warm_brown
+                cluster_mode = "brown_majority"
+            elif len(dark) >= need:
                 cluster = dark
                 cluster_mode = "dark"
             elif len(mid) >= need:
@@ -929,8 +1020,98 @@ def _stool_outside_palette_class(L: float, a: float, b: float) -> dict[str, Any]
     }
 
 
+def _ba_ratio(a: float, b: float) -> float:
+    return float(b) / max(float(a), 1e-6)
+
+
+def _in_normal_stool_lab_core(L: float, a: float, b: float) -> bool:
+    """User healthy gamut: L 35–60, a +5–+18, b +20–+45, prefer b/a > 1.8."""
+    g = STOOL_NORMAL_LAB
+    if not (g["L_lo"] <= L <= g["L_hi"]):
+        return False
+    if not (g["a_lo"] <= a <= g["a_hi"]):
+        return False
+    if not (g["b_lo"] <= b <= g["b_hi"]):
+        return False
+    if a > 0 and _ba_ratio(a, b) < g["ba_min"]:
+        return False
+    return True
+
+
+def _in_normal_stool_lab_soft(L: float, a: float, b: float) -> tuple[bool, float]:
+    """Lighting/shadow soft gamut + ΔE to normal palette center."""
+    g = STOOL_NORMAL_LAB_SOFT
+    de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+    in_box = (
+        g["L_lo"] <= L <= g["L_hi"]
+        and g["a_lo"] <= a <= g["a_hi"]
+        and g["b_lo"] <= b <= g["b_hi"]
+        and (a <= 0 or _ba_ratio(a, b) >= g["ba_min"])
+    )
+    # Soft box alone is enough when warm yellow-brown (ΔE can exceed 26 for
+    # dark-cluster medians of real brown). Cap extreme outliers with de_max+6.
+    if in_box and de <= (g["de_max"] + 6.0):
+        return True, de
+    # Near palette even if one channel slightly outside (phone WB).
+    if (
+        28.0 <= L <= 62.0
+        and 4.0 <= a <= 20.0
+        and 12.0 <= b <= 48.0
+        and _ba_ratio(a, b) >= 1.35
+        and de <= g["de_max"]
+    ):
+        return True, de
+    return False, de
+
+
+def _normal_yellow_brown_hit(
+    *,
+    approx: bool = False,
+    de: float | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": "normal_yellow_brown",
+        "label": "黃褐色／金黃色（近似）" if approx else "黃褐色／金黃色",
+        "organs": "肝膽膽汁正常、腸道通暢（教學）",
+        "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
+        "hint": (
+            f"相對健康糞色教學示範（ΔE≈{de:.0f}）"
+            if approx and de is not None
+            else "相對健康糞色教學示範"
+        ),
+        "confounders": "一般飲食",
+        "abnormal": False,
+        "health_score": 8 if approx else 9,
+    }
+    if de is not None:
+        out["palette_delta_e"] = round(de, 1)
+    return out
+
+
+def _srgb_hsv_supports_normal_brown(
+    r: float, g: float, b: float, h: float, s: float, v: float
+) -> bool:
+    """Optional sRGB/HSV gates from user normal-stool spec."""
+    sr = STOOL_NORMAL_SRGB
+    hv = STOOL_NORMAL_HSV
+    rgb_ok = (
+        sr["r_lo"] <= r <= sr["r_hi"]
+        and sr["g_lo"] <= g <= sr["g_hi"]
+        and sr["b_lo"] <= b <= sr["b_hi"]
+        and r > g > b
+        and 25 <= (r - g) <= 55
+    )
+    hsv_ok = (
+        hv["h_lo"] <= h <= hv["h_hi"]
+        and hv["s_lo"] <= s <= hv["s_hi"]
+        and hv["v_lo"] <= v <= hv["v_hi"]
+    )
+    return bool(rgb_ok or hsv_ok)
+
+
 def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
     chroma = (a * a + b * b) ** 0.5
+    warm_brownish = a >= 4.0 and b >= 14.0 and _ba_ratio(a, b) >= 1.3
 
     if L < 20 and -2 <= a <= 5 and -2 <= b <= 8:
         return {
@@ -976,23 +1157,20 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 5,
         }
-    if 35 <= L <= 68 and 5 <= a <= 20 and 20 <= b <= 50 and b >= a + 5:
-        return {
-            "id": "normal_yellow_brown",
-            "label": "黃褐色／金黃色",
-            "organs": "肝膽膽汁正常、腸道通暢（教學）",
-            "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
-            "hint": "相對健康糞色教學示範",
-            "confounders": "一般飲食",
-            "abnormal": False,
-            "health_score": 9,
-        }
+    # Exact 黃褐 — user healthy Lab baseline (before any black approx).
+    if _in_normal_stool_lab_core(L, a, b):
+        return _normal_yellow_brown_hit(approx=False)
+    # Soft 黃褐 (gamut + ΔE) BEFORE black approx — shadowed phone browns
+    # used to fall through to unbounded L<32 → 黑色／瀝青.
+    soft_ok_yb, de_yb = _in_normal_stool_lab_soft(L, a, b)
+    if soft_ok_yb:
+        return _normal_yellow_brown_hit(approx=True, de=de_yb)
     # Fat-pale Lab band only (steatorrhea teaching): L>60, b>+25, a≈-2..+6 (low a*).
     # Do NOT use a wide mid-L pale band — that locked solid yellow-brown → 淡黃色帶油光.
     if L > 62 and b > 28 and -2 <= a <= 6:
         return _stool_pale_oily_class()
-    # Dark / tarry approximate — catch black stool diluted by toilet lighting.
-    if L < 36 and chroma < 18:
+    # Dark / tarry approximate — true black/tar only (low chroma, not warm brown).
+    if L < 36 and chroma < 14 and not warm_brownish and a < 6 and b < 12:
         return {
             "id": "black_tarry",
             "label": "黑色／瀝青色（近似）",
@@ -1003,7 +1181,7 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
-    if L < 32:
+    if L < 28 and chroma < 16 and not warm_brownish and a < 5 and b < 10:
         return {
             "id": "black_tarry",
             "label": "黑色／瀝青色（近似）",
@@ -1064,34 +1242,8 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
         }
     # Soft near-match only when close to a known center — never invent 黃褐／正常.
     nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
-    # Prefer 黃褐 over 淡脂 when chroma is warm (a*≥5) even if nearest center is pale_oily.
-    # Slightly wider b* floor so dark-cluster medians of brown stool still hit 黃褐.
-    if 28 <= L <= 72 and a >= 5 and 14 <= b <= 52 and b >= a - 2:
-        de_yb = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
-        if de_yb <= 24.0:
-            return {
-                "id": "normal_yellow_brown",
-                "label": "黃褐色／金黃色（近似）",
-                "organs": "肝膽膽汁正常、腸道通暢（教學）",
-                "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
-                "hint": f"相對健康糞色教學示範（ΔE≈{de_yb:.0f}）",
-                "confounders": "一般飲食",
-                "abnormal": False,
-                "health_score": 8,
-                "palette_delta_e": round(de_yb, 1),
-            }
-    if nearest_id == "normal_yellow_brown" and nearest_de <= 14.0 and 30 <= L <= 70:
-        return {
-            "id": "normal_yellow_brown",
-            "label": "黃褐色／金黃色（近似）",
-            "organs": "肝膽膽汁正常、腸道通暢（教學）",
-            "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
-            "hint": f"相對健康糞色教學示範（ΔE≈{nearest_de:.0f}）",
-            "confounders": "一般飲食",
-            "abnormal": False,
-            "health_score": 8,
-            "palette_delta_e": round(nearest_de, 1),
-        }
+    if nearest_id == "normal_yellow_brown" and nearest_de <= 16.0 and warm_brownish:
+        return _normal_yellow_brown_hit(approx=True, de=nearest_de)
     # Soft dark_green only when a* is actually greenish — warm brown (a*>0) must not
     # soft-match 墨绿 just because ΔE to the green center is slightly nearer than 黃褐.
     soft_ok = nearest_de <= STOOL_OUTSIDE_PALETTE_DE and nearest_id in {
@@ -1102,6 +1254,11 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
         "pale_oily",
     }
     if soft_ok and nearest_id == "dark_green" and a >= -2:
+        soft_ok = False
+    # Soft black only for truly dark / low-chroma — never warm brown body.
+    if soft_ok and nearest_id == "black_tarry" and (
+        warm_brownish or L >= 30 or chroma >= 14 or a >= 5 or b >= 10
+    ):
         soft_ok = False
     if soft_ok:
         approx_map = {
@@ -1717,6 +1874,53 @@ def analyze_stool_image(
     # Prefer dark stool cluster so porcelain/water does not dilute black → 黃褐色.
     L, a, b, lab_meta = _lab_from_roi(work, prefer_dark_cluster=True)
     hit = classify_stool_lab(L, a, b)
+    # sRGB/HSV gates (user normal-stool spec): rescue black/tar FP when body is
+    # clearly yellow-brown in RGB/HSV, and reinforce soft Lab near the gamut.
+    try:
+        med_rgb = work.resize((1, 1), Image.Resampling.BOX).getpixel((0, 0))
+        if isinstance(med_rgb, (tuple, list)) and len(med_rgb) >= 3:
+            rr, gg, bb = float(med_rgb[0]), float(med_rgb[1]), float(med_rgb[2])
+            hh, ss, vv = colorsys.rgb_to_hsv(rr / 255.0, gg / 255.0, bb / 255.0)
+            hh_deg = hh * 360.0
+            lab_meta = dict(lab_meta)
+            lab_meta["srgb_median"] = {
+                "r": round(rr, 1),
+                "g": round(gg, 1),
+                "b": round(bb, 1),
+            }
+            lab_meta["hsv_median"] = {
+                "h": round(hh_deg, 1),
+                "s": round(ss, 3),
+                "v": round(vv, 3),
+            }
+            supports_brown = _srgb_hsv_supports_normal_brown(rr, gg, bb, hh_deg, ss, vv)
+            # Spec: V<25% black alert; S<30% pale cue — do not rescue those.
+            if (
+                hit.get("id") == "black_tarry"
+                and supports_brown
+                and vv >= STOOL_BLACK_HSV_V_ALERT
+                and ss >= STOOL_PALE_HSV_S_ALERT
+                and L >= 26
+            ):
+                de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+                hit = _normal_yellow_brown_hit(approx=True, de=de)
+                hit["via"] = "srgb_hsv_normal_rescue"
+            elif (
+                hit.get("id") not in {
+                    "normal_yellow_brown",
+                    "black_tarry",
+                    "bright_dark_red",
+                    "dark_green",
+                    "clay_gray",
+                }
+                and supports_brown
+                and _in_normal_stool_lab_soft(L, a, b)[0]
+            ):
+                de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+                hit = _normal_yellow_brown_hit(approx=True, de=de)
+                hit["via"] = "srgb_hsv_normal_reinforce"
+    except Exception:
+        pass
     steat = steatorrhea_score_v1(work, L, a, b)
     # Multi-cue oily override for pale/yellow-ish color classes only.
     # black / red / green stay intact. clay_gray may flip only when oil specular is clear
