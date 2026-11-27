@@ -1083,6 +1083,208 @@ function isFaceColorTeachingFinding(text) {
   );
 }
 
+/** Drop Lab / YCrCb measurement asides; keep short TCM conclusion words. */
+function stripColorMeasurementProse(text) {
+  let s = String(text || "").trim();
+  s = s.replace(/（[^）]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb|教學|色澤|健康分)[^）]*）/g, "");
+  s = s.replace(/\([^)]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb)[^)]*\)/g, "");
+  s = s.replace(/#[0-9A-Fa-f]{6}/g, "");
+  s = s.replace(/\s*[Δ]?Cr\s*[-+]?\d+(\.\d+)?/g, "");
+  s = s.replace(/\s*[Δ]?Cb\s*[-+]?\d+(\.\d+)?/g, "");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  return s.replace(/^[，,／/\s→\-]+|[，,／/\s→\-]+$/g, "");
+}
+
+/** Regional tongue zone lines (上中下左右／舌尖Δa*) — detail only. */
+function isTongueRegionalFinding(text) {
+  const s = String(text || "");
+  if (!s) return false;
+  const markers = [
+    "（脾胃／舌中）", "（心肺／舌尖）", "（腎／舌根）",
+    "（肝膽／舌邊）", "／舌中）", "／舌尖）", "／舌根）", "／舌邊）",
+    "舌尖−舌中", "舌尖-舌中", "心肺區偏紅", "上區舌質",
+    "上（腎", "中（脾胃", "下（心肺", "左（肝膽", "右（肝膽",
+  ];
+  if (markers.some((m) => s.includes(m))) return true;
+  return /^[上下中左右]（[^）]+）/.test(s);
+}
+
+/**
+ * Long face/tongue/stool/urine teaching bullets → 「細部說明」 only.
+ * Short conclusions stay on the main findings list / circle panel.
+ */
+function isLongTeachingDetailFinding(text) {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  if (isFaceColorTeachingFinding(s)) return true;
+  if (/第\d+格/.test(s)) return true;
+  if (
+    s.includes("ΔCr") || s.includes("ΔCb") || s.includes("L*") ||
+    s.includes("a*") || s.includes("b*") || s.includes("YCrCb")
+  ) return true;
+  if (/\bCr\s*[-+]?\d/.test(s) || /\bCb\s*[-+]?\d/.test(s)) return true;
+  if (
+    /^(面色|臉色|唇|額頭)/.test(s) ||
+    s.includes("滿面") || s.includes("兩頰") || s.includes("下頜") ||
+    s.includes("白睛") || s.includes("眼眥") || s.includes("眼瞼") || s.includes("瞼內")
+  ) return true;
+  if (
+    s.includes("未見明顯偏色") || s.includes("未見全臉色偏") || s.includes("未見明顯色差")
+  ) return true;
+  if (isTongueRegionalFinding(s)) return true;
+  if (
+    s.startsWith("舌質") || s.startsWith("舌苔") || s.startsWith("舌苔（") ||
+    s.startsWith("黃苔") || s.startsWith("白苔") || s.startsWith("剝苔") ||
+    s.startsWith("焦黃") || s.startsWith("黑灰苔") || s.startsWith("光剝")
+  ) return true;
+  if (s.includes("舌質") || s.includes("舌苔") || (s.includes("舌") && s.includes("→"))) {
+    // Keep ultra-short 「舌：…」 conclusions on summary when already brief.
+    if (/^舌[：:]/.test(s) && s.length <= 24 && !s.includes("教學")) return false;
+    return true;
+  }
+  if (s.startsWith("大便色觀察")) return true;
+  if (s.startsWith("大便") && (s.includes("臟腑聯想") || s.includes("飲食／藥物") || s.includes("混淆"))) {
+    return true;
+  }
+  if (s === DYE_CONFUSION_NOTE || s.startsWith("火龍果,") || s.startsWith("火龍果，")) return true;
+  if (s.includes("火龍果") && (s.includes("染色") || s.includes("混淆"))) return true;
+  if (
+    s.includes("取景限制") || s.includes("泡沫時序限制") || s.includes("泡沫：面積比") ||
+    s.includes("GLCM") || s.includes("泡沫衰減")
+  ) return true;
+  if (
+    s.includes("Steatorrhea") || s.includes("帶油光教學") || s.includes("油光線索") ||
+    s.includes("浮水／水面線")
+  ) return true;
+  if (
+    s.includes("紅色確認") || s.includes("綠色確認") || s.includes("灰白確認") ||
+    s.includes("周圍水液") || s.includes("教育提醒") || s.includes("就醫參考")
+  ) return true;
+  if (s === "教學示範，非診斷" || s === "教學示範，非中醫診斷") return true;
+  // Long stool/urine teaching prose with teaching tag; keep brief status lines.
+  if (s.includes("教學示範") && s.length > 48) {
+    if (/^(大便|尿尿)[：:]\s*(正常|需留意|無法對照)/.test(s) && s.length <= 56) return false;
+    return true;
+  }
+  if (/^(尿尿|大便)[：:]/.test(s) && s.length > 56) return true;
+  return false;
+}
+
+/** Short face color conclusions only (bias / lip). */
+function faceFinalConclusions(result) {
+  const out = [];
+  const complexion =
+    (result && result.face_grid && result.face_grid.complexion) ||
+    (result && result.complexion) ||
+    {};
+  const bias = String(complexion.bias || "").trim();
+  if (bias && bias !== "基本色" && bias !== "色差基準") {
+    out.push(`臉色：${stripColorMeasurementProse(bias)}`);
+  } else {
+    const dm = ((result && result.organ_health) || {}).day_modalities || {};
+    const label = String((dm.face && dm.face.color_label) || "").trim();
+    if (label === "臉色已測" || label === "已測") out.push("臉色：已測");
+    else if (label && !isLongTeachingDetailFinding(label) && label.length <= 24) {
+      out.push(label.startsWith("臉") ? label : `臉色：${label}`);
+    } else if (label) {
+      const token = ["實熱", "實寒", "虛熱", "虛寒", "濕氣", "血瘀"].find((t) => label.includes(t));
+      if (token) out.push(`臉色：${token}`);
+    }
+  }
+  const lip = String(
+    (result && result.region_colors && result.region_colors.lip_color) || ""
+  ).trim();
+  if (lip) {
+    const short = stripColorMeasurementProse(lip.replace(/^唇/, "").trim());
+    if (short) out.push(`唇：${short}`);
+  }
+  return out;
+}
+
+/** Short tongue conclusions only (舌質 + 舌苔). */
+function tongueFinalConclusions(result) {
+  const out = [];
+  const colors = (result && result.region_colors) || {};
+  const body = stripColorMeasurementProse(colors.tongue_body_color || "");
+  const coat = stripColorMeasurementProse(colors.tongue_coat_color || "");
+  if (body) out.push(`舌質：${body}`);
+  if (coat) out.push(`舌苔：${coat}`);
+  if (out.length) return out;
+  const dm = ((result && result.organ_health) || {}).day_modalities || {};
+  const label = String((dm.tongue && dm.tongue.color_label) || "").trim();
+  if (!label || isTongueRegionalFinding(label)) return out;
+  if (label.includes("舌質") || label.includes("舌苔") || label.includes("→")) {
+    const parts = label.split(/[；;／]/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const bodyPart = stripColorMeasurementProse(parts.find((p) => p.includes("舌質")) || parts[0]);
+      const coatPart = stripColorMeasurementProse(parts.find((p) => p.includes("苔")) || parts[1]);
+      out.push(bodyPart.startsWith("舌質") ? bodyPart : `舌質：${bodyPart}`);
+      out.push(
+        coatPart.startsWith("舌苔") || coatPart.startsWith("苔")
+          ? (coatPart.startsWith("舌苔") ? coatPart : `舌苔：${coatPart}`)
+          : `舌苔：${coatPart}`
+      );
+    } else {
+      const short = stripColorMeasurementProse(label);
+      out.push(short.startsWith("舌") ? short : `舌：${short}`);
+    }
+  }
+  return out;
+}
+
+/** Partition API findings into short summary lines vs expandable detail bullets. */
+function splitFindingsForDisplay(result) {
+  const raw = Array.isArray(result && result.findings) ? result.findings : [];
+  const summary = [];
+  const detail = [];
+  const seen = new Set();
+  const pushUnique = (list, text) => {
+    const line = withoutUterusStatement(String(text || "").trim());
+    if (!line || hidesSpleenStomachPatternList(line)) return;
+    if (seen.has(line)) return;
+    seen.add(line);
+    list.push(line);
+  };
+
+  faceFinalConclusions(result).forEach((t) => pushUnique(summary, t));
+  tongueFinalConclusions(result).forEach((t) => pushUnique(summary, t));
+
+  const oh = (result && result.organ_health) || {};
+  const su = oh.stool_urine || {};
+  const dm = oh.day_modalities || {};
+  const stoolNote =
+    (result && result.stool) || su.stool || (dm.stool && (dm.stool.note || dm.stool.class)) || null;
+  const urineNote =
+    (result && result.urine) || su.urine || (dm.urine && (dm.urine.note || dm.urine.class)) || null;
+  const stoolBrief = briefCircleLine(stoolNote, "stool");
+  const urineBrief = briefCircleLine(urineNote, "urine");
+  if (stoolBrief) pushUnique(summary, stoolBrief);
+  if (urineBrief) pushUnique(summary, urineBrief);
+
+  raw.forEach((text) => {
+    const s = String(text || "").trim();
+    if (!s) return;
+    if (isLongTeachingDetailFinding(s)) {
+      pushUnique(detail, s);
+      return;
+    }
+    // Avoid duplicating brief stool/urine already emitted as short conclusions.
+    if (/^(大便|尿尿)[：:]/.test(s) && (stoolBrief || urineBrief)) {
+      if (isLongTeachingDetailFinding(s) || s.length > 40) {
+        pushUnique(detail, s);
+        return;
+      }
+      return;
+    }
+    pushUnique(summary, s);
+  });
+
+  if ((stoolBrief || urineBrief) && !detail.some((t) => t.includes("火龍果") || t === DYE_CONFUSION_NOTE)) {
+    pushUnique(detail, DYE_CONFUSION_NOTE);
+  }
+  return { summary, detail };
+}
+
 function findingsFromDayModalities(organHealth) {
   const dm = (organHealth && organHealth.day_modalities) || {};
   const out = [];
@@ -1142,14 +1344,9 @@ function renderCircleResultPanel() {
   const lines = [];
   if (lastDayLines.face) lines.push(lastDayLines.face);
   if (lastDayLines.tongue) lines.push(lastDayLines.tongue);
-  if (lastDayLines.stool) {
-    lines.push(lastDayLines.stool);
-    lines.push(DYE_CONFUSION_NOTE);
-  }
-  if (lastDayLines.urine) {
-    lines.push(lastDayLines.urine);
-    lines.push(DYE_CONFUSION_NOTE);
-  }
+  // Short stool/urine status only — dye / framing / foam live under 「細部說明」.
+  if (lastDayLines.stool) lines.push(lastDayLines.stool);
+  if (lastDayLines.urine) lines.push(lastDayLines.urine);
   if (lastDayLines.pulse) lines.push(lastDayLines.pulse);
   if (!lines.length) {
     el.textContent = "";
@@ -1179,20 +1376,31 @@ function renderResult(result) {
   document.getElementById("color-label").textContent = " " + (result.color_label || "") + lightNote;
   syncTongueDetailFold(result.tongue_grid || lastTongueGrid);
   document.getElementById("disclaimer").textContent = result.disclaimer || "";
+  const split = splitFindingsForDisplay(result);
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
-  (result.findings || []).forEach((text) => {
-    if (hidesSpleenStomachPatternList(text)) return;
-    if (isFaceColorTeachingFinding(text)) return;
-    const line = withoutUterusStatement(text);
-    if (!line) return;
+  split.summary.forEach((line) => {
     const li = document.createElement("li");
     li.textContent = line;
     findings.appendChild(li);
   });
+  const detailFold = document.getElementById("findings-detail-fold");
+  const detailList = document.getElementById("findings-detail");
+  if (detailFold && detailList) {
+    detailList.innerHTML = "";
+    split.detail.forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      detailList.appendChild(li);
+    });
+    if (split.detail.length) detailFold.classList.remove("hidden");
+    else detailFold.classList.add("hidden");
+  }
   const advice = withoutUterusStatement(result.diet_advice || "");
   // Hide face color-analysis teaching blobs if they ever ride inside diet_advice.
-  const adviceClean = isFaceColorTeachingFinding(advice) ? "" : advice;
+  const adviceClean = isFaceColorTeachingFinding(advice) || isLongTeachingDetailFinding(advice)
+    ? ""
+    : advice;
   document.getElementById("advice").textContent = adviceClean ? "食療整理：" + adviceClean : "";
   const links = document.getElementById("links");
   links.innerHTML = "";
