@@ -93,13 +93,15 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         binding.guide.text =
             "前置鏡頭綠光補光 PPG（不開手電筒）\n" +
                 "請用指腹同時蓋住上方前置鏡頭與純綠補光區。\n" +
-                "六格左／右 寸・關・尺可各自量測與重測；今日最後一次讀值會保留。\n" +
+                "上方可點選左／右 寸・關・尺：量完一格後留在本頁，再點其他格繼續量；不必一次量完六格。\n" +
+                "今日讀值會保留，可稍後回來補量或重測；器官判定只看今日已量的穴位。\n" +
+                "全部量完（或先量部分）再按一次「完成並回傳」。\n" +
                 "螢幕亮度已調至最大；等待 → 自動量測 15 秒 → 完成（中位 BPM）。\n" +
                 "15 秒次數＝BPM×15/60；>23 偏熱實，<14 偏寒虛。（教學示範，非診斷）"
 
         loadTodayReadings()
         inflateStepChips()
-        selectPosition(firstOpenIndex())
+        selectPosition(firstOpenIndex(), armMonitor = false)
         showGuideImages(true)
         organExpanded = false
         refreshOrganConclusion()
@@ -131,8 +133,10 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
             saveTodayReadings()
             binding.bpm.text = "— BPM"
             binding.done.isEnabled = stepReadings.isNotEmpty()
+            updateDoneLabel()
             binding.waveform.clear()
             binding.ring.setProgress(0f)
+            refreshStepChips()
             refreshOrganConclusion()
             applyMaxBrightness()
             ensureMonitor().remeasure()
@@ -250,16 +254,64 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         return if (bpm != null) "${index + 1}.$shortName $bpm" else "${index + 1}.$shortName"
     }
 
-    private fun selectPosition(index: Int) {
-        positionIndex = index.coerceIn(0, steps.lastIndex)
+    /**
+     * Switch 寸關尺 site without leaving the screen.
+     * [armMonitor]=true soft-resets PPG to Waiting so the newly selected site can be measured
+     * immediately; does **not** clear other sites' same-day readings.
+     */
+    private fun selectPosition(index: Int, armMonitor: Boolean = true) {
+        val next = index.coerceIn(0, steps.lastIndex)
+        val switching = next != positionIndex
+        positionIndex = next
         val step = steps[positionIndex]
         val shortName = stepShortName(step)
         val organs = stepOrgansLabel(step)
+        val measuredCount = stepReadings.size
         binding.positionBanner.text =
-            "目前量測：$shortName（$organs）· 步驟 ${positionIndex + 1}／${steps.size}"
+            "目前量測：$shortName（$organs）· ${positionIndex + 1}／${steps.size}" +
+                if (measuredCount > 0) " · 今日已量 $measuredCount 格" else ""
         binding.guideHand.setImageResource(step.resId)
         binding.guideCaption.text =
-            "左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝$shortName（$organs）"
+            "左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝$shortName（$organs）｜點上方穴位可換格繼續量"
+        refreshStepChips()
+        // Restore BPM display for this step if already measured.
+        val priorBpm = stepBpms[positionIndex]
+        val priorBeats = stepReadings[positionIndex]
+        if (priorBpm != null && priorBeats != null) {
+            lastBpm = priorBpm
+            lastBeats15 = priorBeats
+            binding.bpm.text = "$priorBpm BPM"
+            binding.status.text =
+                "已有今日讀值 $priorBpm BPM（15 秒約 $priorBeats 次）。可重測此格，或點其他穴位繼續量。"
+        } else {
+            lastBpm = null
+            lastBeats15 = null
+            binding.bpm.text = "— BPM"
+            binding.status.text = "尚未量測 $shortName — 蓋住鏡頭後自動開始，或按開始偵測"
+        }
+        binding.done.isEnabled = stepReadings.isNotEmpty()
+        updateDoneLabel()
+        // Always keep 開始偵測 available so user can measure another site without leaving.
+        binding.start.isEnabled = true
+        binding.start.text = "開始偵測"
+        binding.remeasure.isEnabled = true
+        if (armMonitor && switching) {
+            binding.waveform.clear()
+            binding.ring.setProgress(0f)
+            softArmMonitorForSite()
+        }
+    }
+
+    private fun updateDoneLabel() {
+        val n = stepReadings.size
+        binding.done.text = when {
+            n <= 0 -> "完成並回傳"
+            n >= steps.size -> "完成並回傳（六格皆已量）"
+            else -> "完成並回傳（今日已量 $n 格）"
+        }
+    }
+
+    private fun refreshStepChips() {
         stepChipButtons.forEachIndexed { i, btn ->
             val selected = i == positionIndex
             val done = stepReadings.containsKey(i)
@@ -273,19 +325,23 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
             )
             btn.setTextColor(if (selected || done) Color.WHITE else Color.parseColor("#BDBDBD"))
         }
-        // Restore BPM display for this step if already measured.
-        val priorBpm = stepBpms[positionIndex]
-        val priorBeats = stepReadings[positionIndex]
-        if (priorBpm != null && priorBeats != null) {
-            lastBpm = priorBpm
-            lastBeats15 = priorBeats
-            binding.bpm.text = "$priorBpm BPM"
-        } else {
-            lastBpm = null
-            lastBeats15 = null
-            binding.bpm.text = "— BPM"
+    }
+
+    /** Reset PPG to Waiting for the current site; keep all saved same-day site readings. */
+    private fun softArmMonitorForSite() {
+        val m = monitor ?: return
+        when (m.lastState) {
+            is FrontCameraHeartRateMonitor.MeasurementState.Measuring,
+            is FrontCameraHeartRateMonitor.MeasurementState.Completed,
+            -> {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED
+                ) {
+                    m.remeasure()
+                }
+            }
+            else -> Unit
         }
-        binding.done.isEnabled = stepReadings.isNotEmpty()
     }
 
     private fun applyMaxBrightness() {
@@ -417,15 +473,17 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
                 binding.start.isEnabled = false
                 binding.start.text = "量測中… ${state.remainingSeconds} 秒"
                 binding.remeasure.isEnabled = false
-                binding.done.isEnabled = false
+                // Keep 完成並回傳 available if other sites already have today's readings.
+                binding.done.isEnabled = stepReadings.isNotEmpty()
                 if (state.currentBpm > 0) {
                     binding.bpm.text = "${state.currentBpm} BPM"
                 }
             }
             is FrontCameraHeartRateMonitor.MeasurementState.Completed -> {
                 showGuideImages(true)
-                binding.status.text = "完成"
-                binding.start.isEnabled = false
+                // Stay on screen: start stays enabled so user can retest or switch chips next.
+                binding.start.isEnabled = true
+                binding.start.text = "開始偵測"
                 binding.remeasure.isEnabled = true
                 binding.done.isEnabled = stepReadings.isNotEmpty() || lastBpm != null
                 binding.ring.setProgress(1f)
@@ -450,17 +508,30 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
             .joinToString("；") { line ->
                 PulseOrganJudge.shortLine(line) { key -> organName(key) }
             }
-        binding.bpm.text = "$medianBpm BPM"
-        binding.status.text =
-            "完成 $shortName：中位 $medianBpm BPM（15 秒約 $beats15s 次）\n$lines"
+        val remaining = steps.size - stepReadings.size
         binding.done.isEnabled = true
+        updateDoneLabel()
+        binding.start.isEnabled = true
+        binding.start.text = "開始偵測"
         binding.remeasure.isEnabled = true
         refreshOrganConclusion()
-        // Highlight chip as done; stay on this site so user can retest freely.
-        selectPosition(positionIndex)
+        // Refresh chips / banner; do not re-arm monitor (stay showing this result).
+        selectPosition(positionIndex, armMonitor = false)
+        binding.bpm.text = "$medianBpm BPM"
+        binding.status.text =
+            "完成 $shortName：中位 $medianBpm BPM（15 秒約 $beats15s 次）\n$lines\n" +
+                if (remaining > 0) {
+                    "可點上方其他穴位繼續量（今日已量 ${stepReadings.size}／${steps.size}），或按完成並回傳。"
+                } else {
+                    "六格皆已有今日讀值；可重測任一格，或按完成並回傳。"
+                }
         Toast.makeText(
             this,
-            "$shortName $medianBpm BPM｜$lines",
+            if (remaining > 0) {
+                "$shortName $medianBpm BPM｜點其他穴位可繼續量"
+            } else {
+                "$shortName $medianBpm BPM｜可完成並回傳"
+            },
             Toast.LENGTH_LONG,
         ).show()
     }
