@@ -9,8 +9,8 @@ android {
         applicationId = "com.tube.healthing"
         minSdk = 26
         targetSdk = 36
-        versionCode = 56
-        versionName = "0.56"
+        versionCode = 57
+        versionName = "0.57"
     }
     buildTypes {
         release {

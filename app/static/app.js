@@ -1473,11 +1473,19 @@ async function ensureRecipeFromInput(options) {
       body: formBody({ country: ensureCountry, name: plain, lang: getUiLang() }),
     });
     if (seq !== recipeEnsureSeq) return null;
+    if (data && data.rejected) {
+      detail.textContent = data.note || uiText("recipeLangUnsupported");
+      return null;
+    }
     const created = data && data.recipe;
     if (created && created.id != null) selectedRecipeId = created.id;
     if (created) applyRecipeCountry(created);
     const resolvedCountry = (created && created.country) || countryInput.value.trim();
-    if (resolvedCountry && countryNames.includes(resolvedCountry)) {
+    // Always reload that country's list when catalog corrected the country selector.
+    if (resolvedCountry && (countryNames.includes(resolvedCountry) || data.country_corrected)) {
+      if (resolvedCountry && !countryNames.includes(resolvedCountry)) {
+        countryNames = countryNames.concat([resolvedCountry]);
+      }
       await loadRecipesForCountry({ keepSelection: true, preserveTyped: plain });
     } else if (created) {
       recipeRows = [created].concat(recipeRows.filter((item) => String(item.id) !== String(created.id)));

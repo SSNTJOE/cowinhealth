@@ -2729,9 +2729,36 @@ class MainActivity : AppCompatActivity() {
             if (token != recipeEnsureToken) return
             runOnUiThread {
                 if (token != recipeEnsureToken) return@runOnUiThread
+                if (data.optBoolean("rejected", false)) {
+                    val msg = data.optString("note").ifBlank {
+                        t(
+                            "目前僅支援中文／英文／日文／韓文食譜名稱",
+                            "Only Chinese, English, Japanese, and Korean recipe names are supported",
+                            "中・英・日・韓のレシピ名のみ対応しています",
+                            "중·영·일·한 레시피 이름만 지원합니다"
+                        )
+                    }
+                    binding.recipeDetail.text = msg
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
                 val recipe = data.optJSONObject("recipe")
                 val shown = recipe?.optString("name")?.ifBlank { name } ?: name
-                if (!quiet || data.optBoolean("created", false)) {
+                val countryCorrected = data.optBoolean("country_corrected", false)
+                if (countryCorrected) {
+                    Toast.makeText(
+                        this,
+                        data.optString("note").ifBlank {
+                            t(
+                                "已依食譜庫找到此菜，並改回正確國家",
+                                "Found in catalog; country corrected",
+                                "カタログで見つけ、国を直しました",
+                                "목록에서 찾아 국가를 고쳤습니다"
+                            )
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else if (!quiet || data.optBoolean("created", false)) {
                     Toast.makeText(
                         this,
                         if (data.optBoolean("created", true)) "已寫入共用食譜庫：$shown（網站／App 同步）"
@@ -2757,6 +2784,10 @@ class MainActivity : AppCompatActivity() {
                         }
                         binding.recipeCountry.setText(resolvedCountry, false)
                         loadedCountry = resolvedCountry
+                        // Wrong-country → catalog hit: reload that country's full list.
+                        if (countryCorrected) {
+                            requestRecipes(resolvedCountry, keepSelection = true, preserveTypedName = true)
+                        }
                     }
                     // Merge created row into local list so detail can render immediately.
                     if (id < 0 || recipeRows.none { it.optInt("id", -1) == id }) {
@@ -2768,7 +2799,7 @@ class MainActivity : AppCompatActivity() {
                     bindSearch(binding.recipePick, labels, revealAll = true)
                     showRecipeDetail(label)
                 }
-                refreshRecipeChoices(keepSelection = true)
+                if (!countryCorrected) refreshRecipeChoices(keepSelection = true)
             }
         } catch (e: Exception) {
             if (token != recipeEnsureToken) return
