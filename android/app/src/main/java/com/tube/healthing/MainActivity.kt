@@ -91,6 +91,8 @@ class MainActivity : AppCompatActivity() {
     private var countryNames: List<String> = emptyList()
     private var loadedCountry = ""
     private var recipeLoadToken = 0
+    /** True while a country recipe list request is in flight (web recipeListLoading parity). */
+    @Volatile private var recipeListLoading = false
     /** Invalidates in-flight global name searches so they cannot rewrite recipePick while editing. */
     private var recipeNameSearchGen = 0
     private var recipeEnsureToken = 0
@@ -2221,20 +2223,14 @@ class MainActivity : AppCompatActivity() {
                 if (name == loadedCountry && name.isNotEmpty()) return
                 if (name in countryNames) {
                     // Preserve a typed dish name; do not replace it with the country's first recipe.
-                    if (!recipeEnsureBusy) {
-                        binding.recipeDetail.text = t(
-                            "載入該國食譜中…",
-                            "Loading recipes for this country…",
-                            "この国のレシピを読み込み中…",
-                            "이 국가 레시피 불러오는 중…"
-                        )
-                    }
+                    // requestRecipes clears list + shows under-recipe loading (web parity).
                     requestRecipes(name, keepSelection = false, preserveTypedName = true)
                 } else {
                     // Country cleared / incomplete: drop in-flight country + name loads so they
                     // cannot rewrite recipePick (stuck field after clearing country).
                     cancelRecipeDebounce()
                     loadedCountry = ""
+                    recipeListLoading = false
                     recipeLoadToken += 1
                     recipeNameSearchGen += 1
                     selectedRecipeId = -1
@@ -2245,7 +2241,7 @@ class MainActivity : AppCompatActivity() {
                     val typed = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
                     bindSearch(binding.recipePick, emptyList(), revealAll = true)
                     if (typed.isEmpty()) {
-                        binding.recipeDetail.text = ""
+                        setRecipeStatus("")
                     } else {
                         // No valid country: search dish name across Recipe.xls (web parity).
                         showRecipeSearchingStatus()
@@ -2419,13 +2415,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun revealRecipeList() {
         val country = selectedCountry()
-        if (country.isNotBlank() && recipeRows.isEmpty()) {
-            binding.recipeDetail.text = t(
-                "載入該國食譜中…",
-                "Loading recipes for this country…",
-                "この国のレシピを読み込み中…",
-                "이 국가 레시피 불러오는 중…"
-            )
+        // While country list is importing/loading, keep dropdown closed and show status under recipe.
+        if (country.isNotBlank() && (recipeListLoading || recipeRows.isEmpty())) {
+            if (recipeListLoading && loadedCountry == country) {
+                showRecipeListLoadingStatus()
+                return
+            }
             requestRecipes(country, keepSelection = true, preserveTypedName = true)
             return
         }
@@ -2440,6 +2435,18 @@ class MainActivity : AppCompatActivity() {
         (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter("") {
             binding.recipePick.showDropDown()
         }
+    }
+
+    private fun recipeListLoadingMessage(): String = t(
+        "載入該國食譜中…",
+        "Loading recipes for this country…",
+        "この国のレシピを読み込み中…",
+        "이 국가 레시피 불러오는 중…"
+    )
+
+    private fun showRecipeListLoadingStatus() {
+        recipeListLoading = true
+        if (!recipeEnsureBusy) setRecipeStatus(recipeListLoadingMessage())
     }
 
     private fun bindSearch(
@@ -2783,12 +2790,7 @@ class MainActivity : AppCompatActivity() {
                 "一覧にありません。「レシピを作成」を押してください",
                 "목록에 없습니다. 레시피 만들기를 누르세요"
             )
-            || value == t(
-                "載入該國食譜中…",
-                "Loading recipes for this country…",
-                "この国のレシピを読み込み中…",
-                "이 국가 레시피 불러오는 중…"
-            )
+            || value == recipeListLoadingMessage()
             || value.startsWith(t("建立食譜失敗", "Recipe ensure failed", "レシピ作成失敗", "레시피 작성 실패"))
     }
 
@@ -2987,8 +2989,13 @@ class MainActivity : AppCompatActivity() {
         if (!keepSelection && !preserveTypedName) selectedRecipeId = -1
         val token = ++recipeLoadToken
         loadedCountry = countryName
+        // Web loadRecipesForCountry: close combo, empty adapter, show recipeListLoading under detail.
+        binding.recipePick.dismissDropDown()
+        recipeRows = emptyList()
+        ensureRecipePickEditable()
+        bindSearch(binding.recipePick, emptyList(), revealAll = true)
+        showRecipeListLoadingStatus()
         val byBody = binding.recipeBodyAdvice.isChecked
-        // Only auto-ensure when caller asked (country just chosen with a pending dish).
         Thread { loadRecipes(countryName, token, keepId, byBody, typedName, preserveTypedName) }.start()
     }
 
@@ -3019,6 +3026,7 @@ class MainActivity : AppCompatActivity() {
                 if (token != recipeLoadToken) return@runOnUiThread
                 // User cleared/changed country while this load was in flight — do not touch recipePick.
                 if (selectedCountry() != countryName) return@runOnUiThread
+                recipeListLoading = false
                 recipeRows = rows
                 ensureRecipePickEditable()
                 bindSearch(binding.recipePick, labels, revealAll = true)
@@ -3044,6 +3052,8 @@ class MainActivity : AppCompatActivity() {
                     if (currentPlain.equals(typedName, ignoreCase = true) || currentPlain.isEmpty()) {
                         if (currentPlain.isEmpty()) binding.recipePick.setText(typedName, false)
                     } else {
+                        // Stale typed snapshot — still clear loading status.
+                        if (!recipeEnsureBusy) setRecipeStatus("")
                         return@runOnUiThread
                     }
                     if (!recipeEnsureBusy) showRecipeCreateHint()
@@ -3051,26 +3061,32 @@ class MainActivity : AppCompatActivity() {
                     selectedRecipeId = -1
                     if (currentPlain.isNotEmpty()) {
                         // User typed while load ran with empty snapshot — leave their text.
+                        if (!recipeEnsureBusy) setRecipeStatus("")
                     } else {
                         binding.recipePick.setText("", false)
                     }
-                    binding.recipeDetail.text = if (rows.isEmpty()) {
-                        if (byBody) {
-                            t(
-                                "沒有符合今日檢測與過敏條件的食譜。教學示範，非診斷。",
-                                "No recipes pass today’s reading and allergy filters. Teaching demo, not a diagnosis.",
-                                "今日の検出とアレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                                "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                            )
-                        } else {
-                            t(
-                                "沒有符合過敏條件的食譜。教學示範，非診斷。",
-                                "No recipes pass the allergy filter. Teaching demo, not a diagnosis.",
-                                "アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                                "알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                            )
-                        }
-                    } else ""
+                    // Clear loading; show empty-state copy or blank when list is ready.
+                    if (currentPlain.isEmpty() && !recipeEnsureBusy) {
+                        setRecipeStatus(
+                            if (rows.isEmpty()) {
+                                if (byBody) {
+                                    t(
+                                        "沒有符合今日檢測與過敏條件的食譜。教學示範，非診斷。",
+                                        "No recipes pass today’s reading and allergy filters. Teaching demo, not a diagnosis.",
+                                        "今日の検出とアレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                                        "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                                    )
+                                } else {
+                                    t(
+                                        "沒有符合過敏條件的食譜。教學示範，非診斷。",
+                                        "No recipes pass the allergy filter. Teaching demo, not a diagnosis.",
+                                        "アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                                        "알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                                    )
+                                }
+                            } else ""
+                        )
+                    }
                 }
                 // After country chosen: bind list and open dropdown so recipes are visible.
                 if (rows.isNotEmpty()) {
@@ -3081,7 +3097,15 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            runOnUiThread { Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() }
+            runOnUiThread {
+                if (token == recipeLoadToken) {
+                    recipeListLoading = false
+                    if (!recipeEnsureBusy) {
+                        setRecipeStatus(e.message ?: recipeListLoadingMessage())
+                    }
+                }
+                Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
