@@ -600,8 +600,9 @@ class MainActivity : AppCompatActivity() {
             }
             refreshTrend()
             loadLatestAdvice()
-            refreshStepsSummaryOnly()
             refreshMealCalendar()
+            // Pull device steps (HC / sensor) so calorie ruler burn bar can fill.
+            requestSyncSteps()
             refreshCaptcha()
         } catch (e: Exception) {
             refreshCaptcha()
@@ -638,8 +639,8 @@ class MainActivity : AppCompatActivity() {
                 refreshRecipeChoices(keepSelection = false)
             }
             refreshTrend()
-            refreshStepsSummaryOnly()
             refreshMealCalendar()
+            requestSyncSteps()
             refreshCaptcha()
         } catch (e: Exception) {
             refreshCaptcha()
@@ -1998,13 +1999,18 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, t("toastStepsSynced"), Toast.LENGTH_SHORT).show()
                 }
             } else {
+                // Still refresh intake ruler from meals even when steps are unavailable.
                 refreshStepsSummaryOnly()
+                val note = reading?.note.orEmpty()
+                val msg = when (note) {
+                    "permission_needed" -> t("stepsNote")
+                    "no_sensor" -> t("stepsNote")
+                    "no_reading" -> t("stepsNote")
+                    "update_required" -> t("stepsNote")
+                    else -> note.ifBlank { t("stepsNote") }
+                }
                 runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        reading?.note?.ifBlank { t("stepsNote") } ?: t("stepsNote"),
-                        Toast.LENGTH_LONG
-                    ).show()
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 }
             }
         } catch (e: Exception) {
@@ -2051,16 +2057,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyStepsDay(day: JSONObject, sourceHint: String) {
-        val intake = day.optDouble("calories_intake", 0.0).let { Math.round(it).toInt() }
-        val recommended = day.optInt("recommended_steps", 0)
-        val actual = if (day.isNull("actual_steps")) null else day.optInt("actual_steps")
-        val gap = if (day.isNull("steps_gap")) null else day.optInt("steps_gap")
-        val burned = if (day.isNull("burned_kcal")) null else day.optDouble("burned_kcal", 0.0)
+        // Match web: prefer calories_intake, else meal totals 每日熱量(大卡).
+        val intakeRaw = when {
+            day.has("calories_intake") && !day.isNull("calories_intake") ->
+                day.optDouble("calories_intake", 0.0)
+            else -> day.optJSONObject("totals")?.optDouble("每日熱量(大卡)", 0.0) ?: 0.0
+        }
+        val intake = Math.round(intakeRaw).toInt()
+        val recommended = when {
+            day.has("recommended_steps") && !day.isNull("recommended_steps") ->
+                day.optInt("recommended_steps", 0)
+            else -> {
+                if (intake > 0) {
+                    ((intake / StepsReader.KCAL_PER_STEP).toInt()).coerceIn(3000, 15000)
+                } else 0
+            }
+        }
+        val activity = day.optJSONObject("activity")
+        val actual = when {
+            day.has("actual_steps") && !day.isNull("actual_steps") -> day.optInt("actual_steps")
+            activity != null && activity.has("actual_steps") && !activity.isNull("actual_steps") ->
+                activity.optInt("actual_steps")
+            else -> null
+        }
+        val gap = when {
+            day.has("steps_gap") && !day.isNull("steps_gap") -> day.optInt("steps_gap")
+            actual != null -> actual - recommended
+            else -> null
+        }
+        val burned = when {
+            day.has("burned_kcal") && !day.isNull("burned_kcal") -> day.optDouble("burned_kcal", 0.0)
+            activity != null && activity.has("burned_kcal") && !activity.isNull("burned_kcal") ->
+                activity.optDouble("burned_kcal", 0.0)
+            actual != null -> StepsReader.estimateBurned(actual)
+            else -> null
+        }
         val target = when {
-            !day.isNull("calories_target") -> day.optDouble("calories_target", 0.0).takeIf { it > 0 }
+            day.has("calories_target") && !day.isNull("calories_target") ->
+                day.optDouble("calories_target", 0.0).takeIf { it > 0 }
             else -> day.optJSONObject("targets")?.optDouble("每日熱量(大卡)", 0.0)?.takeIf { it > 0 }
         }
-        val source = day.optString("steps_source", sourceHint).ifBlank { sourceHint }.ifBlank { "—" }
+        val source = day.optString("steps_source", "").ifBlank {
+            activity?.optString("source", "").orEmpty()
+        }.ifBlank { sourceHint }.ifBlank { "—" }
         val burnedSafe = burned?.coerceAtLeast(0.0) ?: 0.0
         val net = Math.round((intake - burnedSafe) * 10.0) / 10.0
         val intakeLabel = if (intake > 0) {
@@ -2180,6 +2219,14 @@ class MainActivity : AppCompatActivity() {
                 if (name == loadedCountry && name.isNotEmpty()) return
                 if (name in countryNames) {
                     // Preserve a typed dish name; do not replace it with the country's first recipe.
+                    if (!recipeEnsureBusy) {
+                        binding.recipeDetail.text = t(
+                            "載入該國食譜中…",
+                            "Loading recipes for this country…",
+                            "この国のレシピを読み込み中…",
+                            "이 국가 레시피 불러오는 중…"
+                        )
+                    }
                     requestRecipes(name, keepSelection = false, preserveTypedName = true)
                 } else {
                     loadedCountry = ""
@@ -2215,7 +2262,7 @@ class MainActivity : AppCompatActivity() {
             if (hasFocus) {
                 revealRecipeList()
             } else {
-                // Blur: ensure / fill when typed dish is not in the current list.
+                // Blur: never silent-create; hint「建立食譜」when not in list.
                 maybeEnsureTypedRecipe(fromBlur = true)
             }
         }
@@ -2260,7 +2307,7 @@ class MainActivity : AppCompatActivity() {
         }
         val country = selectedCountry()
         if (country.isNotEmpty()) {
-            // Country list is local — show dropdown matches; ensure when nothing matches.
+            // Country list is local — filter dropdown; never silent-create.
             (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter(label) {
                 if (binding.recipePick.isFocused) binding.recipePick.showDropDown()
             }
@@ -2269,11 +2316,10 @@ class MainActivity : AppCompatActivity() {
                     binding.recipeDetail.text = ""
                 }
             } else {
-                showRecipeSearchingStatus()
-                scheduleRecipeEnsure(label)
+                showRecipeCreateHint()
             }
         } else {
-            // No country: API name search (雞腿便當 flow), then ensure if still missing.
+            // No country: API name search across Recipe.xls; create only via button.
             showRecipeSearchingStatus()
             scheduleRecipeNameSearch(label)
         }
@@ -2289,22 +2335,6 @@ class MainActivity : AppCompatActivity() {
         recipeUiHandler.postDelayed(runnable, 280)
     }
 
-    private fun scheduleRecipeEnsure(typed: String) {
-        val plain = recipeNamePlain(typed)
-        if (plain.isEmpty()) return
-        val runnable = Runnable {
-            if (recipeEnsureBusy) {
-                recipeEnsureFollowUpName = plain
-                return@Runnable
-            }
-            if (findRecipeByTypedName(plain) != null) return@Runnable
-            if (recipeHasSubstringMatch(plain)) return@Runnable
-            Thread { ensureTypedRecipe(quiet = true) }.start()
-        }
-        recipeEnsureRunnable = runnable
-        recipeUiHandler.postDelayed(runnable, 450)
-    }
-
     private fun maybeEnsureTypedRecipe(fromBlur: Boolean = false, fromSubmit: Boolean = false) {
         val typed = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
         if (typed.isEmpty()) return
@@ -2312,18 +2342,16 @@ class MainActivity : AppCompatActivity() {
             showRecipeDetail(binding.recipePick.text?.toString().orEmpty())
             return
         }
-        if (!fromSubmit && !fromBlur) return
-        // Substring hits: wait for an exact pick unless user explicitly submitted.
-        if (!fromSubmit && recipeHasSubstringMatch(typed)) {
-            showRecipeSearchingStatus()
-            return
+        // Blur / IME done: never silent-create. Hint user to tap「建立食譜」.
+        if (fromBlur || fromSubmit) {
+            if (recipeHasSubstringMatch(typed)) {
+                if (!isRecipeStatusMessage(binding.recipeDetail.text?.toString())) {
+                    binding.recipeDetail.text = ""
+                }
+            } else {
+                showRecipeCreateHint()
+            }
         }
-        if (recipeEnsureBusy) {
-            recipeEnsureFollowUpName = typed
-            showRecipeEnsuringStatus()
-            return
-        }
-        Thread { ensureTypedRecipe(quiet = fromBlur) }.start()
     }
 
     private fun showCountryMenu() {
@@ -2339,6 +2367,12 @@ class MainActivity : AppCompatActivity() {
     private fun revealRecipeList() {
         val country = selectedCountry()
         if (country.isNotBlank() && recipeRows.isEmpty()) {
+            binding.recipeDetail.text = t(
+                "載入該國食譜中…",
+                "Loading recipes for this country…",
+                "この国のレシピを読み込み中…",
+                "이 국가 레시피 불러오는 중…"
+            )
             requestRecipes(country, keepSelection = true, preserveTypedName = true)
             return
         }
@@ -2349,6 +2383,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         synchronized(this) { recipeShowAllPasses = 2 }
+        binding.recipePick.requestFocus()
         (binding.recipePick.adapter as? ArrayAdapter<*>)?.filter?.filter("") {
             binding.recipePick.showDropDown()
         }
@@ -2672,6 +2707,18 @@ class MainActivity : AppCompatActivity() {
         if (value.isEmpty()) return false
         return value == t("搜尋中", "Searching", "検索中", "검색 중")
             || value == t("搜尋建檔中", "Searching and creating data", "検索してデータを作成中", "검색하며 데이터 작성 중")
+            || value == t(
+                "清單中沒有此食譜，請點「建立食譜」",
+                "Not in list — tap Create recipe",
+                "一覧にありません。「レシピを作成」を押してください",
+                "목록에 없습니다. 레시피 만들기를 누르세요"
+            )
+            || value == t(
+                "載入該國食譜中…",
+                "Loading recipes for this country…",
+                "この国のレシピを読み込み中…",
+                "이 국가 레시피 불러오는 중…"
+            )
             || value.startsWith(t("建立食譜失敗", "Recipe ensure failed", "レシピ作成失敗", "레시피 작성 실패"))
     }
 
@@ -2681,6 +2728,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
         binding.recipeDetail.text = t("搜尋中", "Searching", "検索中", "검색 중")
+    }
+
+    private fun showRecipeCreateHint() {
+        if (recipeEnsureBusy) {
+            showRecipeEnsuringStatus()
+            return
+        }
+        binding.recipeDetail.text = t(
+            "清單中沒有此食譜，請點「建立食譜」",
+            "Not in list — tap Create recipe",
+            "一覧にありません。「レシピを作成」を押してください",
+            "목록에 없습니다. 레시피 만들기를 누르세요"
+        )
     }
 
     private fun showRecipeEnsuringStatus() {
@@ -2896,21 +2956,11 @@ class MainActivity : AppCompatActivity() {
                     binding.recipePick.setText(label, false)
                     showRecipeDetail(label)
                 } else if (typedName.isNotEmpty()) {
-                    // Keep pending dish — never silently switch to 蛋餅 / first country recipe.
+                    // Keep pending dish — never silently switch to first country recipe
+                    // and never silent-create; user taps「建立食譜」explicitly.
                     selectedRecipeId = -1
                     binding.recipePick.setText(typedName, false)
-                    if (preserveTypedName) {
-                        if (recipeEnsureBusy) {
-                            recipeEnsureFollowUpName = typedName
-                            showRecipeEnsuringStatus()
-                        } else {
-                            showRecipeEnsuringStatus()
-                            Thread { ensureTypedRecipe(quiet = true) }.start()
-                        }
-                    } else if (!recipeEnsureBusy) {
-                        showRecipeSearchingStatus()
-                        scheduleRecipeEnsure(typedName)
-                    }
+                    if (!recipeEnsureBusy) showRecipeCreateHint()
                 } else {
                     selectedRecipeId = -1
                     binding.recipePick.setText("", false)
@@ -2932,7 +2982,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     } else ""
                 }
-                // After country chosen: always open full recipe list for that country.
+                // After country chosen: bind list and open dropdown so recipes are visible.
                 if (rows.isNotEmpty()) {
                     binding.recipePick.post {
                         synchronized(this@MainActivity) { recipeShowAllPasses = 2 }
@@ -2995,14 +3045,13 @@ class MainActivity : AppCompatActivity() {
                     showRecipeDetail(recipeLabel(exact))
                     return@runOnUiThread
                 }
-                // Keep typed multilingual name; open matches if any, else ensure/create.
+                // Keep typed multilingual name; open matches if any, else hint create button.
                 binding.recipePick.setText(plain, false)
                 if (rows.isNotEmpty()) {
                     if (!recipeEnsureBusy) binding.recipeDetail.text = ""
                     binding.recipePick.post { revealRecipeList() }
                 } else if (!recipeEnsureBusy) {
-                    showRecipeSearchingStatus()
-                    scheduleRecipeEnsure(plain)
+                    showRecipeCreateHint()
                 }
             }
         } catch (e: Exception) {

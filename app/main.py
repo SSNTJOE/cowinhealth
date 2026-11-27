@@ -966,7 +966,8 @@ def api_meals_day(request: Request, date: str | None = None):
     user_id = require_user(request)
     user = fetch_user(user_id) or {}
     try:
-        return user_meals.day_summary(user_id, user, date)
+        summary = user_meals.day_summary(user_id, user, date)
+        return user_activity.attach_activity_to_day(summary, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError:
@@ -1042,7 +1043,10 @@ async def api_meals_add(request: Request):
             detail = "找不到食譜或營養建議資料檔"
         raise HTTPException(status_code=404, detail=detail) from exc
     user = fetch_user(user_id) or {}
-    summary = user_meals.day_summary(user_id, user, meal["meal_date"])
+    summary = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, meal["meal_date"]),
+        user_id,
+    )
     return {"ok": True, "meal": meal, "day": summary}
 
 
@@ -1052,7 +1056,10 @@ def api_meals_delete(request: Request, meal_id: int, date: str | None = None):
     if not user_meals.delete_meal(user_id, meal_id):
         raise HTTPException(status_code=404, detail="找不到這筆飲食紀錄")
     user = fetch_user(user_id) or {}
-    summary = user_meals.day_summary(user_id, user, date)
+    summary = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, date),
+        user_id,
+    )
     return {"ok": True, "day": summary}
 
 
@@ -1136,7 +1143,10 @@ async def api_activity_steps(request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = fetch_user(user_id) or {}
-    day = user_meals.day_summary(user_id, user, saved["date"])
+    day = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, saved["date"]),
+        user_id,
+    )
     return {"ok": True, "activity": saved, "day": day}
 
 

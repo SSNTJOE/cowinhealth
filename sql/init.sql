@@ -21,6 +21,18 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_daily_activity (
+  user_id VARCHAR(32) NOT NULL,
+  activity_date DATE NOT NULL,
+  actual_steps INT NOT NULL DEFAULT 0,
+  burned_kcal DECIMAL(10,1) NULL,
+  source VARCHAR(64) NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, activity_date),
+  INDEX idx_user_activity_day (activity_date),
+  CONSTRAINT fk_activity_user FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
 CREATE TABLE IF NOT EXISTS health_records (
   record_id INT AUTO_INCREMENT PRIMARY KEY,
   user_id VARCHAR(32) NOT NULL,

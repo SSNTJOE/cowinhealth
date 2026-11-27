@@ -29,6 +29,7 @@ ALLOWED_TABLES = frozenset(
     {
         "users",
         "user_meals",
+        "user_daily_activity",
         "health_records",
         "catalog_recipes",
         "catalog_foods",
