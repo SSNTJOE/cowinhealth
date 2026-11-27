@@ -53,6 +53,17 @@ class ApiClient(
     private val client = buildClient(connectSec = 12, readSec = 30, callSec = 60)
 
     /**
+     * Captcha is a tiny JSON+PNG payload. Keep connect short so wrong host / loopback
+     * fails fast with CAPTCHA_REFUSED or CAPTCHA_TIMEOUT instead of hanging the login UI.
+     */
+    private val captchaClient = buildClient(
+        connectSec = 8,
+        readSec = 20,
+        writeSec = 15,
+        callSec = 30,
+    )
+
+    /**
      * /api/record can run stool/urine Lab + day merge; phone uploads need headroom.
      * Short read timeouts left circle UI stuck on the previous judgment line.
      */
@@ -139,10 +150,10 @@ class ApiClient(
 
     fun captcha(): JSONObject {
         val url = "$baseUrl/api/captcha"
-        Log.i(TAG, "GET $url")
+        Log.i(TAG, "GET $url (captchaClient connect=8s read=20s)")
         val req = Request.Builder().url(url).get().build()
         try {
-            client.newCall(req).execute().use { resp ->
+            captchaClient.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 Log.i(TAG, "captcha HTTP ${resp.code} bytes=${body.length}")
                 val json = JSONObject(body.ifBlank { "{}" })
@@ -171,6 +182,12 @@ class ApiClient(
             val msg = (e.message ?: "").lowercase()
             if (msg.contains("cleartext") || msg.contains("plaintext")) {
                 throw IOException("CAPTCHA_CLEARTEXT: ${e.message}", e)
+            }
+            // Android often wraps refused LAN routes as "Failed to connect to /x.x.x.x:8000"
+            if (msg.contains("failed to connect") || msg.contains("connection refused") ||
+                msg.contains("econnrefused")
+            ) {
+                throw IOException("CAPTCHA_REFUSED: ${e.message}", e)
             }
             throw e
         }

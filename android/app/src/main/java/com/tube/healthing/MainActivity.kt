@@ -306,6 +306,12 @@ class MainActivity : AppCompatActivity() {
         return false
     }
 
+    /** Phone cannot reach the PC via 127.0.0.1/localhost — that is the phone itself. */
+    private fun looksLikeLoopbackHost(raw: String): Boolean {
+        val host = extractHost(raw)?.lowercase() ?: return false
+        return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
+    }
+
     private fun extractHost(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isBlank()) return null
@@ -351,6 +357,12 @@ class MainActivity : AppCompatActivity() {
             }
             return false
         }
+        if (looksLikeLoopbackHost(url)) {
+            runOnUiThread {
+                Toast.makeText(this, t("toastServerLoopback"), Toast.LENGTH_LONG).show()
+            }
+            return false
+        }
         if (extractHost(url) == null) {
             runOnUiThread {
                 Toast.makeText(this, t("toastServerEmpty"), Toast.LENGTH_LONG).show()
@@ -375,18 +387,24 @@ class MainActivity : AppCompatActivity() {
         if (looksLikePlaceholderHost(binding.server.text.toString()) || blob.contains("192.168.x.x")) {
             return t("toastServerPlaceholder")
         }
+        if (looksLikeLoopbackHost(binding.server.text.toString()) || blob.contains("127.0.0.1") ||
+            blob.contains("localhost")
+        ) {
+            return t("toastServerLoopback")
+        }
         if (blob.contains("captcha_dns") || blob.contains("unable to resolve host") ||
             blob.contains("unknownhost") || blob.contains("no address associated")
         ) {
             return t("toastCaptchaDns")
         }
         if (blob.contains("captcha_refused") || blob.contains("connection refused") ||
-            blob.contains("econnrefused") || blob.contains("connectexception")
+            blob.contains("econnrefused") || blob.contains("connectexception") ||
+            blob.contains("failed to connect")
         ) {
             return t("toastCaptchaRefused")
         }
         if (blob.contains("captcha_timeout") || blob.contains("timed out") || blob.contains("timeout") ||
-            blob.contains("network is unreachable") || blob.contains("failed to connect")
+            blob.contains("network is unreachable")
         ) {
             return t("toastCaptchaTimeout")
         }
@@ -506,6 +524,7 @@ class MainActivity : AppCompatActivity() {
                     val msg = when {
                         binding.server.text.toString().isBlank() -> t("toastServerEmpty")
                         looksLikePlaceholderHost(binding.server.text.toString()) -> t("toastServerPlaceholder")
+                        looksLikeLoopbackHost(binding.server.text.toString()) -> t("toastServerLoopback")
                         else -> t("toastCaptchaFail")
                     }
                     showCaptchaFailure(msg)
