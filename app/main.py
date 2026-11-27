@@ -949,16 +949,31 @@ def api_recipes(
     conditions: str | None = None,
     female: str | None = None,
     by_body: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ):
+    """List recipes for a country (or search by name).
+
+    Pagination: ``limit`` / ``offset`` (default country page = 80 so App dropdowns
+    fill before phone timeouts; pass a larger limit or page to load the rest).
+    """
     args = _recipe_filter_args(request, patterns, scores, allergies, conditions, female)
     allergy_list = args["allergies"]
     condition_list = args["conditions"]
+    page_offset = max(0, int(offset or 0))
+    # Cap a single page so a buggy client cannot request 20k full payloads.
+    if limit is None:
+        page_limit = 80 if (country or "").strip() else 40
+    else:
+        page_limit = max(1, min(int(limit), 500))
     try:
         if (country or "").strip():
             payload = filter_recipes(
                 country=country,
                 lang=lang,
                 by_body=by_body,
+                limit=page_limit,
+                offset=page_offset,
                 **args,
             )
         else:
@@ -967,6 +982,8 @@ def api_recipes(
                 name=name or "",
                 lang=lang,
                 by_body=by_body,
+                limit=page_limit,
+                offset=page_offset,
                 **args,
             )
     except ValueError as exc:

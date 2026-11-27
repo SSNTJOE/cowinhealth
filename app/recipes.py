@@ -959,13 +959,22 @@ def nutrient_line(row: dict | None) -> str:
     return "、".join(parts)
 
 
-def ingredient_affiliates(row: dict, *, limit: int = 4) -> list[dict]:
-    """Top recipe ingredients that have an affiliate_slug on catalog_foods."""
-    foods = foods_index() or {}
+def ingredient_affiliates(
+    row: dict,
+    *,
+    foods: dict[str, dict[str, str]] | None = None,
+    limit: int = 4,
+) -> list[dict]:
+    """Top recipe ingredients that have an affiliate_slug on catalog_foods.
+
+    Pass a shared ``foods`` index when serializing many rows — calling
+    ``foods_index()`` per recipe re-validates MySQL and was ~24s for Taiwan.
+    """
+    index = foods if foods is not None else (foods_index() or {})
     out: list[dict] = []
     seen: set[str] = set()
     for name in top_ingredient_names(row.get("recipe") or "", limit=max(limit, 8)):
-        item = foods.get(name) or {}
+        item = index.get(name) or {}
         slug = str(item.get("affiliate_slug") or "").strip()
         if not slug or slug in seen:
             continue
@@ -1005,12 +1014,20 @@ def ingredient_affiliates(row: dict, *, limit: int = 4) -> list[dict]:
     return out
 
 
-def public_recipe(row: dict, lang: str, score: int, *, simplify: bool = True) -> dict:
+def public_recipe(
+    row: dict,
+    lang: str,
+    score: int,
+    *,
+    simplify: bool = True,
+    foods: dict[str, dict[str, str]] | None = None,
+) -> dict:
     """Serialize a catalog row for API clients.
 
     ``simplify=False`` skips Foods.xls organ-effect rewriting — required for
     country dropdown lists (100+ rows) so /api/recipes stays under a second.
     Single-recipe ensure/detail may keep ``simplify=True``.
+    Pass ``foods`` when building a list so ingredient affiliates reuse one index.
     """
     mapped = recipe_nutrient_map(row)
     line = nutrient_line(row)
@@ -1044,7 +1061,7 @@ def public_recipe(row: dict, lang: str, score: int, *, simplify: bool = True) ->
         "affiliate": row.get("affiliate")
         if isinstance(row.get("affiliate"), dict)
         else None,
-        "ingredient_affiliates": ingredient_affiliates(row),
+        "ingredient_affiliates": ingredient_affiliates(row, foods=foods),
     }
     if not payload["affiliate"]:
         from .affiliate import affiliate_payload_from_join
@@ -1067,6 +1084,7 @@ def filter_recipes(
     female: bool = False,
     by_body: bool = False,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict:
     del pattern_labels  # tags without a 1–5 score must not filter
     wanted = (country or "").strip()
@@ -1092,16 +1110,29 @@ def filter_recipes(
     matched.sort(key=lambda item: (-item[0], localized_name(item[1], lang)))
     safe.sort(key=lambda item: localized_name(item[1], lang))
     picked = matched + safe
-    if limit is not None:
-        picked = picked[: max(1, limit)]
-    # List/dropdown path: skip per-row Foods.xls rewrite (was ~15s for Taiwan).
-    recipes = [public_recipe(row, lang, score, simplify=False) for score, row in picked]
+    total = len(picked)
+    start = max(0, int(offset or 0))
+    page_limit = None if limit is None else max(1, int(limit))
+    if page_limit is not None:
+        page = picked[start : start + page_limit]
+    else:
+        page = picked[start:]
+    # List/dropdown path: skip per-row Foods.xls rewrite; reuse one foods index.
+    recipes = [
+        public_recipe(row, lang, score, simplify=False, foods=foods)
+        for score, row in page
+    ]
+    end = start + len(recipes)
     return {
         "country": wanted,
         "lang": lang,
         "by_body": bool(by_body),
         "patterns": organ_tags,
         "count": len(recipes),
+        "total": total,
+        "offset": start,
+        "limit": page_limit,
+        "has_more": end < total,
         "benefit_matches": len(matched),
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
@@ -1142,6 +1173,7 @@ def find_recipes_by_name(
     female: bool = False,
     by_body: bool = False,
     limit: int = 40,
+    offset: int = 0,
 ) -> dict:
     """Search Recipe.xls across all countries by dish name (exact preferred)."""
     needle = (name or "").strip().casefold()
@@ -1163,17 +1195,28 @@ def find_recipes_by_name(
         ranked.sort(
             key=lambda item: (-item[0], -item[1], localized_name(item[2], lang), item[2].get("country") or "")
         )
-        if limit is not None:
-            ranked = ranked[: max(1, int(limit))]
+    total = len(ranked)
+    start = max(0, int(offset or 0))
+    page_limit = None if limit is None else max(1, int(limit))
+    if page_limit is not None:
+        page = ranked[start : start + page_limit]
+    else:
+        page = ranked[start:]
     recipes = [
-        public_recipe(row, lang, benefit, simplify=False) for _rank, benefit, row in ranked
+        public_recipe(row, lang, benefit, simplify=False, foods=foods)
+        for _rank, benefit, row in page
     ]
+    end = start + len(recipes)
     return {
         "name": (name or "").strip(),
         "lang": lang,
         "by_body": bool(by_body),
         "patterns": organ_tags,
         "count": len(recipes),
+        "total": total,
+        "offset": start,
+        "limit": page_limit,
+        "has_more": end < total,
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
     }

@@ -2015,10 +2015,38 @@ function recipeFilterParams() {
   return params;
 }
 
-function recipeQueryParams(country) {
+function recipeQueryParams(country, options) {
   const params = recipeFilterParams();
   params.set("country", country);
+  const limit = options && options.limit != null ? options.limit : 80;
+  const offset = options && options.offset != null ? options.offset : 0;
+  params.set("limit", String(limit));
+  params.set("offset", String(Math.max(0, offset)));
   return params;
+}
+
+/** Fetch all country (or name-search) pages until has_more is false. */
+async function fetchRecipePages(buildParams, pageLimit) {
+  const limit = pageLimit || 80;
+  let offset = 0;
+  let recipes = [];
+  let last = null;
+  while (true) {
+    const params = buildParams(limit, offset);
+    const data = await api("/api/recipes?" + params.toString());
+    last = data;
+    const batch = data.recipes || [];
+    recipes = recipes.concat(batch);
+    if (!data.has_more) break;
+    const next = (data.offset != null ? data.offset : offset) + batch.length;
+    if (next <= offset || !batch.length) break;
+    offset = next;
+  }
+  if (last) {
+    last.recipes = recipes;
+    last.count = recipes.length;
+  }
+  return last || { recipes: [], count: 0, has_more: false };
 }
 
 function clearRecipeSelection() {
@@ -2071,9 +2099,13 @@ async function loadRecipesByName(name, options) {
     recipeRows = [];
     return;
   }
-  const params = recipeFilterParams();
-  params.set("name", plain);
-  const data = await api("/api/recipes?" + params.toString());
+  const data = await fetchRecipePages((limit, offset) => {
+    const params = recipeFilterParams();
+    params.set("name", plain);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    return params;
+  }, 40);
   if (seq !== recipeListSeq) return;
   recipeRows = data.recipes || [];
   if (keepId != null) {
@@ -2125,9 +2157,35 @@ async function loadRecipesForCountry(options) {
     if (seq === recipeListSeq) recipeRows = [];
     return;
   }
-  const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
+  // First page fills the dropdown quickly; remaining pages append in the same call.
+  const first = await api("/api/recipes?" + recipeQueryParams(country, { limit: 80, offset: 0 }).toString());
   if (seq !== recipeListSeq) return;
-  recipeRows = data.recipes || [];
+  recipeRows = first.recipes || [];
+  const openCountryList = () => {
+    if (pick && list && recipeRows.length) {
+      renderCombo(pick, list, recipeRows.map(recipeLabel), (label) => {
+        rememberRecipeChoice(label);
+        showSelectedRecipe();
+      }, "all");
+    }
+  };
+  openCountryList();
+  if (first.has_more) {
+    let offset = (first.offset != null ? first.offset : 0) + recipeRows.length;
+    while (true) {
+      const more = await api(
+        "/api/recipes?" + recipeQueryParams(country, { limit: 80, offset }).toString()
+      );
+      if (seq !== recipeListSeq) return;
+      const batch = more.recipes || [];
+      recipeRows = recipeRows.concat(batch);
+      openCountryList();
+      if (!more.has_more) break;
+      const next = (more.offset != null ? more.offset : offset) + batch.length;
+      if (next <= offset || !batch.length) break;
+      offset = next;
+    }
+  }
   if (keepId != null) {
     const row = recipeRows.find((item) => String(item.id) === String(keepId));
     if (row) {

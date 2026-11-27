@@ -53,6 +53,17 @@ class ApiClient(
     private val client = buildClient(connectSec = 12, readSec = 30, callSec = 60)
 
     /**
+     * Country recipe pages can still be large; give the list call more headroom than
+     * the default 30s read so a slow first page does not leave the dropdown empty.
+     */
+    private val recipesClient = buildClient(
+        connectSec = 12,
+        readSec = 60,
+        writeSec = 30,
+        callSec = 90,
+    )
+
+    /**
      * Captcha is a tiny JSON+PNG payload. Keep connect short so wrong host / loopback
      * fails fast with CAPTCHA_REFUSED or CAPTCHA_TIMEOUT instead of hanging the login UI.
      */
@@ -342,19 +353,23 @@ class ApiClient(
         female: Boolean,
         byBody: Boolean = false,
         name: String = "",
+        limit: Int? = 80,
+        offset: Int = 0,
     ): JSONObject {
         val url = "$baseUrl/api/recipes".toHttpUrl().newBuilder()
             .addQueryParameter("lang", lang)
             .addQueryParameter("female", if (female) "1" else "0")
             .addQueryParameter("by_body", if (byBody) "1" else "0")
+            .addQueryParameter("offset", offset.coerceAtLeast(0).toString())
         val countryTrim = country.trim()
         val nameTrim = name.trim()
         if (countryTrim.isNotEmpty()) url.addQueryParameter("country", countryTrim)
         if (nameTrim.isNotEmpty()) url.addQueryParameter("name", nameTrim)
         if (scores.isNotBlank()) url.addQueryParameter("scores", scores)
         if (patterns.isNotBlank()) url.addQueryParameter("patterns", patterns)
+        if (limit != null) url.addQueryParameter("limit", limit.coerceIn(1, 500).toString())
         val req = Request.Builder().url(url.build()).auth().get().build()
-        client.newCall(req).execute().use { resp ->
+        recipesClient.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取食譜失敗"))
             return json

@@ -3146,89 +3146,72 @@ class MainActivity : AppCompatActivity() {
             rememberServer()
             val scores = if (judgmentReady) lastScoresJson else ""
             val patterns = if (judgmentReady) lastPatternsJson else ""
-            val data = api.recipes(countryName, currentLang(), scores, patterns, female, byBody)
-            if (token != recipeLoadToken) return
-            val arr = data.optJSONArray("recipes") ?: JSONArray()
-            val rows = ArrayList<JSONObject>(arr.length())
-            val labels = ArrayList<String>(arr.length())
-            for (i in 0 until arr.length()) {
-                val row = arr.optJSONObject(i) ?: continue
-                rows.add(row)
-                labels.add(recipeLabel(row))
-            }
-            runOnUiThread {
-                if (token != recipeLoadToken) return@runOnUiThread
-                // User cleared/changed country while this load was in flight — do not touch recipePick.
-                if (selectedCountry() != countryName) return@runOnUiThread
-                recipeListLoading = false
-                recipeRows = rows
-                ensureRecipePickEditable()
-                bindSearch(binding.recipePick, labels, revealAll = true)
-                val currentPlain = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
-                val kept = if (keepId >= 0) rows.firstOrNull { it.optInt("id", -1) == keepId } else null
-                val typedMatch = if (typedName.isNotEmpty()) {
-                    rows.firstOrNull { recipeNamePlain(recipeLabel(it)).equals(typedName, ignoreCase = true) }
-                        ?: rows.firstOrNull { it.optString("name").trim().equals(typedName, ignoreCase = true) }
-                } else null
-                val chosen = kept ?: typedMatch
-                if (chosen != null) {
-                    val label = recipeLabel(chosen)
-                    if (!currentPlain.equals(recipeNamePlain(label), ignoreCase = true)) {
-                        binding.recipePick.setText(label, false)
+            val pageSize = 80
+            val rows = ArrayList<JSONObject>()
+            val labels = ArrayList<String>()
+            var offset = 0
+            var firstPageApplied = false
+            while (true) {
+                if (token != recipeLoadToken) return
+                val data = api.recipes(
+                    countryName, currentLang(), scores, patterns, female, byBody,
+                    limit = pageSize, offset = offset
+                )
+                if (token != recipeLoadToken) return
+                val arr = data.optJSONArray("recipes") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val row = arr.optJSONObject(i) ?: continue
+                    rows.add(row)
+                    labels.add(recipeLabel(row))
+                }
+                val pageRows = ArrayList(rows)
+                val pageLabels = ArrayList(labels)
+                val isFirstPage = !firstPageApplied
+                val hasMore = data.optBoolean("has_more", false)
+                runOnUiThread {
+                    if (token != recipeLoadToken) return@runOnUiThread
+                    // User cleared/changed country while this load was in flight — do not touch recipePick.
+                    if (selectedCountry() != countryName) return@runOnUiThread
+                    recipeRows = ArrayList(pageRows)
+                    ensureRecipePickEditable()
+                    bindSearch(binding.recipePick, pageLabels, revealAll = true)
+                    if (isFirstPage) {
+                        recipeListLoading = false
+                        applyCountryRecipeSelection(
+                            rows = pageRows,
+                            keepId = keepId,
+                            typedName = typedName,
+                            byBody = byBody,
+                        )
+                        // After first page: open dropdown so recipes are visible immediately.
+                        if (pageRows.isNotEmpty()) {
+                            binding.recipePick.post {
+                                synchronized(this@MainActivity) { recipeShowAllPasses = 2 }
+                                revealRecipeList()
+                            }
+                        }
+                    } else if (pageRows.isNotEmpty() && binding.recipePick.hasFocus()) {
+                        // Later pages: refresh adapter; reopen if still focused on recipe.
+                        binding.recipePick.post {
+                            synchronized(this@MainActivity) { recipeShowAllPasses = 2 }
+                            revealRecipeList()
+                        }
                     }
-                    showRecipeDetail(label)
-                } else if (typedName.isNotEmpty()) {
-                    // Keep pending dish — never silently switch to first country recipe
-                    // and never silent-create; user taps「建立食譜」explicitly.
-                    selectedRecipeId = -1
-                    // Only rewrite when the field still matches the snapshot we loaded for;
-                    // never restore a stale typedName over newer edits / country-clear.
-                    if (currentPlain.equals(typedName, ignoreCase = true) || currentPlain.isEmpty()) {
-                        if (currentPlain.isEmpty()) binding.recipePick.setText(typedName, false)
-                    } else {
-                        // Stale typed snapshot — still clear loading status.
-                        if (!recipeEnsureBusy) setRecipeStatus("")
-                        return@runOnUiThread
-                    }
-                    if (!recipeEnsureBusy) showRecipeCreateHint()
-                } else {
-                    selectedRecipeId = -1
-                    if (currentPlain.isNotEmpty()) {
-                        // User typed while load ran with empty snapshot — leave their text.
-                        if (!recipeEnsureBusy) setRecipeStatus("")
-                    } else {
-                        binding.recipePick.setText("", false)
-                    }
-                    // Clear loading; show empty-state copy or blank when list is ready.
-                    if (currentPlain.isEmpty() && !recipeEnsureBusy) {
-                        setRecipeStatus(
-                            if (rows.isEmpty()) {
-                                if (byBody) {
-                                    t(
-                                        "沒有符合今日檢測與過敏條件的食譜。教學示範，非診斷。",
-                                        "No recipes pass today’s reading and allergy filters. Teaching demo, not a diagnosis.",
-                                        "今日の検出とアレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                                        "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                                    )
-                                } else {
-                                    t(
-                                        "沒有符合過敏條件的食譜。教學示範，非診斷。",
-                                        "No recipes pass the allergy filter. Teaching demo, not a diagnosis.",
-                                        "アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
-                                        "알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
-                                    )
-                                }
-                            } else ""
+                    // Typed dish may land on a later page — re-check once full list is in.
+                    if (!hasMore && typedName.isNotEmpty() && selectedRecipeId < 0) {
+                        applyCountryRecipeSelection(
+                            rows = pageRows,
+                            keepId = keepId,
+                            typedName = typedName,
+                            byBody = byBody,
                         )
                     }
                 }
-                // After country chosen: bind list and open dropdown so recipes are visible.
-                if (rows.isNotEmpty()) {
-                    binding.recipePick.post {
-                        synchronized(this@MainActivity) { recipeShowAllPasses = 2 }
-                        revealRecipeList()
-                    }
-                }
+                firstPageApplied = true
+                if (!hasMore) break
+                val nextOffset = data.optInt("offset", offset) + arr.length()
+                if (nextOffset <= offset || arr.length() == 0) break
+                offset = nextOffset
             }
         } catch (e: Exception) {
             runOnUiThread {
@@ -3243,6 +3226,75 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Apply keep/typed selection after a country recipe page lands. */
+    private fun applyCountryRecipeSelection(
+        rows: List<JSONObject>,
+        keepId: Int,
+        typedName: String,
+        byBody: Boolean,
+    ) {
+        val currentPlain = recipeNamePlain(binding.recipePick.text?.toString().orEmpty())
+        val kept = if (keepId >= 0) rows.firstOrNull { it.optInt("id", -1) == keepId } else null
+        val typedMatch = if (typedName.isNotEmpty()) {
+            rows.firstOrNull { recipeNamePlain(recipeLabel(it)).equals(typedName, ignoreCase = true) }
+                ?: rows.firstOrNull { it.optString("name").trim().equals(typedName, ignoreCase = true) }
+        } else null
+        val chosen = kept ?: typedMatch
+        if (chosen != null) {
+            val label = recipeLabel(chosen)
+            if (!currentPlain.equals(recipeNamePlain(label), ignoreCase = true)) {
+                binding.recipePick.setText(label, false)
+            }
+            showRecipeDetail(label)
+            return
+        }
+        if (typedName.isNotEmpty()) {
+            // Keep pending dish — never silently switch to first country recipe
+            // and never silent-create; user taps「建立食譜」explicitly.
+            selectedRecipeId = -1
+            // Only rewrite when the field still matches the snapshot we loaded for;
+            // never restore a stale typedName over newer edits / country-clear.
+            if (currentPlain.equals(typedName, ignoreCase = true) || currentPlain.isEmpty()) {
+                if (currentPlain.isEmpty()) binding.recipePick.setText(typedName, false)
+            } else {
+                // Stale typed snapshot — still clear loading status.
+                if (!recipeEnsureBusy) setRecipeStatus("")
+                return
+            }
+            if (!recipeEnsureBusy) showRecipeCreateHint()
+            return
+        }
+        selectedRecipeId = -1
+        if (currentPlain.isNotEmpty()) {
+            // User typed while load ran with empty snapshot — leave their text.
+            if (!recipeEnsureBusy) setRecipeStatus("")
+        } else {
+            binding.recipePick.setText("", false)
+        }
+        // Clear loading; show empty-state copy or blank when list is ready.
+        if (currentPlain.isEmpty() && !recipeEnsureBusy) {
+            setRecipeStatus(
+                if (rows.isEmpty()) {
+                    if (byBody) {
+                        t(
+                            "沒有符合今日檢測與過敏條件的食譜。教學示範，非診斷。",
+                            "No recipes pass today’s reading and allergy filters. Teaching demo, not a diagnosis.",
+                            "今日の検出とアレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                            "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                        )
+                    } else {
+                        t(
+                            "沒有符合過敏條件的食譜。教學示範，非診斷。",
+                            "No recipes pass the allergy filter. Teaching demo, not a diagnosis.",
+                            "アレルギー条件に合うレシピがありません。教材であり診断ではありません。",
+                            "알레르기 조건에 맞는 레시피가 없습니다. 교육용이며 진단이 아닙니다."
+                        )
+                    }
+                } else ""
+            )
+        }
+    }
+
     /** Cross-country dish search when no country is selected (web loadRecipesByName). */
     private fun loadRecipesByName(name: String) {
         val plain = recipeNamePlain(name)
@@ -3253,23 +3305,34 @@ class MainActivity : AppCompatActivity() {
             rememberServer()
             val scores = if (judgmentReady) lastScoresJson else ""
             val patterns = if (judgmentReady) lastPatternsJson else ""
-            val data = api.recipes(
-                country = "",
-                lang = currentLang(),
-                scores = scores,
-                patterns = patterns,
-                female = female,
-                byBody = byBody,
-                name = plain,
-            )
-            if (gen != recipeNameSearchGen) return
-            val arr = data.optJSONArray("recipes") ?: JSONArray()
-            val rows = ArrayList<JSONObject>(arr.length())
-            val labels = ArrayList<String>(arr.length())
-            for (i in 0 until arr.length()) {
-                val row = arr.optJSONObject(i) ?: continue
-                rows.add(row)
-                labels.add(recipeLabelWithCountry(row))
+            val pageSize = 40
+            val rows = ArrayList<JSONObject>()
+            val labels = ArrayList<String>()
+            var offset = 0
+            while (true) {
+                if (gen != recipeNameSearchGen) return
+                val data = api.recipes(
+                    country = "",
+                    lang = currentLang(),
+                    scores = scores,
+                    patterns = patterns,
+                    female = female,
+                    byBody = byBody,
+                    name = plain,
+                    limit = pageSize,
+                    offset = offset,
+                )
+                if (gen != recipeNameSearchGen) return
+                val arr = data.optJSONArray("recipes") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val row = arr.optJSONObject(i) ?: continue
+                    rows.add(row)
+                    labels.add(recipeLabelWithCountry(row))
+                }
+                if (!data.optBoolean("has_more", false)) break
+                val nextOffset = data.optInt("offset", offset) + arr.length()
+                if (nextOffset <= offset || arr.length() == 0) break
+                offset = nextOffset
             }
             runOnUiThread {
                 if (gen != recipeNameSearchGen) return@runOnUiThread

@@ -11,6 +11,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +31,36 @@ DEVIATION_SQLITE = ROOT / "deviation.db"
 # holds the seed lock via mysql_ready() → ensure_schema() → init_schema().
 _SEED_LOCK = threading.RLock()
 _seeded = False
+
+# Short TTL memo for COUNT/MAX(updated_at) tokens. Without this, every
+# foods_index() / ingredient_affiliates() call opens fresh SSL MySQL connections
+# (~0.2s each) and country recipe lists of 100+ rows take tens of seconds.
+_CATALOG_TOKEN_TTL_SEC = 30.0
+_catalog_token_memo: dict[str, tuple[float, Any]] = {}
+_catalog_token_lock = threading.Lock()
+
+
+def _catalog_memo_get(key: str) -> Any | None:
+    with _catalog_token_lock:
+        hit = _catalog_token_memo.get(key)
+        if hit and (time.monotonic() - hit[0]) < _CATALOG_TOKEN_TTL_SEC:
+            return hit[1]
+    return None
+
+
+def _catalog_memo_set(key: str, value: Any) -> Any:
+    with _catalog_token_lock:
+        _catalog_token_memo[key] = (time.monotonic(), value)
+    return value
+
+
+def _clear_catalog_token_memo(*keys: str) -> None:
+    with _catalog_token_lock:
+        if not keys:
+            _catalog_token_memo.clear()
+            return
+        for key in keys:
+            _catalog_token_memo.pop(key, None)
 
 # Keep field maps local to avoid circular imports with recipes.py.
 COLUMN_FIELDS = (
@@ -248,11 +279,16 @@ def table_count(table: str) -> int:
     from .security import assert_allowed_table
 
     safe = assert_allowed_table(table)
+    memo_key = f"table_count:{safe}"
+    cached = _catalog_memo_get(memo_key)
+    if cached is not None:
+        return int(cached)
     conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS c FROM `" + safe + "`")
-            return int((cur.fetchone() or {}).get("c") or 0)
+            count = int((cur.fetchone() or {}).get("c") or 0)
+        return int(_catalog_memo_set(memo_key, count))
     finally:
         conn.close()
 
@@ -526,6 +562,9 @@ def seed_from_excel_if_empty() -> dict[str, int]:
 
 
 def _recipe_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("recipe_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -533,12 +572,17 @@ def _recipe_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_recipes"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_recipes", token[0])
+        return _catalog_memo_set("recipe_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
 
 
 def _food_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("food_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -546,12 +590,17 @@ def _food_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_foods"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_foods", token[0])
+        return _catalog_memo_set("food_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
 
 
 def _daily_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("daily_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -559,7 +608,9 @@ def _daily_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_daily_nutrient"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_daily_nutrient", token[0])
+        return _catalog_memo_set("daily_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
 
@@ -623,9 +674,10 @@ def fetch_recipe_rows() -> tuple[dict, ...] | None:
     if not mysql_ready():
         return None
     try:
-        if table_count("catalog_recipes") == 0:
+        count, token = _recipe_token()
+        if count == 0:
             return None
-        return _fetch_recipes_cached(*_recipe_token())
+        return _fetch_recipes_cached(count, token)
     except Exception:
         logger.exception("read catalog_recipes failed")
         return None
@@ -661,9 +713,10 @@ def fetch_recipe_rows_for_country(country: str) -> tuple[dict, ...] | None:
     if not mysql_ready():
         return None
     try:
-        if table_count("catalog_recipes") == 0:
+        count, token = _recipe_token()
+        if count == 0:
             return None
-        return _fetch_recipes_for_country_cached(wanted, *_recipe_token())
+        return _fetch_recipes_for_country_cached(wanted, count, token)
     except Exception:
         logger.exception("read catalog_recipes by country failed")
         return None
@@ -709,6 +762,7 @@ def fetch_recipe_rows_by_names(names: list[str]) -> tuple[dict, ...] | None:
 def invalidate_recipe_mysql_cache() -> None:
     _fetch_recipes_cached.cache_clear()
     _fetch_recipes_for_country_cached.cache_clear()
+    _clear_catalog_token_memo("recipe_token", "table_count:catalog_recipes")
 
 
 def insert_recipe(fields: dict[str, Any]) -> dict[str, Any]:
@@ -840,9 +894,10 @@ def fetch_foods_index() -> dict[str, dict[str, str]] | None:
     if not mysql_ready():
         return None
     try:
-        if table_count("catalog_foods") == 0:
+        count, token = _food_token()
+        if count == 0:
             return None
-        return _fetch_foods_cached(*_food_token())
+        return _fetch_foods_cached(count, token)
     except Exception:
         logger.exception("read catalog_foods failed")
         return None
@@ -850,6 +905,7 @@ def fetch_foods_index() -> dict[str, dict[str, str]] | None:
 
 def invalidate_foods_mysql_cache() -> None:
     _fetch_foods_cached.cache_clear()
+    _clear_catalog_token_memo("food_token", "table_count:catalog_foods")
 
 
 def upsert_food(fields: dict[str, Any]) -> None:
