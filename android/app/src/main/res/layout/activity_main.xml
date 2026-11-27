@@ -345,6 +345,32 @@
             android:linksClickable="true"
             android:textColorLink="#1565C0"/>
         <TextView
+            android:id="@+id/affiliateCarouselLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#2F6F4E"
+            android:visibility="gone"
+            android:text="健康導購推薦"/>
+        <HorizontalScrollView
+            android:id="@+id/affiliateCarouselScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fadeScrollbars="true"
+            android:visibility="gone"
+            android:paddingBottom="4dp">
+            <LinearLayout
+                android:id="@+id/affiliateCarouselTrack"
+                android:orientation="horizontal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingEnd="8dp"/>
+        </HorizontalScrollView>
+        <TextView
             android:id="@+id/acupointLink"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -1402,8 +1402,10 @@ function renderResult(result) {
     ? ""
     : advice;
   document.getElementById("advice").textContent = adviceClean ? "食療整理：" + adviceClean : "";
-  const links = document.getElementById("links");
-  links.innerHTML = "";
+  const dietLinks = document.getElementById("diet-links") || document.getElementById("links");
+  const acuLinks = document.getElementById("acupoint-links") || dietLinks;
+  if (dietLinks) dietLinks.innerHTML = "";
+  if (acuLinks && acuLinks !== dietLinks) acuLinks.innerHTML = "";
   const dietArticleQ = (result.diet_query || "").trim() || (() => {
     try {
       const u = new URL(result.diet_url || "", window.location.origin);
@@ -1421,12 +1423,13 @@ function renderResult(result) {
   const dietVideo = result.diet_video_url || (dietVideoQ
     ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(dietVideoQ)}`
     : "");
-  if (dietArticle) {
-    links.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
+  if (dietLinks && dietArticle) {
+    dietLinks.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
   }
-  if (dietVideo) {
-    links.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
+  if (dietLinks && dietVideo) {
+    dietLinks.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
   }
+  renderAffiliateCarousel();
   const acuImageQ = (result.acupoint_query || "").trim() || (() => {
     try {
       const u = new URL(result.acupoint_url || "", window.location.origin);
@@ -1446,11 +1449,11 @@ function renderResult(result) {
   const acuVideo = result.acupoint_video_url || (acuVideoQ
     ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(acuVideoQ)}`
     : "");
-  if (acuImages) {
-    links.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
+  if (acuLinks && acuImages) {
+    acuLinks.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
   }
-  if (acuVideo) {
-    links.innerHTML += `<a href="${acuVideo}" target="_blank" rel="noreferrer">${uiText("acupointLinkVideos")}</a>`;
+  if (acuLinks && acuVideo) {
+    acuLinks.innerHTML += `<a href="${acuVideo}" target="_blank" rel="noreferrer">${uiText("acupointLinkVideos")}</a>`;
   }
   renderScoreCards(result);
   drawOrgans(result);
@@ -1641,6 +1644,57 @@ function clearAffiliatePanels() {
     foodAff.hidden = true;
     foodAff.innerHTML = "";
   }
+}
+
+let affiliateCarouselCache = null;
+let affiliateCarouselPromise = null;
+
+async function fetchAffiliateCarouselItems() {
+  if (Array.isArray(affiliateCarouselCache)) return affiliateCarouselCache;
+  if (affiliateCarouselPromise) return affiliateCarouselPromise;
+  affiliateCarouselPromise = fetch("/api/affiliates", { credentials: "same-origin" })
+    .then((resp) => (resp.ok ? resp.json() : { affiliates: [] }))
+    .then((data) => {
+      const list = Array.isArray(data.affiliates) ? data.affiliates : [];
+      affiliateCarouselCache = list.filter((item) => item && item.go_url);
+      return affiliateCarouselCache;
+    })
+    .catch(() => {
+      affiliateCarouselCache = [];
+      return affiliateCarouselCache;
+    })
+    .finally(() => {
+      affiliateCarouselPromise = null;
+    });
+  return affiliateCarouselPromise;
+}
+
+function affiliateCarouselCardHtml(aff) {
+  if (!aff || !aff.go_url) return "";
+  const title = aff.title || aff.button_text || "健康推薦";
+  const platform = aff.platform_name || "";
+  const cta = aff.button_text || "前往查看優惠";
+  return `<a class="affiliate-carousel-card" href="${aff.go_url}" target="_blank" rel="nofollow sponsored noopener" role="listitem">
+    <span class="affiliate-carousel-title">${title}</span>
+    ${platform ? `<span class="affiliate-carousel-platform">${platform}</span>` : ""}
+    <span class="affiliate-carousel-cta">${cta}</span>
+  </a>`;
+}
+
+async function renderAffiliateCarousel() {
+  const box = document.getElementById("affiliate-carousel");
+  const track = document.getElementById("affiliate-carousel-track");
+  if (!box || !track) return;
+  const label = box.querySelector(".affiliate-carousel-label");
+  if (label) label.textContent = uiText("affiliateCarouselLabel");
+  const items = await fetchAffiliateCarouselItems();
+  if (!items.length) {
+    track.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  track.innerHTML = items.map(affiliateCarouselCardHtml).join("");
+  box.hidden = false;
 }
 
 function affiliateCtaHtml(aff, extraClass) {

@@ -210,10 +210,12 @@ class MainActivity : AppCompatActivity() {
             if (!rememberServer(showFeedback = true)) return@setOnClickListener
             Toast.makeText(this, t("toastServerSaved"), Toast.LENGTH_SHORT).show()
             Thread { refreshCaptcha() }.start()
+            refreshAffiliateCarousel()
         }
         binding.captchaRefresh.setOnClickListener { Thread { refreshCaptcha() }.start() }
         if (savedUrl.isNotBlank() && !looksLikePlaceholderHost(savedUrl)) {
             Thread { refreshCaptcha() }.start()
+            refreshAffiliateCarousel()
         }
         binding.login.setOnClickListener { Thread { login() }.start() }
         binding.register.setOnClickListener { Thread { register() }.start() }
@@ -1514,6 +1516,7 @@ class MainActivity : AppCompatActivity() {
         binding.trendHeading.text = t("trendHeading")
         binding.trendNote.text = t("trendNote")
         binding.trendEmpty.text = t("trendEmpty")
+        binding.affiliateCarouselLabel.text = t("affiliateCarouselLabel")
         refreshSyndromeLegend()
         binding.recipeHeading.text = t("recipeHeading")
         binding.recipeNote.text = ""
@@ -2649,6 +2652,7 @@ class MainActivity : AppCompatActivity() {
             ),
             this,
         )
+        refreshAffiliateCarousel()
         SearchLinks.bindLabeledLinks(
             binding.acupointLink,
             listOf(
@@ -2657,6 +2661,87 @@ class MainActivity : AppCompatActivity() {
             ),
             this,
         )
+    }
+
+    private fun refreshAffiliateCarousel() {
+        Thread {
+            try {
+                rememberServer()
+                val data = api.affiliates()
+                val rows = data.optJSONArray("affiliates") ?: JSONArray()
+                runOnUiThread { renderAffiliateCarousel(rows) }
+            } catch (_: Exception) {
+                runOnUiThread { renderAffiliateCarousel(JSONArray()) }
+            }
+        }.start()
+    }
+
+    private fun dp(value: Int): Int =
+        TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            value.toFloat(),
+            resources.displayMetrics,
+        ).toInt()
+
+    private fun renderAffiliateCarousel(rows: JSONArray) {
+        binding.affiliateCarouselLabel.text = t("affiliateCarouselLabel")
+        binding.affiliateCarouselTrack.removeAllViews()
+        if (rows.length() == 0) {
+            binding.affiliateCarouselLabel.visibility = View.GONE
+            binding.affiliateCarouselScroll.visibility = View.GONE
+            return
+        }
+        for (i in 0 until rows.length()) {
+            val item = rows.optJSONObject(i) ?: continue
+            val go = item.optString("go_url").ifBlank {
+                val slug = item.optString("slug")
+                if (slug.isBlank()) "" else "/go/$slug"
+            }
+            if (go.isBlank()) continue
+            val title = item.optString("title").ifBlank { item.optString("button_text") }.ifBlank { "健康推薦" }
+            val platform = item.optString("platform_name")
+            val cta = item.optString("button_text").ifBlank { "前往查看優惠" }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setBackgroundColor(Color.parseColor("#F4FAF6"))
+                minimumWidth = dp(168)
+            }
+            val titleView = TextView(this).apply {
+                text = title
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Color.parseColor("#244834"))
+                textSize = 14f
+            }
+            card.addView(titleView)
+            if (platform.isNotBlank()) {
+                card.addView(
+                    TextView(this).apply {
+                        text = platform
+                        setTextColor(Color.parseColor("#6D6256"))
+                        textSize = 12f
+                        setPadding(0, dp(2), 0, dp(6))
+                    }
+                )
+            }
+            card.addView(
+                TextView(this).apply {
+                    text = cta
+                    setTextColor(Color.parseColor("#2F6F4E"))
+                    setTypeface(typeface, Typeface.BOLD)
+                    textSize = 13f
+                }
+            )
+            card.setOnClickListener { openAffiliateGo(go) }
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(10) }
+            binding.affiliateCarouselTrack.addView(card, lp)
+        }
+        val visible = binding.affiliateCarouselTrack.childCount > 0
+        binding.affiliateCarouselLabel.visibility = if (visible) View.VISIBLE else View.GONE
+        binding.affiliateCarouselScroll.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     private fun loadLatestAdvice() {

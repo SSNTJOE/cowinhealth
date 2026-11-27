@@ -182,6 +182,41 @@ def _row_public(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@router.get("/api/affiliates")
+def list_active_affiliates():
+    """Public carousel feed: active affiliate_links → /go/{slug} CTAs."""
+    conn = connect(ensure=True)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT slug, title, platform_name, button_text
+                FROM affiliate_links
+                WHERE is_active = 1
+                ORDER BY id ASC
+                """
+            )
+            rows = cur.fetchall() or []
+        items = []
+        for row in rows:
+            slug = str(row.get("slug") or "").strip()
+            if not slug:
+                continue
+            items.append(
+                {
+                    "slug": slug,
+                    "title": str(row.get("title") or "").strip(),
+                    "platform_name": str(row.get("platform_name") or "").strip(),
+                    "button_text": str(row.get("button_text") or "前往查看優惠").strip()
+                    or "前往查看優惠",
+                    "go_url": "/go/" + slug,
+                }
+            )
+        return {"affiliates": items}
+    finally:
+        conn.close()
+
+
 @router.get("/api/admin/affiliates")
 def admin_list_affiliates(_user: str = Depends(require_affiliate_admin)):
     conn = connect(ensure=True)
@@ -300,34 +335,68 @@ def admin_toggle_affiliate(
         conn.close()
 
 
+_CAROUSEL_SEED_ROWS = (
+    (
+        "test-olive-oil",
+        "冷壓初榨橄欖油",
+        "iHerb / Amazon",
+        "購買推薦健康好油",
+        "https://iherb.com",
+        "https://amazon.com",
+        "https://iherb.com",
+    ),
+    (
+        "healthy-quinoa",
+        "有機藜麥",
+        "iHerb",
+        "補充優質全穀蛋白",
+        "https://iherb.com",
+        "https://iherb.com",
+        "https://iherb.com",
+    ),
+    (
+        "green-tea-matcha",
+        "有機抹茶粉",
+        "iHerb / Amazon",
+        "日常輕爽抗氧化飲",
+        "https://iherb.com",
+        "https://amazon.com",
+        "https://iherb.com",
+    ),
+    (
+        "omega3-fish-oil",
+        "高濃度魚油 Omega-3",
+        "iHerb",
+        "補足每日好油脂",
+        "https://iherb.com",
+        "https://iherb.com",
+        "https://iherb.com",
+    ),
+)
+
+
 def seed_demo_affiliate_rows() -> None:
-    """Idempotent seed for test-olive-oil (+ easy-to-find Taiwan demo links)."""
+    """Idempotent seed for carousel + Taiwan demo recipe/food links."""
     conn = connect(ensure=False)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO affiliate_links (
-                  slug, title, platform_name, button_text, url_tw, url_us, url_default
-                ) VALUES (
-                  'test-olive-oil',
-                  '冷壓初榨橄欖油',
-                  'iHerb / Amazon',
-                  '購買推薦健康好油',
-                  'https://iherb.com',
-                  'https://amazon.com',
-                  'https://iherb.com'
+            for slug, title, platform, button, url_tw, url_us, url_default in _CAROUSEL_SEED_ROWS:
+                cur.execute(
+                    """
+                    INSERT INTO affiliate_links (
+                      slug, title, platform_name, button_text, url_tw, url_us, url_default
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                      title=VALUES(title),
+                      platform_name=VALUES(platform_name),
+                      button_text=VALUES(button_text),
+                      url_tw=VALUES(url_tw),
+                      url_us=VALUES(url_us),
+                      url_default=VALUES(url_default),
+                      is_active=1
+                    """,
+                    (slug, title, platform, button, url_tw, url_us, url_default),
                 )
-                ON DUPLICATE KEY UPDATE
-                  title=VALUES(title),
-                  platform_name=VALUES(platform_name),
-                  button_text=VALUES(button_text),
-                  url_tw=VALUES(url_tw),
-                  url_us=VALUES(url_us),
-                  url_default=VALUES(url_default),
-                  is_active=1
-                """
-            )
             # Prefer the cooking oil food users actually see in Taiwan recipes.
             cur.execute(
                 """
