@@ -228,6 +228,38 @@ CATALOG_SCHEMA_SQL = [
       INDEX idx_dev_user (user_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS catalog_health_labels (
+      label_id INT AUTO_INCREMENT PRIMARY KEY,
+      kind ENUM('condition','allergen') NOT NULL,
+      name_zh VARCHAR(128) NOT NULL,
+      name_en VARCHAR(255) NULL,
+      name_ja VARCHAR(255) NULL,
+      name_ko VARCHAR(255) NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_health_labels_kind_zh (kind, name_zh),
+      INDEX idx_health_labels_kind (kind)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS recipe_translations (
+      recipe_id INT NOT NULL,
+      lang VARCHAR(8) NOT NULL,
+      recipe MEDIUMTEXT NULL,
+      method MEDIUMTEXT NULL,
+      benefit TEXT NULL,
+      ban TEXT NULL,
+      allergens TEXT NULL,
+      nutrient TEXT NULL,
+      source_hash VARCHAR(64) NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (recipe_id, lang),
+      CONSTRAINT fk_recipe_tr_recipe
+        FOREIGN KEY (recipe_id) REFERENCES catalog_recipes(recipe_id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
 
 
@@ -552,6 +584,15 @@ def seed_from_excel_if_empty() -> dict[str, int]:
                 stats["daily_nutrient"] = _import_daily_from_xlsx(DAILY_XLSX)
             if table_count("catalog_deviations") == 0:
                 stats["deviations"] = _import_deviations_from_sqlite(DEVIATION_SQLITE)
+            try:
+                from .health_labels import sync_health_labels_from_xls, write_seed_xls_files
+
+                write_seed_xls_files()
+                label_stats = sync_health_labels_from_xls(force=False)
+                if label_stats.get("seeded"):
+                    stats["health_labels"] = int(label_stats["seeded"])
+            except Exception:
+                logger.exception("health label catalog seed failed")
             _seeded = True
             if stats:
                 logger.info("MySQL catalog seeded from Excel/SQLite: %s", stats)

@@ -152,6 +152,9 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
 
     override fun onResume() {
         super.onResume()
+        // Keep pulse chrome in sync if MainActivity changed per-app locale.
+        refreshOrganConclusion()
+        updateDoneLabel()
         applyMaxBrightness()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED

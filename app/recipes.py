@@ -1021,6 +1021,7 @@ def public_recipe(
     *,
     simplify: bool = True,
     foods: dict[str, dict[str, str]] | None = None,
+    translations: dict[int, dict[str, str]] | None = None,
 ) -> dict:
     """Serialize a catalog row for API clients.
 
@@ -1028,48 +1029,83 @@ def public_recipe(
     country dropdown lists (100+ rows) so /api/recipes stays under a second.
     Single-recipe ensure/detail may keep ``simplify=True``.
     Pass ``foods`` when building a list so ingredient affiliates reuse one index.
+
+    Long text uses recipe_translations via COALESCE(NULLIF(tr,''), zh).
+    Titles stay on catalog_recipes.name_zh/en/ja/ko. Content is plain text
+    (not HTML/JSON) in current MySQL rows.
     """
-    mapped = recipe_nutrient_map(row)
-    line = nutrient_line(row)
-    stored_benefit = row.get("benefit") or ""
-    stored_ban = row.get("ban") or ""
+    code = normalize_lang(lang)
+    working = dict(row)
+    if translations is not None:
+        from .health_labels import coalesce_recipe_long_fields
+
+        working = coalesce_recipe_long_fields(
+            working, translations.get(int(row.get("id") or 0))
+        )
+    elif code != "zh":
+        from .health_labels import coalesce_recipe_long_fields, fetch_recipe_translations
+
+        rid = int(row.get("id") or 0)
+        tr_map = fetch_recipe_translations([rid], code) if rid else {}
+        working = coalesce_recipe_long_fields(working, tr_map.get(rid))
+
+    mapped = recipe_nutrient_map(working)
+    line = nutrient_line(working)
+    stored_benefit = working.get("benefit") or ""
+    stored_ban = working.get("ban") or ""
     # Prefer columns already rewritten to plain teaching copy; else derive from Foods.xls.
     if stored_benefit.startswith("依主要食材") and stored_ban.startswith("依主要食材"):
         benefit, ban = stored_benefit, stored_ban
     elif simplify:
-        plain_benefit, plain_ban = simplify_organ_effects(row)
+        plain_benefit, plain_ban = simplify_organ_effects(working)
         benefit = plain_benefit or stored_benefit
         ban = plain_ban or stored_ban
     else:
         benefit, ban = stored_benefit, stored_ban
+
+    body_lang = code
+    # If non-zh UI still shows zh body (no translation row), surface a soft note.
+    body_still_zh = False
+    if code != "zh":
+        zh_markers = ("依主要食材", "克、", "較有助於", "需特別留意")
+        sample = f"{benefit}{ban}{working.get('method') or ''}"
+        body_still_zh = any(marker in sample for marker in zh_markers) or (
+            not (translations or {}).get(int(row.get("id") or 0))
+            and code != "zh"
+        )
+
     payload = {
         "id": int(row["id"]),
-        "country": row.get("country") or "",
-        "name": localized_name(row, lang),
-        "recipe": row.get("recipe") or "",
-        "method": row.get("method") or "",
+        "country": working.get("country") or row.get("country") or "",
+        "name": localized_name(row, code),
+        "recipe": working.get("recipe") or "",
+        "method": working.get("method") or "",
         "benefit": benefit,
         "ban": ban,
-        "nutrient": row.get("nutrient") or "",
-        "allergens": row.get("allergens") or "",
+        "nutrient": working.get("nutrient") or "",
+        "allergens": working.get("allergens") or "",
         "nutrients": mapped,
-        "has_nutrients": bool(row.get("has_nutrients")) or bool(line),
+        "has_nutrients": bool(working.get("has_nutrients")) or bool(line),
         "nutrient_line": line,
         "benefit_match": score > 0,
         "benefit_score": score,
-        "affiliate_slug": str(row.get("affiliate_slug") or "").strip(),
-        "affiliate": row.get("affiliate")
+        "affiliate_slug": str(working.get("affiliate_slug") or row.get("affiliate_slug") or "").strip(),
+        "affiliate": working.get("affiliate")
+        if isinstance(working.get("affiliate"), dict)
+        else row.get("affiliate")
         if isinstance(row.get("affiliate"), dict)
         else None,
-        "ingredient_affiliates": ingredient_affiliates(row, foods=foods),
+        "ingredient_affiliates": ingredient_affiliates(working, foods=foods),
+        "lang": code,
+        "body_lang": "zh" if body_still_zh else body_lang,
+        "body_still_zh": bool(body_still_zh and code != "zh"),
     }
     if not payload["affiliate"]:
         from .affiliate import affiliate_payload_from_join
 
-        payload["affiliate"] = affiliate_payload_from_join(row)
-    del lang  # plain summary is Traditional Chinese teaching copy for all UI langs
+        payload["affiliate"] = affiliate_payload_from_join(working) or affiliate_payload_from_join(row)
     for field, _header in NUTRIENT_FIELDS:
-        payload[field] = row.get(field)
+        payload[field] = working.get(field, row.get(field))
     return payload
 
 
@@ -1118,8 +1154,16 @@ def filter_recipes(
     else:
         page = picked[start:]
     # List/dropdown path: skip per-row Foods.xls rewrite; reuse one foods index.
+    from .health_labels import fetch_recipe_translations
+
+    tr_map = fetch_recipe_translations(
+        [int(row.get("id") or 0) for _score, row in page],
+        lang,
+    )
     recipes = [
-        public_recipe(row, lang, score, simplify=False, foods=foods)
+        public_recipe(
+            row, lang, score, simplify=False, foods=foods, translations=tr_map
+        )
         for score, row in page
     ]
     end = start + len(recipes)
@@ -1202,8 +1246,16 @@ def find_recipes_by_name(
         page = ranked[start : start + page_limit]
     else:
         page = ranked[start:]
+    from .health_labels import fetch_recipe_translations
+
+    tr_map = fetch_recipe_translations(
+        [int(row.get("id") or 0) for _rank, _benefit, row in page],
+        lang,
+    )
     recipes = [
-        public_recipe(row, lang, benefit, simplify=False, foods=foods)
+        public_recipe(
+            row, lang, benefit, simplify=False, foods=foods, translations=tr_map
+        )
         for _rank, benefit, row in page
     ]
     end = start + len(recipes)

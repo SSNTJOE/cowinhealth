@@ -598,14 +598,33 @@ def backup_export_all(request: Request):
     return {"ok": True, "files": paths}
 
 
+@app.get("/api/config/locale")
+def api_config_locale(request: Request):
+    """Suggest UI lang from query / X-App-Lang / Accept-Language / CF-IPCountry.
+
+    Soft tip only — clients must not force-write preferred_lang from this.
+    """
+    from .locale import detect_locale_payload
+
+    return detect_locale_payload(request)
+
+
 @app.get("/api/flags")
-def health_flag_options():
-    options = list(allergy_options())
-    return {
-        "conditions": list(CONDITION_OPTIONS),
-        "allergies": options,
-        "allergy_options": options,
-    }
+def health_flag_options(request: Request, lang: str | None = None):
+    """Special-disease + allergen checkbox options localized to UI lang.
+
+    Each option is ``{value, label}`` where ``value`` is the canonical zh token
+    stored in profiles, and ``label`` follows ``lang`` (COALESCE MySQL/xls → zh).
+    """
+    from .health_labels import flags_payload, sync_health_labels_from_xls
+    from .locale import resolve_ui_lang
+
+    try:
+        sync_health_labels_from_xls(force=False)
+    except Exception:
+        logger.exception("health label sync before /api/flags failed")
+    code = resolve_ui_lang(request, lang)
+    return flags_payload(code)
 
 
 def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]]:
@@ -942,7 +961,7 @@ def api_recipes(
     request: Request,
     country: str = "",
     name: str | None = None,
-    lang: str = "zh",
+    lang: str | None = None,
     patterns: str | None = None,
     scores: str | None = None,
     allergies: str | None = None,
@@ -956,7 +975,11 @@ def api_recipes(
 
     Pagination: ``limit`` / ``offset`` (default country page = 80 so App dropdowns
     fill before phone timeouts; pass a larger limit or page to load the rest).
+    Long fields COALESCE from ``recipe_translations`` when lang ≠ zh.
     """
+    from .locale import resolve_ui_lang
+
+    lang = resolve_ui_lang(request, lang)
     args = _recipe_filter_args(request, patterns, scores, allergies, conditions, female)
     allergy_list = args["allergies"]
     condition_list = args["conditions"]
@@ -997,8 +1020,16 @@ def api_recipes(
     return payload
 
 
-def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
+def _api_recipes_create_or_ensure(country: str, name: str, lang: str | None, request: Request | None = None):
     """Find or create a recipe row; country may be blank (lookup / infer / Global)."""
+    from .locale import resolve_ui_lang
+
+    if request is not None:
+        lang = resolve_ui_lang(request, lang)
+    else:
+        from .recipes import normalize_lang
+
+        lang = normalize_lang(lang)
     try:
         return ensure_recipe(country=country or "", name=name, lang=lang)
     except ValueError as exc:
@@ -1015,21 +1046,23 @@ def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
 
 @app.post("/api/recipes/ensure")
 def api_recipes_ensure(
+    request: Request,
     country: str = Form(""),
     name: str = Form(...),
-    lang: str = Form("zh"),
+    lang: str | None = Form(None),
 ):
-    return _api_recipes_create_or_ensure(country, name, lang)
+    return _api_recipes_create_or_ensure(country, name, lang, request)
 
 
 @app.post("/api/recipes/create")
 def api_recipes_create(
+    request: Request,
     country: str = Form(""),
     name: str = Form(...),
-    lang: str = Form("zh"),
+    lang: str | None = Form(None),
 ):
     """Alias of /api/recipes/ensure — country optional; missing rows are researched."""
-    return _api_recipes_create_or_ensure(country, name, lang)
+    return _api_recipes_create_or_ensure(country, name, lang, request)
 
 
 @app.get("/api/nutrient-targets")

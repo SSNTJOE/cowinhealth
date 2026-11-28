@@ -653,22 +653,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun flagsOrNull(): JSONObject? = runCatching { api.flags() }.getOrNull()
+    private fun flagsOrNull(): JSONObject? =
+        runCatching { api.flags(currentLang()) }.getOrNull()
 
     private fun applyFlagOptions(flags: JSONObject?) {
         val keptConditions = JSONArray(HealthFlags.selectedJson(binding.conditionsGroup))
         val keptAllergies = JSONArray(HealthFlags.selectedJson(binding.allergiesGroup))
-        val conditions = HealthFlags.jsonLabelsFrom(flags, "conditions")
-        if (conditions.isNotEmpty()) {
-            HealthFlags.inflate(binding.conditionsGroup, conditions)
+        val conditionOpts = HealthFlags.optionsFromJson(flags?.optJSONArray("conditions"))
+        if (conditionOpts.isNotEmpty()) {
+            HealthFlags.inflateOptions(binding.conditionsGroup, conditionOpts)
             HealthFlags.apply(binding.conditionsGroup, keptConditions)
         }
-        val options = HealthFlags.consolidateAllergyOptions(
-            HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
-        )
-        if (options.isNotEmpty()) {
-            flagAllergyOptions = options
-            HealthFlags.inflate(binding.allergiesGroup, options, columns = 3)
+        val allergyRaw = flags?.optJSONArray("allergy_options")
+            ?: flags?.optJSONArray("allergies")
+        val allergyOpts = HealthFlags.optionsFromJson(allergyRaw)
+        if (allergyOpts.isNotEmpty()) {
+            val consolidated = HealthFlags.consolidateAllergyOptions(allergyOpts.map { it.value })
+            val byValue = allergyOpts.associateBy { it.value }
+            val localized = consolidated.map { value ->
+                FlagOption(value = value, label = byValue[value]?.label ?: value)
+            }
+            flagAllergyOptions = consolidated
+            HealthFlags.inflateOptions(binding.allergiesGroup, localized, columns = 3)
             HealthFlags.apply(binding.allergiesGroup, keptAllergies)
         }
     }
@@ -694,14 +700,21 @@ class MainActivity : AppCompatActivity() {
         }
         applyLangChrome()
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
-        val allergyOptions = HealthFlags.consolidateAllergyOptions(
-            HealthFlags.jsonLabelsFrom(user, "allergy_options").ifEmpty {
-                HealthFlags.jsonLabelsFrom(flags, "allergy_options", "allergies")
+        val allergyFromFlags = HealthFlags.optionsFromJson(
+            flags?.optJSONArray("allergy_options") ?: flags?.optJSONArray("allergies")
+        )
+        val allergyValues = HealthFlags.consolidateAllergyOptions(
+            allergyFromFlags.map { it.value }.ifEmpty {
+                HealthFlags.jsonLabelsFrom(user, "allergy_options")
             }.ifEmpty { flagAllergyOptions }
         )
-        if (allergyOptions.isNotEmpty()) {
-            flagAllergyOptions = allergyOptions
-            HealthFlags.inflate(binding.allergiesGroup, allergyOptions, columns = 3)
+        if (allergyValues.isNotEmpty()) {
+            flagAllergyOptions = allergyValues
+            val byValue = allergyFromFlags.associateBy { it.value }
+            val localized = allergyValues.map { value ->
+                FlagOption(value = value, label = byValue[value]?.label ?: value)
+            }
+            HealthFlags.inflateOptions(binding.allergiesGroup, localized, columns = 3)
         }
         HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
         female = jsonText(user, "gender") == "female"
@@ -2233,6 +2246,8 @@ class MainActivity : AppCompatActivity() {
                 applyLangChrome()
                 Thread {
                     runCatching { api.updatePreferredLang(code) }
+                    val flags = flagsOrNull()
+                    runOnUiThread { applyFlagOptions(flags) }
                 }.start()
                 val country = selectedCountry()
                 if (country.isNotBlank()) requestRecipes(country, keepSelection = true)

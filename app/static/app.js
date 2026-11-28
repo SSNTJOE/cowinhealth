@@ -202,6 +202,7 @@ function applyUserBodyImage(user) {
 fillHealthFlags(document, {});
 
 function fillProfile(user) {
+  window.__healthingUser = user || {};
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
@@ -1830,6 +1831,9 @@ function showSelectedRecipe(extraNote) {
   let rest = afterAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
   const nutrientLine = row.nutrient_line || formatRecipeNutrients(row.nutrients);
   if (nutrientLine) rest = (rest ? rest + "\n\n" : "") + nutrientLine;
+  if (row.body_still_zh && getUiLang() !== "zh") {
+    rest = (rest ? rest + "\n\n" : "") + uiText("bodyStillZh");
+  }
   if (extraNote) rest = (rest ? rest + "\n\n" : "") + extraNote;
   // Keep status/search messages in #recipe-detail; body copy goes below the CTA.
   detail.textContent = detailTop ? rest : ((topText ? topText + "\n\n" : "") + rest);
@@ -3531,6 +3535,9 @@ const updateHomeBmi = bindBmiInputs(
 );
 
 bindUiLang(() => {
+  loadHealthFlagOptions(getUiLang()).then(() =>
+    fillHealthFlags(document, window.__healthingUser || {}),
+  );
   if (appCard && !appCard.classList.contains("hidden")) {
     reloadRecipesForLanguage().catch((err) => {
       const detail = document.getElementById("recipe-detail");
@@ -3542,6 +3549,6 @@ bindUiLang(() => {
 });
 
 checkMysql()
-  .then(() => loadHealthFlagOptions())
-  .then(() => fillHealthFlags(document, {}))
+  .then(() => loadHealthFlagOptions(getUiLang()))
+  .then(() => fillHealthFlags(document, window.__healthingUser || {}))
   .then(loadMe);

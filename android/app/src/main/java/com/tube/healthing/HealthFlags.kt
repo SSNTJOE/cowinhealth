@@ -6,6 +6,8 @@ import android.widget.GridLayout
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class FlagOption(val value: String, val label: String)
+
 object HealthFlags {
     val CONDITIONS = listOf(
         "糖尿病",
@@ -17,6 +19,33 @@ object HealthFlags {
         "服用抗凝血劑",
     )
     val ALLERGIES = listOf("蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶")
+
+    fun optionsFrom(raw: List<String>): List<FlagOption> =
+        raw.map { FlagOption(value = it, label = it) }
+
+    fun optionsFromJson(arr: JSONArray?): List<FlagOption> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<FlagOption>(arr.length())
+        for (i in 0 until arr.length()) {
+            val item = arr.opt(i)
+            when (item) {
+                is JSONObject -> {
+                    val value = item.optString("value").ifBlank {
+                        item.optString("name_zh")
+                    }.trim()
+                    val label = item.optString("label").ifBlank {
+                        item.optString("name")
+                    }.ifBlank { value }.trim()
+                    if (value.isNotEmpty()) out.add(FlagOption(value, label.ifBlank { value }))
+                }
+                else -> {
+                    val text = arr.optString(i).trim()
+                    if (text.isNotEmpty()) out.add(FlagOption(text, text))
+                }
+            }
+        }
+        return out
+    }
 
     private val CRUSTACEAN_TOKENS = setOf("蝦蟹", "蝦", "蝦米", "蝦仁", "龍蝦", "螃蟹", "蟹")
 
@@ -103,15 +132,19 @@ object HealthFlags {
 
     /** Inflate checkboxes; if [parent] is a [GridLayout], use equal-width columns. */
     fun inflate(parent: ViewGroup, options: List<String>, columns: Int = 1) {
+        inflateOptions(parent, optionsFrom(options), columns)
+    }
+
+    fun inflateOptions(parent: ViewGroup, options: List<FlagOption>, columns: Int = 1) {
         parent.removeAllViews()
         val grid = parent as? GridLayout
         if (grid != null && columns > 1) {
             grid.columnCount = columns
         }
-        options.forEach { label ->
+        options.forEach { opt ->
             val box = CheckBox(parent.context).apply {
-                text = label
-                tag = label
+                text = opt.label
+                tag = opt.value
             }
             if (grid != null) {
                 val lp = GridLayout.LayoutParams().apply {
@@ -130,7 +163,10 @@ object HealthFlags {
         val arr = JSONArray()
         for (i in 0 until parent.childCount) {
             val box = parent.getChildAt(i) as? CheckBox ?: continue
-            if (box.isChecked) arr.put(box.text.toString())
+            if (box.isChecked) {
+                val value = (box.tag as? String)?.trim().orEmpty().ifBlank { box.text.toString() }
+                arr.put(value)
+            }
         }
         return arr.toString()
     }
@@ -139,12 +175,15 @@ object HealthFlags {
         val picked = mutableSetOf<String>()
         if (selected != null) {
             for (i in 0 until selected.length()) {
-                canonicalizeAllergyLabel(selected.optString(i))?.let { picked.add(it) }
+                val raw = selected.optString(i)
+                canonicalizeAllergyLabel(raw)?.let { picked.add(it) }
+                raw.trim().takeIf { it.isNotEmpty() }?.let { picked.add(it) }
             }
         }
         for (i in 0 until parent.childCount) {
             val box = parent.getChildAt(i) as? CheckBox ?: continue
-            box.isChecked = picked.contains(box.text.toString())
+            val value = (box.tag as? String)?.trim().orEmpty().ifBlank { box.text.toString() }
+            box.isChecked = value in picked || box.text.toString() in picked
         }
     }
 }

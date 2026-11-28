@@ -154,34 +154,66 @@ function consolidateAllergyOptions(options) {
   return canonicalizeAllergySelection(options);
 }
 
-async function loadHealthFlagOptions() {
+/** Normalize /api/flags options to {value, label} (value = canonical zh). */
+function normalizeFlagOptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (item && typeof item === "object") {
+        const value = String(item.value || item.name_zh || "").trim();
+        const label = String(item.label || item.name || value).trim();
+        if (!value) return null;
+        return { value, label: label || value };
+      }
+      const text = String(item || "").trim();
+      if (!text) return null;
+      return { value: text, label: text };
+    })
+    .filter(Boolean);
+}
+
+let CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((v) => ({ value: v, label: v }));
+let ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((v) => ({ value: v, label: v }));
+
+async function loadHealthFlagOptions(lang) {
+  const code = normalizeUiLang(lang || getUiLang());
   try {
-    const data = await api("/api/flags");
-    if (Array.isArray(data.conditions) && data.conditions.length) {
-      CONDITION_OPTIONS = data.conditions;
+    const data = await api("/api/flags?lang=" + encodeURIComponent(code));
+    const conditions = normalizeFlagOptions(data.conditions);
+    if (conditions.length) {
+      CONDITION_FLAG_OPTIONS = conditions;
+      CONDITION_OPTIONS = conditions.map((item) => item.value);
     }
-    if (Array.isArray(data.allergies) && data.allergies.length) {
-      ALLERGY_OPTIONS = consolidateAllergyOptions(data.allergies);
+    const allergies = normalizeFlagOptions(data.allergies || data.allergy_options);
+    if (allergies.length) {
+      const consolidatedValues = consolidateAllergyOptions(allergies.map((item) => item.value));
+      const byValue = new Map(allergies.map((item) => [item.value, item.label]));
+      ALLERGY_FLAG_OPTIONS = consolidatedValues.map((value) => ({
+        value,
+        label: byValue.get(value) || value,
+      }));
+      ALLERGY_OPTIONS = consolidatedValues;
     }
   } catch (_err) {
     /* keep defaults if Recipe.xls is unavailable */
   }
-  return { conditions: CONDITION_OPTIONS, allergies: ALLERGY_OPTIONS };
+  return { conditions: CONDITION_FLAG_OPTIONS, allergies: ALLERGY_FLAG_OPTIONS };
 }
 
 function renderCheckboxes(container, options, selected) {
   if (!container) return;
   const picked = new Set(Array.isArray(selected) ? selected : []);
-  container.innerHTML = options
-    .map((label) => {
-      const checked = picked.has(label) ? " checked" : "";
+  const items = normalizeFlagOptions(options);
+  container.innerHTML = items
+    .map((item) => {
+      const checked = picked.has(item.value) ? " checked" : "";
       return (
         '<label class="check"><input type="checkbox" value="' +
-        label +
+        item.value +
         '"' +
         checked +
         "> " +
-        label +
+        item.label +
         "</label>"
       );
     })
@@ -192,17 +224,23 @@ function fillHealthFlags(root, user) {
   const scope = root || document;
   renderCheckboxes(
     scope.querySelector("#conditions-group"),
-    CONDITION_OPTIONS,
+    CONDITION_FLAG_OPTIONS,
     user && user.conditions,
   );
-  const allergyOpts = consolidateAllergyOptions(
+  const allergyOpts =
     user && Array.isArray(user.allergy_options) && user.allergy_options.length
-      ? user.allergy_options
-      : ALLERGY_OPTIONS,
-  );
+      ? normalizeFlagOptions(
+          user.allergy_options.map((item) => {
+            if (item && typeof item === "object") return item;
+            const value = canonicalizeAllergyLabel(item) || String(item || "").trim();
+            const hit = ALLERGY_FLAG_OPTIONS.find((opt) => opt.value === value);
+            return { value, label: (hit && hit.label) || value };
+          }),
+        )
+      : ALLERGY_FLAG_OPTIONS;
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
-    allergyOpts,
+    allergyOpts.length ? allergyOpts : ALLERGY_FLAG_OPTIONS,
     canonicalizeAllergySelection(user && user.allergies),
   );
 }
@@ -768,7 +806,8 @@ const UI_I18N_EXTRA = {
     "fallbackZhNote": "（部分內容僅有中文，教學示範）",
     "localeSuggest": "偵測到瀏覽器／裝置語言為 {lang}，要切換嗎？（不會強制）",
     "localeSuggestSwitch": "切換為 {lang}",
-    "localeSuggestKeep": "維持目前語言"
+    "localeSuggestKeep": "維持目前語言",
+    "bodyStillZh": "此食譜內文仍為中文；標題已依介面語言顯示。"
   },
   "en": {
     "loginTitle": "Email login",
@@ -867,7 +906,8 @@ const UI_I18N_EXTRA = {
     "recipeBodyAdvice": "Suggest by body reading",
     "localeSuggest": "Browser/device language looks like {lang}. Switch? (optional)",
     "localeSuggestSwitch": "Switch to {lang}",
-    "localeSuggestKeep": "Keep current language"
+    "localeSuggestKeep": "Keep current language",
+    "bodyStillZh": "Recipe body is still Chinese; the title follows your UI language."
   },
   "ja": {
     "loginTitle": "メールでログイン",
@@ -966,7 +1006,8 @@ const UI_I18N_EXTRA = {
     "recipeBodyAdvice": "体調に合わせて提案",
     "localeSuggest": "ブラウザ／端末の言語が {lang} のようです。切り替えますか？（任意）",
     "localeSuggestSwitch": "{lang} に切り替える",
-    "localeSuggestKeep": "今の言語のまま"
+    "localeSuggestKeep": "今の言語のまま",
+    "bodyStillZh": "本文はまだ中国語です。タイトルはUI言語に合わせています。"
   },
   "ko": {
     "loginTitle": "이메일 로그인",
@@ -1065,7 +1106,8 @@ const UI_I18N_EXTRA = {
     "recipeBodyAdvice": "몸 상태에 맞춰 추천",
     "localeSuggest": "브라우저/기기 언어가 {lang}인 것 같습니다. 바꿀까요? (선택)",
     "localeSuggestSwitch": "{lang}(으)로 전환",
-    "localeSuggestKeep": "현재 언어 유지"
+    "localeSuggestKeep": "현재 언어 유지",
+    "bodyStillZh": "본문은 아직 중국어입니다. 제목은 UI 언어를 따릅니다."
   }
 };
 Object.keys(UI_I18N_EXTRA).forEach((lang) => {
@@ -1134,6 +1176,8 @@ function setLocaleSuggestAck(lang) {
 }
 
 function getUiLang() {
+  // Stored preference only. First-visit detect uses soft tip (navigator → /api/config/locale),
+  // never force-write preferred_lang / LS from detection alone.
   return normalizeUiLang(localStorage.getItem(UI_LANG_KEY) || readCookie(UI_LANG_KEY) || "zh");
 }
 
@@ -1184,20 +1228,27 @@ function maybeShowLocaleSuggest() {
   const boxes = document.querySelectorAll(".js-locale-suggest");
   if (!boxes.length) return;
   const detected = detectBrowserUiLang();
-  if (!detected) {
-    hideLocaleSuggestTips();
+  if (detected) {
+    const current = getUiLang();
+    if (detected === current || getLocaleSuggestAck() === detected) {
+      hideLocaleSuggestTips();
+      return;
+    }
+    renderLocaleSuggestTip(detected);
     return;
   }
-  const current = getUiLang();
-  if (detected === current) {
-    hideLocaleSuggestTips();
-    return;
-  }
-  if (getLocaleSuggestAck() === detected) {
-    hideLocaleSuggestTips();
-    return;
-  }
-  renderLocaleSuggestTip(detected);
+  // Navigator unsupported → soft-check /api/config/locale (CF-IPCountry) without force-write.
+  hideLocaleSuggestTips();
+  if (typeof api !== "function") return;
+  api("/api/config/locale")
+    .then((data) => {
+      const suggested = mapLocaleTagToUiLang(data && (data.suggested || data.detected));
+      if (!suggested) return;
+      const current = getUiLang();
+      if (suggested === current || getLocaleSuggestAck() === suggested) return;
+      renderLocaleSuggestTip(suggested);
+    })
+    .catch(() => {});
 }
 
 function bindLocaleSuggestTips(onChange) {
@@ -1361,11 +1412,15 @@ function bindUiLang(onChange) {
       applyUiLangChrome();
       syncPreferredLangToServer(lang);
       hideLocaleSuggestTips();
+      loadHealthFlagOptions(lang).then(() => fillHealthFlags(document, window.__healthingUser || {}));
       if (typeof onChange === "function") onChange(lang);
     });
   });
   applyUiLangChrome();
-  bindLocaleSuggestTips(onChange);
+  bindLocaleSuggestTips((lang) => {
+    loadHealthFlagOptions(lang).then(() => fillHealthFlags(document, window.__healthingUser || {}));
+    if (typeof onChange === "function") onChange(lang);
+  });
 }
 
 function applyPreferredLangFromUser(user) {

@@ -258,8 +258,11 @@ class ApiClient(
         }
     }
 
-    fun flags(): JSONObject {
-        val req = Request.Builder().url("$baseUrl/api/flags").get().build()
+    fun flags(lang: String? = null): JSONObject {
+        val url = "$baseUrl/api/flags".toHttpUrl().newBuilder().apply {
+            if (!lang.isNullOrBlank()) addQueryParameter("lang", lang)
+        }.build()
+        val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
             val json = JSONObject(resp.body?.string().orEmpty().ifBlank { "{}" })
             if (!resp.isSuccessful) throw RuntimeException(errorDetail(json, "讀取過敏選項失敗"))
