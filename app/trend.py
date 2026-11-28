@@ -38,7 +38,10 @@ def build_trend(rows: list[dict], include_uterus: bool = True) -> dict:
             try:
                 score = int(raw)
             except (TypeError, ValueError):
-                score = 5
+                continue
+            # 0 / negative = no real source that session; skip invented defaults.
+            if score < 1:
+                continue
             points.append({"t": iso_time(row.get("record_date")), "y": score})
         organs.append({**spec, "points": points})
     return {

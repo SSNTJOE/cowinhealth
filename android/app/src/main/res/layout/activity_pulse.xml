@@ -5,117 +5,202 @@
     android:layout_height="match_parent"
     android:background="#121212">
 
-    <!-- Top pure-green fill-light for front-camera fingertip PPG -->
+    <!-- Top pure-green fill-light for front-camera fingertip PPG (kept shorter so buttons stay reachable) -->
     <View
         android:id="@+id/greenFillLight"
         android:layout_width="match_parent"
-        android:layout_height="140dp"
+        android:layout_height="96dp"
         android:background="#00FF00"/>
 
-    <LinearLayout
-        android:orientation="vertical"
-        android:padding="12dp"
+    <TextView
+        android:id="@+id/positionBanner"
+        android:text="目前量測：左寸（心、小腸）· 步驟 1／6"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF"
+        android:gravity="center"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:background="#1B5E20"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <HorizontalScrollView
+        android:id="@+id/stepChipsScroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+        <LinearLayout
+            android:id="@+id/stepChips"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"/>
+    </HorizontalScrollView>
+
+    <ScrollView
+        android:id="@+id/pulseScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp">
 
-        <TextView
-            android:id="@+id/guide"
-            android:textSize="15sp"
-            android:textColor="#EEEEEE"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"/>
-
-        <!-- Placement guides: finger-on-front-cam + 寸關尺 Hand.png demos -->
         <LinearLayout
-            android:id="@+id/guideImages"
-            android:orientation="horizontal"
+            android:orientation="vertical"
+            android:padding="12dp"
             android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:visibility="visible">
+            android:layout_height="wrap_content">
 
-            <ImageView
-                android:id="@+id/guideFinger"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:adjustViewBounds="true"
-                android:contentDescription="前置鏡頭指腹蓋法"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ppg_finger_guide"
-                android:background="#1A1A1A"/>
+            <TextView
+                android:id="@+id/guide"
+                android:textSize="14sp"
+                android:textColor="#EEEEEE"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
 
-            <ImageView
-                android:id="@+id/guideHand"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_marginStart="4dp"
-                android:adjustViewBounds="true"
-                android:contentDescription="寸關尺手勢導引"
-                android:scaleType="fitCenter"
-                android:src="@drawable/pulse_hand"
-                android:background="#1A1A1A"/>
+            <!-- Placement guides: finger-on-front-cam + highlighted 寸關尺 position -->
+            <LinearLayout
+                android:id="@+id/guideImages"
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="140dp"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:visibility="visible">
+
+                <ImageView
+                    android:id="@+id/guideFinger"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:adjustViewBounds="true"
+                    android:contentDescription="前置鏡頭指腹蓋法"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ppg_finger_guide"
+                    android:background="#1A1A1A"/>
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:background="#1A1A1A">
+
+                    <ImageView
+                        android:id="@+id/guideHand"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:adjustViewBounds="true"
+                        android:contentDescription="寸關尺手勢導引（紅圈為目前位置）"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/pulse_left_cun"/>
+                </FrameLayout>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/guideCaption"
+                android:text="左：指腹蓋住綠光區與前置鏡頭｜右：紅圈＝目前寸關尺位置"
+                android:textSize="12sp"
+                android:textColor="#9E9E9E"
+                android:gravity="center"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"/>
+
+            <FrameLayout
+                android:id="@+id/previewFrame"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp">
+
+                <androidx.camera.view.PreviewView
+                    android:id="@+id/preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"/>
+
+                <com.tube.healthing.PpgRingView
+                    android:id="@+id/ring"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"/>
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/bpm"
+                android:text="— BPM"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:gravity="center"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
+
+            <TextView
+                android:id="@+id/status"
+                android:text="等待開始"
+                android:textSize="14sp"
+                android:textColor="#BDBDBD"
+                android:gravity="center"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"/>
+
+            <com.tube.healthing.PpgWaveformView
+                android:id="@+id/waveform"
+                android:layout_width="match_parent"
+                android:layout_height="72dp"
+                android:layout_marginBottom="8dp"
+                android:background="#1E1E1E"/>
+
+            <TextView
+                android:id="@+id/pulseScoreToggle"
+                android:text="脈搏分數 ▸"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:gravity="center_vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:background="#263238"
+                android:clickable="true"
+                android:focusable="true"/>
+
+            <TextView
+                android:id="@+id/organConclusion"
+                android:text=""
+                android:textSize="13sp"
+                android:textColor="#C8E6C9"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:background="#1B2E1B"
+                android:visibility="gone"/>
         </LinearLayout>
+    </ScrollView>
 
-        <TextView
-            android:id="@+id/guideCaption"
-            android:text="左：指腹同時蓋住上方綠光區與前置鏡頭｜右：寸關尺參考"
-            android:textSize="12sp"
-            android:textColor="#9E9E9E"
-            android:gravity="center"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="4dp"/>
-
-        <FrameLayout
-            android:id="@+id/previewFrame"
-            android:layout_width="180dp"
-            android:layout_height="180dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp">
-
-            <androidx.camera.view.PreviewView
-                android:id="@+id/preview"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"/>
-
-            <com.tube.healthing.PpgRingView
-                android:id="@+id/ring"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"/>
-        </FrameLayout>
-
-        <TextView
-            android:id="@+id/bpm"
-            android:text="— BPM"
-            android:textSize="36sp"
-            android:textStyle="bold"
-            android:textColor="#FFFFFF"
-            android:gravity="center"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"/>
-
-        <TextView
-            android:id="@+id/status"
-            android:text="等待開始"
-            android:textSize="14sp"
-            android:textColor="#BDBDBD"
-            android:gravity="center"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"/>
-
-        <com.tube.healthing.PpgWaveformView
-            android:id="@+id/waveform"
-            android:layout_width="match_parent"
-            android:layout_height="96dp"
-            android:layout_marginBottom="8dp"
-            android:background="#1E1E1E"/>
+    <!-- Sticky action bar — always above scroll content / not covered -->
+    <LinearLayout
+        android:id="@+id/actionBar"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:background="#1A1A1A"
+        android:elevation="8dp">
 
         <LinearLayout
             android:orientation="horizontal"

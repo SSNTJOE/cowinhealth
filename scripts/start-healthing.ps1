@@ -1,12 +1,13 @@
-# Start Health-ing uvicorn on 127.0.0.1:8000 if not already listening.
+# Start Health-ing uvicorn on 0.0.0.0:8000 so phones on LAN can reach /api/captcha.
 # Used by Scheduled Task: Health-ing-uvicorn
+# Binding only 127.0.0.1 makes App captcha show timeout / connection refused.
 
 $ErrorActionPreference = 'Continue'
 $ProjectRoot = 'C:\tube\Health-ing'
 $PythonExe   = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $LogDir      = Join-Path $ProjectRoot 'logs'
 $LogFile     = Join-Path $LogDir 'uvicorn.log'
-$HostAddr    = '127.0.0.1'
+$HostAddr    = '0.0.0.0'
 $Port        = 8000
 
 if (-not (Test-Path $LogDir)) {
@@ -18,14 +19,37 @@ function Write-Log([string]$Message) {
     Add-Content -Path $LogFile -Value "[$stamp] $Message" -Encoding UTF8
 }
 
-function Test-PortListening {
+function Get-Listeners {
     try {
-        $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { $_.LocalAddress -eq $HostAddr -or $_.LocalAddress -eq '0.0.0.0' -or $_.LocalAddress -eq '::' } |
-            Select-Object -First 1
-        return $null -ne $conn
+        return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     } catch {
-        return $false
+        return @()
+    }
+}
+
+function Test-LanReady {
+    $listeners = Get-Listeners
+    foreach ($conn in $listeners) {
+        if ($conn.LocalAddress -eq '0.0.0.0' -or $conn.LocalAddress -eq '::') {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Stop-PortListeners {
+    $listeners = Get-Listeners
+    $ownerIds = @($listeners | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -gt 0 })
+    foreach ($ownerId in $ownerIds) {
+        try {
+            Write-Log "STOP: killing pid=$ownerId (was bound on :$Port, not LAN-ready)"
+            Stop-Process -Id $ownerId -Force -ErrorAction Stop
+        } catch {
+            Write-Log "WARN: could not stop pid=$ownerId : $($_.Exception.Message)"
+        }
+    }
+    if ($ownerIds.Count -gt 0) {
+        Start-Sleep -Seconds 1
     }
 }
 
@@ -34,10 +58,13 @@ if (-not (Test-Path $PythonExe)) {
     exit 1
 }
 
-if (Test-PortListening) {
-    Write-Log "SKIP: already listening on ${HostAddr}:${Port}"
+if (Test-LanReady) {
+    Write-Log "SKIP: already listening on 0.0.0.0:${Port} (LAN-ready)"
     exit 0
 }
+
+# Loopback-only uvicorn blocks phone captcha; replace it.
+Stop-PortListeners
 
 Write-Log "START: launching uvicorn on ${HostAddr}:${Port}"
 Set-Location $ProjectRoot
@@ -62,10 +89,10 @@ Write-Log "STARTED: pid=$($proc.Id)"
 
 # Brief wait so caller/task can see a listen state when possible
 Start-Sleep -Seconds 2
-if (Test-PortListening) {
+if (Test-LanReady) {
     Write-Log "OK: listening on ${HostAddr}:${Port}"
     exit 0
 }
 
-Write-Log "WARN: process started (pid=$($proc.Id)) but port $Port not yet listening"
+Write-Log "WARN: process started (pid=$($proc.Id)) but port $Port not yet LAN-ready"
 exit 0

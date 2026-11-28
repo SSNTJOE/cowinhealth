@@ -8,7 +8,10 @@ async function loadProfile() {
     return;
   }
   const user = data.user;
+  window.__healthingUser = user || {};
   applyPreferredLangFromUser(user);
+  // Reload flags for preferred lang so allergen/disease labels match the UI.
+  await loadHealthFlagOptions(getUiLang());
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("email").value = user.email || "";
   document.getElementById("nickname").value = user.nickname || "";

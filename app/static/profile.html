@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="profilePageTitle">基本資料 — Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=lang-login1" />
+  <link rel="stylesheet" href="/static/styles.css?v=locale-suggest1" />
 </head>
 <body>
   <div class="wrap">
@@ -20,6 +20,13 @@
           <option value="ja">日本語</option>
           <option value="ko">한국어</option>
         </select>
+      </div>
+      <div class="js-locale-suggest locale-suggest hidden" role="status">
+        <p class="locale-suggest-msg"></p>
+        <div class="locale-suggest-actions">
+          <button type="button" class="locale-suggest-switch secondary">切換</button>
+          <button type="button" class="locale-suggest-keep ghost">維持目前語言</button>
+        </div>
       </div>
       <h2 data-i18n="accountHeading">帳號</h2>
       <p><span data-i18n="anonIdLabel">匿名 ID：</span><span id="anon-id" class="anon"></span></p>
@@ -68,7 +75,7 @@
       <p id="profile-msg" class="status"></p>
     </section>
   </div>
-  <script src="/static/common.js?v=lang-login1"></script>
-  <script src="/static/profile.js?v=lang-login1"></script>
+  <script src="/static/common.js?v=locale-suggest1"></script>
+  <script src="/static/profile.js?v=locale-suggest1"></script>
 </body>
 </html>

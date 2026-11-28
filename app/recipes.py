@@ -202,6 +202,24 @@ def recipe_rows() -> tuple[dict, ...]:
     return _rows_cached(mtime)
 
 
+def recipe_rows_for_country(country: str) -> tuple[dict, ...]:
+    """Rows for one country — prefer indexed MySQL country query for dropdown speed."""
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    try:
+        from .shared_catalog import fetch_recipe_rows_for_country
+
+        mysql_rows = fetch_recipe_rows_for_country(wanted)
+        if mysql_rows is not None:
+            return mysql_rows
+    except Exception:
+        pass
+    return tuple(
+        row for row in recipe_rows() if (row.get("country") or "").strip() == wanted
+    )
+
+
 def recipe_by_id(recipe_id: int | str | None) -> dict | None:
     if recipe_id is None or recipe_id == "":
         return None
@@ -941,37 +959,153 @@ def nutrient_line(row: dict | None) -> str:
     return "、".join(parts)
 
 
-def public_recipe(row: dict, lang: str, score: int) -> dict:
-    mapped = recipe_nutrient_map(row)
-    line = nutrient_line(row)
-    stored_benefit = row.get("benefit") or ""
-    stored_ban = row.get("ban") or ""
+def ingredient_affiliates(
+    row: dict,
+    *,
+    foods: dict[str, dict[str, str]] | None = None,
+    limit: int = 4,
+) -> list[dict]:
+    """Top recipe ingredients that have an affiliate_slug on catalog_foods.
+
+    Pass a shared ``foods`` index when serializing many rows — calling
+    ``foods_index()`` per recipe re-validates MySQL and was ~24s for Taiwan.
+    """
+    index = foods if foods is not None else (foods_index() or {})
+    out: list[dict] = []
+    seen: set[str] = set()
+    for name in top_ingredient_names(row.get("recipe") or "", limit=max(limit, 8)):
+        item = index.get(name) or {}
+        slug = str(item.get("affiliate_slug") or "").strip()
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        kcal = item.get("kcal")
+        protein = item.get("protein_g")
+        try:
+            kcal_num = float(kcal) if kcal is not None and kcal != "" else None
+        except (TypeError, ValueError):
+            kcal_num = None
+        try:
+            protein_num = float(protein) if protein is not None and protein != "" else None
+        except (TypeError, ValueError):
+            protein_num = None
+        aff = item.get("affiliate") if isinstance(item.get("affiliate"), dict) else None
+        if not aff:
+            from .affiliate import affiliate_payload_from_join
+
+            aff = affiliate_payload_from_join({"aff_slug": slug, **item}) or {
+                "slug": slug,
+                "title": str(item.get("name_zh") or name).strip() or name,
+                "platform_name": str(item.get("platform_name") or "").strip(),
+                "button_text": "🛒 購買推薦食材（iHerb / Amazon）",
+                "go_url": "/go/" + slug,
+            }
+        out.append(
+            {
+                "name": str(item.get("name_zh") or name).strip() or name,
+                "affiliate_slug": slug,
+                "affiliate": aff,
+                "kcal": kcal_num,
+                "protein_g": protein_num,
+            }
+        )
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
+def public_recipe(
+    row: dict,
+    lang: str,
+    score: int,
+    *,
+    simplify: bool = True,
+    foods: dict[str, dict[str, str]] | None = None,
+    translations: dict[int, dict[str, str]] | None = None,
+) -> dict:
+    """Serialize a catalog row for API clients.
+
+    ``simplify=False`` skips Foods.xls organ-effect rewriting — required for
+    country dropdown lists (100+ rows) so /api/recipes stays under a second.
+    Single-recipe ensure/detail may keep ``simplify=True``.
+    Pass ``foods`` when building a list so ingredient affiliates reuse one index.
+
+    Long text uses recipe_translations via COALESCE(NULLIF(tr,''), zh).
+    Titles stay on catalog_recipes.name_zh/en/ja/ko. Content is plain text
+    (not HTML/JSON) in current MySQL rows.
+    """
+    code = normalize_lang(lang)
+    working = dict(row)
+    if translations is not None:
+        from .health_labels import coalesce_recipe_long_fields
+
+        working = coalesce_recipe_long_fields(
+            working, translations.get(int(row.get("id") or 0))
+        )
+    elif code != "zh":
+        from .health_labels import coalesce_recipe_long_fields, fetch_recipe_translations
+
+        rid = int(row.get("id") or 0)
+        tr_map = fetch_recipe_translations([rid], code) if rid else {}
+        working = coalesce_recipe_long_fields(working, tr_map.get(rid))
+
+    mapped = recipe_nutrient_map(working)
+    line = nutrient_line(working)
+    stored_benefit = working.get("benefit") or ""
+    stored_ban = working.get("ban") or ""
     # Prefer columns already rewritten to plain teaching copy; else derive from Foods.xls.
     if stored_benefit.startswith("依主要食材") and stored_ban.startswith("依主要食材"):
         benefit, ban = stored_benefit, stored_ban
-    else:
-        plain_benefit, plain_ban = simplify_organ_effects(row)
+    elif simplify:
+        plain_benefit, plain_ban = simplify_organ_effects(working)
         benefit = plain_benefit or stored_benefit
         ban = plain_ban or stored_ban
+    else:
+        benefit, ban = stored_benefit, stored_ban
+
+    body_lang = code
+    # If non-zh UI still shows zh body (no translation row), surface a soft note.
+    body_still_zh = False
+    if code != "zh":
+        zh_markers = ("依主要食材", "克、", "較有助於", "需特別留意")
+        sample = f"{benefit}{ban}{working.get('method') or ''}"
+        body_still_zh = any(marker in sample for marker in zh_markers) or (
+            not (translations or {}).get(int(row.get("id") or 0))
+            and code != "zh"
+        )
+
     payload = {
         "id": int(row["id"]),
-        "country": row.get("country") or "",
-        "name": localized_name(row, lang),
-        "recipe": row.get("recipe") or "",
-        "method": row.get("method") or "",
+        "country": working.get("country") or row.get("country") or "",
+        "name": localized_name(row, code),
+        "recipe": working.get("recipe") or "",
+        "method": working.get("method") or "",
         "benefit": benefit,
         "ban": ban,
-        "nutrient": row.get("nutrient") or "",
-        "allergens": row.get("allergens") or "",
+        "nutrient": working.get("nutrient") or "",
+        "allergens": working.get("allergens") or "",
         "nutrients": mapped,
-        "has_nutrients": bool(row.get("has_nutrients")) or bool(line),
+        "has_nutrients": bool(working.get("has_nutrients")) or bool(line),
         "nutrient_line": line,
         "benefit_match": score > 0,
         "benefit_score": score,
+        "affiliate_slug": str(working.get("affiliate_slug") or row.get("affiliate_slug") or "").strip(),
+        "affiliate": working.get("affiliate")
+        if isinstance(working.get("affiliate"), dict)
+        else row.get("affiliate")
+        if isinstance(row.get("affiliate"), dict)
+        else None,
+        "ingredient_affiliates": ingredient_affiliates(working, foods=foods),
+        "lang": code,
+        "body_lang": "zh" if body_still_zh else body_lang,
+        "body_still_zh": bool(body_still_zh and code != "zh"),
     }
-    del lang  # plain summary is Traditional Chinese teaching copy for all UI langs
+    if not payload["affiliate"]:
+        from .affiliate import affiliate_payload_from_join
+
+        payload["affiliate"] = affiliate_payload_from_join(working) or affiliate_payload_from_join(row)
     for field, _header in NUTRIENT_FIELDS:
-        payload[field] = row.get(field)
+        payload[field] = working.get(field, row.get(field))
     return payload
 
 
@@ -986,6 +1120,7 @@ def filter_recipes(
     female: bool = False,
     by_body: bool = False,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict:
     del pattern_labels  # tags without a 1–5 score must not filter
     wanted = (country or "").strip()
@@ -999,9 +1134,7 @@ def filter_recipes(
     foods = foods_index()
     matched: list[tuple[int, dict[str, str]]] = []
     safe: list[tuple[int, dict[str, str]]] = []
-    for row in recipe_rows():
-        if (row.get("country") or "") != wanted:
-            continue
+    for row in recipe_rows_for_country(wanted):
         if recipe_excluded(row, allergy_tokens, condition_tokens, organ_tags, foods):
             continue
         score = benefit_score(recipe_filter_benefit_blob(row, foods), organ_tags)
@@ -1013,15 +1146,37 @@ def filter_recipes(
     matched.sort(key=lambda item: (-item[0], localized_name(item[1], lang)))
     safe.sort(key=lambda item: localized_name(item[1], lang))
     picked = matched + safe
-    if limit is not None:
-        picked = picked[: max(1, limit)]
-    recipes = [public_recipe(row, lang, score) for score, row in picked]
+    total = len(picked)
+    start = max(0, int(offset or 0))
+    page_limit = None if limit is None else max(1, int(limit))
+    if page_limit is not None:
+        page = picked[start : start + page_limit]
+    else:
+        page = picked[start:]
+    # List/dropdown path: skip per-row Foods.xls rewrite; reuse one foods index.
+    from .health_labels import fetch_recipe_translations
+
+    tr_map = fetch_recipe_translations(
+        [int(row.get("id") or 0) for _score, row in page],
+        lang,
+    )
+    recipes = [
+        public_recipe(
+            row, lang, score, simplify=False, foods=foods, translations=tr_map
+        )
+        for score, row in page
+    ]
+    end = start + len(recipes)
     return {
         "country": wanted,
         "lang": lang,
         "by_body": bool(by_body),
         "patterns": organ_tags,
         "count": len(recipes),
+        "total": total,
+        "offset": start,
+        "limit": page_limit,
+        "has_more": end < total,
         "benefit_matches": len(matched),
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
@@ -1062,6 +1217,7 @@ def find_recipes_by_name(
     female: bool = False,
     by_body: bool = False,
     limit: int = 40,
+    offset: int = 0,
 ) -> dict:
     """Search Recipe.xls across all countries by dish name (exact preferred)."""
     needle = (name or "").strip().casefold()
@@ -1083,15 +1239,36 @@ def find_recipes_by_name(
         ranked.sort(
             key=lambda item: (-item[0], -item[1], localized_name(item[2], lang), item[2].get("country") or "")
         )
-        if limit is not None:
-            ranked = ranked[: max(1, int(limit))]
-    recipes = [public_recipe(row, lang, benefit) for _rank, benefit, row in ranked]
+    total = len(ranked)
+    start = max(0, int(offset or 0))
+    page_limit = None if limit is None else max(1, int(limit))
+    if page_limit is not None:
+        page = ranked[start : start + page_limit]
+    else:
+        page = ranked[start:]
+    from .health_labels import fetch_recipe_translations
+
+    tr_map = fetch_recipe_translations(
+        [int(row.get("id") or 0) for _rank, _benefit, row in page],
+        lang,
+    )
+    recipes = [
+        public_recipe(
+            row, lang, benefit, simplify=False, foods=foods, translations=tr_map
+        )
+        for _rank, benefit, row in page
+    ]
+    end = start + len(recipes)
     return {
         "name": (name or "").strip(),
         "lang": lang,
         "by_body": bool(by_body),
         "patterns": organ_tags,
         "count": len(recipes),
+        "total": total,
+        "offset": start,
+        "limit": page_limit,
+        "has_more": end < total,
         "recipes": recipes,
         "disclaimer": TEACHING_DISCLAIMER,
     }

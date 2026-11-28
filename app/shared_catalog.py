@@ -11,6 +11,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -26,8 +27,40 @@ DAILY_XLSX = ROOT / "daily_nutrient.xlsx"
 DEVIATION_XLS = ROOT / "deviation.xls"
 DEVIATION_SQLITE = ROOT / "deviation.db"
 
-_SEED_LOCK = threading.Lock()
+# RLock: init_schema() may call seed_from_excel_if_empty while a fetch already
+# holds the seed lock via mysql_ready() → ensure_schema() → init_schema().
+_SEED_LOCK = threading.RLock()
 _seeded = False
+
+# Short TTL memo for COUNT/MAX(updated_at) tokens. Without this, every
+# foods_index() / ingredient_affiliates() call opens fresh SSL MySQL connections
+# (~0.2s each) and country recipe lists of 100+ rows take tens of seconds.
+_CATALOG_TOKEN_TTL_SEC = 30.0
+_catalog_token_memo: dict[str, tuple[float, Any]] = {}
+_catalog_token_lock = threading.Lock()
+
+
+def _catalog_memo_get(key: str) -> Any | None:
+    with _catalog_token_lock:
+        hit = _catalog_token_memo.get(key)
+        if hit and (time.monotonic() - hit[0]) < _CATALOG_TOKEN_TTL_SEC:
+            return hit[1]
+    return None
+
+
+def _catalog_memo_set(key: str, value: Any) -> Any:
+    with _catalog_token_lock:
+        _catalog_token_memo[key] = (time.monotonic(), value)
+    return value
+
+
+def _clear_catalog_token_memo(*keys: str) -> None:
+    with _catalog_token_lock:
+        if not keys:
+            _catalog_token_memo.clear()
+            return
+        for key in keys:
+            _catalog_token_memo.pop(key, None)
 
 # Keep field maps local to avoid circular imports with recipes.py.
 COLUMN_FIELDS = (
@@ -123,6 +156,7 @@ CATALOG_SCHEMA_SQL = [
       protein_g DOUBLE NULL,
       fat_g DOUBLE NULL,
       water_g DOUBLE NULL,
+      affiliate_slug VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug',
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_recipes_country (country),
       INDEX idx_recipes_name_zh (name_zh)
@@ -152,6 +186,7 @@ CATALOG_SCHEMA_SQL = [
       protein_g DOUBLE NULL,
       fat_g DOUBLE NULL,
       water_g DOUBLE NULL,
+      affiliate_slug VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug',
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_foods_zh (name_zh)
     )
@@ -193,13 +228,46 @@ CATALOG_SCHEMA_SQL = [
       INDEX idx_dev_user (user_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS catalog_health_labels (
+      label_id INT AUTO_INCREMENT PRIMARY KEY,
+      kind ENUM('condition','allergen') NOT NULL,
+      name_zh VARCHAR(128) NOT NULL,
+      name_en VARCHAR(255) NULL,
+      name_ja VARCHAR(255) NULL,
+      name_ko VARCHAR(255) NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_health_labels_kind_zh (kind, name_zh),
+      INDEX idx_health_labels_kind (kind)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS recipe_translations (
+      recipe_id INT NOT NULL,
+      lang VARCHAR(8) NOT NULL,
+      recipe MEDIUMTEXT NULL,
+      method MEDIUMTEXT NULL,
+      benefit TEXT NULL,
+      ban TEXT NULL,
+      allergens TEXT NULL,
+      nutrient TEXT NULL,
+      source_hash VARCHAR(64) NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (recipe_id, lang),
+      CONSTRAINT fk_recipe_tr_recipe
+        FOREIGN KEY (recipe_id) REFERENCES catalog_recipes(recipe_id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
 
 
 def _connect():
+    """Open MySQL without re-entering ensure_schema (avoids seed/init deadlock)."""
     from .db import connect
 
-    return connect()
+    return connect(ensure=False)
 
 
 def _cell_number(raw) -> float | None:
@@ -243,11 +311,16 @@ def table_count(table: str) -> int:
     from .security import assert_allowed_table
 
     safe = assert_allowed_table(table)
+    memo_key = f"table_count:{safe}"
+    cached = _catalog_memo_get(memo_key)
+    if cached is not None:
+        return int(cached)
     conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS c FROM `" + safe + "`")
-            return int((cur.fetchone() or {}).get("c") or 0)
+            count = int((cur.fetchone() or {}).get("c") or 0)
+        return int(_catalog_memo_set(memo_key, count))
     finally:
         conn.close()
 
@@ -511,6 +584,15 @@ def seed_from_excel_if_empty() -> dict[str, int]:
                 stats["daily_nutrient"] = _import_daily_from_xlsx(DAILY_XLSX)
             if table_count("catalog_deviations") == 0:
                 stats["deviations"] = _import_deviations_from_sqlite(DEVIATION_SQLITE)
+            try:
+                from .health_labels import sync_health_labels_from_xls, write_seed_xls_files
+
+                write_seed_xls_files()
+                label_stats = sync_health_labels_from_xls(force=False)
+                if label_stats.get("seeded"):
+                    stats["health_labels"] = int(label_stats["seeded"])
+            except Exception:
+                logger.exception("health label catalog seed failed")
             _seeded = True
             if stats:
                 logger.info("MySQL catalog seeded from Excel/SQLite: %s", stats)
@@ -521,6 +603,9 @@ def seed_from_excel_if_empty() -> dict[str, int]:
 
 
 def _recipe_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("recipe_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -528,12 +613,17 @@ def _recipe_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_recipes"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_recipes", token[0])
+        return _catalog_memo_set("recipe_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
 
 
 def _food_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("food_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -541,12 +631,17 @@ def _food_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_foods"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_foods", token[0])
+        return _catalog_memo_set("food_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
 
 
 def _daily_token() -> tuple[int, int]:
+    cached = _catalog_memo_get("daily_token")
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     conn = _connect()
     try:
         with conn.cursor() as cur:
@@ -554,9 +649,17 @@ def _daily_token() -> tuple[int, int]:
                 "SELECT COUNT(*) AS c, COALESCE(MAX(UNIX_TIMESTAMP(updated_at)),0) AS t FROM catalog_daily_nutrient"
             )
             row = cur.fetchone() or {}
-            return int(row.get("c") or 0), int(row.get("t") or 0)
+            token = (int(row.get("c") or 0), int(row.get("t") or 0))
+        _catalog_memo_set("table_count:catalog_daily_nutrient", token[0])
+        return _catalog_memo_set("daily_token", token)  # type: ignore[return-value]
     finally:
         conn.close()
+
+
+def _affiliate_from_join(db_row: dict[str, Any]) -> dict[str, Any] | None:
+    from .affiliate import affiliate_payload_from_join
+
+    return affiliate_payload_from_join(db_row)
 
 
 def _row_to_recipe_item(db_row: dict[str, Any]) -> dict[str, Any]:
@@ -578,7 +681,20 @@ def _row_to_recipe_item(db_row: dict[str, Any]) -> dict[str, Any]:
             has_any = True
     item["nutrients"] = nutrients
     item["has_nutrients"] = has_any
+    item["affiliate_slug"] = str(db_row.get("affiliate_slug") or "").strip()
+    item["affiliate"] = _affiliate_from_join(db_row)
     return item
+
+
+_RECIPE_AFFILIATE_SQL = """
+SELECT r.*,
+  a.slug AS aff_slug,
+  a.title AS aff_title,
+  a.platform_name AS aff_platform_name,
+  a.button_text AS aff_button_text
+FROM catalog_recipes r
+LEFT JOIN affiliate_links a ON r.affiliate_slug = a.slug AND a.is_active = 1
+"""
 
 
 @lru_cache(maxsize=4)
@@ -587,7 +703,7 @@ def _fetch_recipes_cached(count: int, token: int) -> tuple[dict, ...]:
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM catalog_recipes ORDER BY recipe_id")
+            cur.execute(_RECIPE_AFFILIATE_SQL + " ORDER BY r.recipe_id")
             rows = cur.fetchall() or []
         return tuple(_row_to_recipe_item(r) for r in rows)
     finally:
@@ -599,16 +715,95 @@ def fetch_recipe_rows() -> tuple[dict, ...] | None:
     if not mysql_ready():
         return None
     try:
-        if table_count("catalog_recipes") == 0:
+        count, token = _recipe_token()
+        if count == 0:
             return None
-        return _fetch_recipes_cached(*_recipe_token())
+        return _fetch_recipes_cached(count, token)
     except Exception:
         logger.exception("read catalog_recipes failed")
         return None
 
 
+@lru_cache(maxsize=64)
+def _fetch_recipes_for_country_cached(country: str, count: int, token: int) -> tuple[dict, ...]:
+    """Country-scoped catalog rows — avoids rebuilding the full 24k cache for dropdowns."""
+    del count, token
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                _RECIPE_AFFILIATE_SQL
+                + " WHERE r.country=%s ORDER BY r.recipe_id",
+                (wanted,),
+            )
+            rows = cur.fetchall() or []
+        return tuple(_row_to_recipe_item(r) for r in rows)
+    finally:
+        conn.close()
+
+
+def fetch_recipe_rows_for_country(country: str) -> tuple[dict, ...] | None:
+    """Return MySQL recipes for one country, or None to fall back to Excel scan."""
+    wanted = (country or "").strip()
+    if not wanted:
+        return ()
+    seed_from_excel_if_empty()
+    if not mysql_ready():
+        return None
+    try:
+        count, token = _recipe_token()
+        if count == 0:
+            return None
+        return _fetch_recipes_for_country_cached(wanted, count, token)
+    except Exception:
+        logger.exception("read catalog_recipes by country failed")
+        return None
+
+
+def fetch_recipe_rows_by_names(names: list[str]) -> tuple[dict, ...] | None:
+    """Exact zh/en/ja/ko name hits across all countries (ensure global lookup)."""
+    needles = [str(n or "").strip() for n in names if str(n or "").strip()]
+    if not needles:
+        return ()
+    seed_from_excel_if_empty()
+    if not mysql_ready():
+        return None
+    try:
+        if table_count("catalog_recipes") == 0:
+            return None
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                clauses = []
+                params: list[str] = []
+                for needle in needles:
+                    clauses.append(
+                        "(r.name_zh=%s OR r.name_en=%s OR r.name_ja=%s OR r.name_ko=%s)"
+                    )
+                    params.extend([needle, needle, needle, needle])
+                sql = (
+                    _RECIPE_AFFILIATE_SQL
+                    + " WHERE "
+                    + " OR ".join(clauses)
+                    + " ORDER BY r.recipe_id"
+                )
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+            return tuple(_row_to_recipe_item(r) for r in rows)
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("read catalog_recipes by name failed")
+        return None
+
+
 def invalidate_recipe_mysql_cache() -> None:
     _fetch_recipes_cached.cache_clear()
+    _fetch_recipes_for_country_cached.cache_clear()
+    _clear_catalog_token_memo("recipe_token", "table_count:catalog_recipes")
 
 
 def insert_recipe(fields: dict[str, Any]) -> dict[str, Any]:
@@ -636,7 +831,10 @@ def insert_recipe(fields: dict[str, Any]) -> dict[str, Any]:
                 payload,
             )
             recipe_id = int(cur.lastrowid)
-            cur.execute("SELECT * FROM catalog_recipes WHERE recipe_id=%s", (recipe_id,))
+            cur.execute(
+                _RECIPE_AFFILIATE_SQL + " WHERE r.recipe_id=%s",
+                (recipe_id,),
+            )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -673,7 +871,10 @@ def update_recipe(recipe_id: str | int, fields: dict[str, Any]) -> dict[str, Any
             )
             if cur.rowcount == 0:
                 raise RuntimeError(f"找不到要更新的食譜列：{recipe_id}")
-            cur.execute("SELECT * FROM catalog_recipes WHERE recipe_id=%s", (rid,))
+            cur.execute(
+                _RECIPE_AFFILIATE_SQL + " WHERE r.recipe_id=%s",
+                (rid,),
+            )
             row = cur.fetchone()
     finally:
         conn.close()
@@ -681,17 +882,28 @@ def update_recipe(recipe_id: str | int, fields: dict[str, Any]) -> dict[str, Any
     return _row_to_recipe_item(row)
 
 
+_FOOD_AFFILIATE_SQL = """
+SELECT f.*,
+  a.slug AS aff_slug,
+  a.title AS aff_title,
+  a.platform_name AS aff_platform_name,
+  a.button_text AS aff_button_text
+FROM catalog_foods f
+LEFT JOIN affiliate_links a ON f.affiliate_slug = a.slug AND a.is_active = 1
+"""
+
+
 @lru_cache(maxsize=4)
-def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, str]]:
+def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, Any]]:
     del count, token
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM catalog_foods ORDER BY food_id")
+            cur.execute(_FOOD_AFFILIATE_SQL + " ORDER BY f.food_id")
             rows = cur.fetchall() or []
     finally:
         conn.close()
-    foods: dict[str, dict[str, str]] = {}
+    foods: dict[str, dict[str, Any]] = {}
     for db_row in rows:
         zh = str(db_row.get("name_zh") or "").strip()
         if not zh:
@@ -704,6 +916,10 @@ def _fetch_foods_cached(count: int, token: int) -> dict[str, dict[str, str]]:
             "benefit": str(db_row.get("benefit") or "").strip(),
             "ban": str(db_row.get("ban") or "").strip(),
             "nutrient": str(db_row.get("nutrient") or "").strip(),
+            "affiliate_slug": str(db_row.get("affiliate_slug") or "").strip(),
+            "affiliate": _affiliate_from_join(db_row),
+            "kcal": db_row.get("kcal"),
+            "protein_g": db_row.get("protein_g"),
             "_id": str(db_row.get("food_id")),
         }
         foods[zh] = item
@@ -719,9 +935,10 @@ def fetch_foods_index() -> dict[str, dict[str, str]] | None:
     if not mysql_ready():
         return None
     try:
-        if table_count("catalog_foods") == 0:
+        count, token = _food_token()
+        if count == 0:
             return None
-        return _fetch_foods_cached(*_food_token())
+        return _fetch_foods_cached(count, token)
     except Exception:
         logger.exception("read catalog_foods failed")
         return None
@@ -729,6 +946,7 @@ def fetch_foods_index() -> dict[str, dict[str, str]] | None:
 
 def invalidate_foods_mysql_cache() -> None:
     _fetch_foods_cached.cache_clear()
+    _clear_catalog_token_memo("food_token", "table_count:catalog_foods")
 
 
 def upsert_food(fields: dict[str, Any]) -> None:

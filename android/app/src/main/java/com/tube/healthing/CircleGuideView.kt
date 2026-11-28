@@ -23,7 +23,7 @@ class CircleGuideView @JvmOverloads constructor(
         super.onDraw(canvas)
         val cx = width / 2f
         val cy = height / 2f
-        val radius = min(width, height) * 0.32f
+        val radius = min(width, height) * CircleFrame.RADIUS_FRAC
         canvas.drawCircle(cx, cy, radius, paint)
     }
 }

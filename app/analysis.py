@@ -7,7 +7,11 @@ from typing import Any
 
 from PIL import Image, ImageFilter
 
-from .health_flags import CONDITION_OPTIONS
+from .health_flags import (
+    CONDITION_OPTIONS,
+    canonicalize_condition_label,
+    disease_affected_organs,
+)
 from .syndrome import (
     ORGAN_META,
     add,
@@ -42,6 +46,8 @@ SEVERE_DELTA_E_FRAC = 0.65
 # Quiet cohort (no special disease / severe wording): never show 1–3.
 QUIET_HEALTH_FLOOR = 4
 HEALTHY_SCORE_MIN = 8
+# Score 1 needs face+tongue+stool+urine all ≤ this (severe band).
+SCORE_ONE_AGREE_MAX = 3
 # Opens the 1–3 band when ΔE is extreme (checked conditions or severe symptom wording).
 SEVERE_SYMPTOM_KEYWORDS = (
     "很痛",
@@ -64,6 +70,7 @@ FACE_ZH_TO_ORGAN = {
     "心": "heart",
     "腎": "kidney",
 }
+SCORE_KEY_TO_ORGAN = {score_key: key for key, _name, score_key, _pk in ORGAN_META}
 
 
 def organs_from_zh(text: str) -> list[str]:
@@ -105,27 +112,134 @@ def relative_delta_health_score(
     return clamp(10 - 9 * (delta_e - d_min) / span)
 
 
+def severe_symptom_wording(symptoms: str = "", discomfort: str = "") -> bool:
+    """True when今日感覺／不舒服 wording alone opens the severe 1–3 band."""
+    blob = f"{symptoms or ''} {discomfort or ''}"
+    return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
+
+
 def severe_health_gate(
     conditions: list[str] | tuple[str, ...] | None = None,
     symptoms: str = "",
     discomfort: str = "",
 ) -> bool:
-    """True when 1–3 scores may open: any checked special disease or severe wording."""
+    """True when extreme ΔE may enter 1–3 before per-organ floors apply.
+
+    Any checked CONDITION_OPTIONS label (aliases OK) or severe wording opens the
+    color band; organ_allows_severe then floors organs outside the disease map.
+    """
+    if severe_symptom_wording(symptoms, discomfort):
+        return True
     allowed = set(CONDITION_OPTIONS)
     for label in conditions or ():
-        text = str(label or "").strip()
+        canon = canonicalize_condition_label(str(label or ""))
+        text = canon or str(label or "").strip()
         if text and text in allowed:
             return True
-    blob = f"{symptoms or ''} {discomfort or ''}"
-    return any(keyword in blob for keyword in SEVERE_SYMPTOM_KEYWORDS)
+    return False
 
 
-def clamp_organ_health_score(score: int | float, severe_gate: bool = False) -> int:
-    """1–10 organ health; without severe_gate never below QUIET_HEALTH_FLOOR (4)."""
+def organ_allows_severe(
+    organ_key: str,
+    conditions: list[str] | tuple[str, ...] | None = None,
+    symptoms: str = "",
+    discomfort: str = "",
+) -> bool:
+    """Whether this organ may score below quiet floor 4.
+
+    Severe symptom wording → all organs. Special disease → only TCM-affected set.
+    """
+    if severe_symptom_wording(symptoms, discomfort):
+        return True
+    if not organ_key:
+        return False
+    return organ_key in disease_affected_organs(conditions)
+
+
+def modalities_agree_organ_damage(
+    score_key: str,
+    source_maps: dict[str, dict[str, int] | None] | None,
+    *,
+    agree_max: int = SCORE_ONE_AGREE_MAX,
+) -> bool:
+    """True when face + tongue + stool + urine all score this organ ≤ agree_max.
+
+    Tongue = min(tongue_body, tongue_coat) when either is present. Missing any of
+    the four modalities → no score-1 consensus.
+    """
+    if not score_key or not isinstance(source_maps, dict):
+        return False
+    face = source_maps.get("face") or {}
+    stool = source_maps.get("stool") or {}
+    urine = source_maps.get("urine") or {}
+    body = source_maps.get("tongue_body") or {}
+    coat = source_maps.get("tongue_coat") or {}
+    if score_key not in face or score_key not in stool or score_key not in urine:
+        return False
+    tongue_vals = [int(body[score_key])] if score_key in body else []
+    if score_key in coat:
+        tongue_vals.append(int(coat[score_key]))
+    if not tongue_vals:
+        return False
+    try:
+        face_v = int(face[score_key])
+        stool_v = int(stool[score_key])
+        urine_v = int(urine[score_key])
+        tongue_v = min(tongue_vals)
+    except (TypeError, ValueError):
+        return False
+    return (
+        face_v <= agree_max
+        and tongue_v <= agree_max
+        and stool_v <= agree_max
+        and urine_v <= agree_max
+    )
+
+
+def clamp_organ_health_score(
+    score: int | float,
+    severe_gate: bool = False,
+    *,
+    allow_one: bool = True,
+) -> int:
+    """1–10 organ health; without severe_gate never below QUIET_HEALTH_FLOOR (4).
+
+    When severe_gate is open but allow_one is False, floor at 2 (score 1 needs
+    face+tongue+stool+urine consensus).
+    """
     n = max(1, min(10, int(round(float(score)))))
     if not severe_gate and n < QUIET_HEALTH_FLOOR:
         return QUIET_HEALTH_FLOOR
+    if n < 2 and not allow_one:
+        return 2
     return n
+
+
+def clamp_score_map_for_conditions(
+    scores: dict[str, int] | None,
+    conditions: list[str] | tuple[str, ...] | None,
+    symptoms: str = "",
+    discomfort: str = "",
+    *,
+    source_maps: dict[str, dict[str, int] | None] | None = None,
+    apply_one_consensus: bool = False,
+) -> dict[str, int] | None:
+    """Clamp *_score ints with per-organ disease floors and optional score-1 gate."""
+    if not scores:
+        return scores
+    out: dict[str, int] = {}
+    for score_key, value in scores.items():
+        if value is None:
+            continue
+        organ_key = SCORE_KEY_TO_ORGAN.get(score_key, "")
+        gate = organ_allows_severe(organ_key, conditions, symptoms, discomfort)
+        allow_one = True
+        if apply_one_consensus and gate:
+            allow_one = modalities_agree_organ_damage(score_key, source_maps)
+        out[score_key] = clamp_organ_health_score(
+            value, severe_gate=gate, allow_one=allow_one
+        )
+    return out
 
 
 def delta_e_ref_health_score(
@@ -179,7 +293,8 @@ def apply_relative_color_scores(
             )
     return {
         "formula": (
-            "規格內（ΔE≤3）10→8；超出規格 7→4；嚴重門開啟且 ΔE≳0.65·ref 才 3→1。"
+            "規格內（ΔE≤3）10→8；超出規格 7→4；嚴重門開啟且 ΔE≳0.65·ref 才 3→1；"
+            "特殊疾病僅對應臟腑可留在 1–3，其餘地板 4；1 分須四模態同意。"
             "8–10 健康。"
             if mode != "minmax"
             else "score=round(10-9*(ΔE-d_min)/(d_max-d_min)) clamp 1–10；近基準→10，最大ΔE→1。"
@@ -1458,9 +1573,10 @@ def classify_face_lab(
     base: dict[str, float],
     kind: str,
     uneven: float = 0.0,
+    thresholds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """CIELAB vs teaching normal L*65 a*12 b*20; eyes still vs personal/intra baseline."""
-    t = FACE_LAB_THRESHOLDS
+    t = thresholds or FACE_LAB_THRESHOLDS
     ref = FACE_NORMAL_LAB if kind != "eye" else base
     d = _lab_delta(stats, ref)
     dL, da, db, dS = d["dL"], d["da"], d["db"], d["dS"]
@@ -1927,7 +2043,13 @@ def analyze_face_grid(
     personal_lab: dict[str, Any] | None = None,
     female: bool = False,
     severe_gate: bool = False,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+    from .color_calib_online import apply_threshold_adjustments
+
+    face_thresh = apply_threshold_adjustments(
+        FACE_LAB_THRESHOLDS, online_calib, modality="face"
+    )
     findings: list[str] = []
     cells: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
@@ -1957,7 +2079,7 @@ def analyze_face_grid(
         f"教學正常值 L*65 a*12 b*20 #E2AC8A（紅黃隱隱）。本圖平均 {base_hex}，"
         f"Cr {base_cr:.1f}、Cb {base_cb:.1f}。臉色分數 ΔE*/20 → 1–10（8–10 健康）（{TEACHING_NOTE}）"
     )
-    findings.append(c_text)
+    # Keep Lab teaching text on complexion only — do not dump into findings / 食療整理.
 
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
     face_blocks: list[dict[str, Any]] = []
@@ -1975,7 +2097,9 @@ def analyze_face_grid(
         ycrcb_kind = "face" if kind == "nose" else kind
         ycrcb_base = cheek_base if ycrcb_kind == "cheek" else complexion_stats
         reading = classify_face_color(stats, ycrcb_base, ycrcb_kind)
-        lab = classify_face_lab(stats, base, kind, lab_uneven_score(crop))
+        lab = classify_face_lab(
+            stats, base, kind, lab_uneven_score(crop), thresholds=face_thresh
+        )
         reading["dL"] = lab.get("dL")
         reading["da"] = lab.get("da")
         reading["db"] = lab.get("db")
@@ -2376,10 +2500,14 @@ def analyze_face_grid(
                 {"id": spec["id"], "label": spec["label"], "hex": spec["hex"], "centroid": spec["centroid"]}
                 for spec in FACE_COLOR_CLASSES
             ]},
-            "thresholds": FACE_LAB_THRESHOLDS,
+            "thresholds": face_thresh,
         },
         "color_health": color_health,
         "disclaimer": TEACHING_NOTE,
+        "online_calib": {
+            "thresh_applied": bool(face_thresh.get("_online_applied")),
+            "n": int((online_calib or {}).get("n") or 0),
+        },
     }
     return face_grid, findings, colors
 
@@ -2984,11 +3112,16 @@ def analyze_tongue_grid(
     image: Image.Image,
     female: bool = False,
     severe_gate: bool = False,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, str | None]]:
+    from .color_calib_online import apply_threshold_adjustments
+
     findings: list[str] = []
     marks: list[dict[str, Any]] = []
     best_overlay: dict[str, tuple[float, str, tuple[tuple[str, float], ...]]] = {}
-    thresh = TONGUE_LAB_THRESHOLDS
+    thresh = apply_threshold_adjustments(
+        TONGUE_LAB_THRESHOLDS, online_calib, modality="tongue"
+    )
     seg = segment_tongue_body_coat(image)
     baseline = _lab_baseline(seg["all_stats"])
     coating_ratio = float(seg.get("coating_ratio") or tongue_coating_ratio(seg))
@@ -3956,7 +4089,9 @@ def inspect_image(
     confounders: str | None = None,
     lighting_calib: dict[str, Any] | None = None,
     device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from .color_calib_online import apply_lighting_compensation
     from .lighting_calib import compensate_lighting
 
     raw_image = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -3970,12 +4105,18 @@ def inspect_image(
                 color_temperature_k=color_temperature_k,
                 confounders=confounders,
                 severe_gate=severe_gate,
+                lighting_calib=lighting_calib,
+                device_key=device_key,
+                online_calib=online_calib,
             )
         return analyze_urine_image(
             raw_image,
             color_temperature_k=color_temperature_k,
             confounders=confounders,
             severe_gate=severe_gate,
+            lighting_calib=lighting_calib,
+            device_key=device_key,
+            online_calib=online_calib,
         )
     if shot_type == "tongue":
         image, crop_info = frame_tongue_image(raw_image)
@@ -4001,6 +4142,10 @@ def inspect_image(
         lighting_calib,
         device_key,
     )
+    cct, _blended_bright, brightness_gain, online_meta = apply_lighting_compensation(
+        cct, _blended_bright, float(brightness_gain), online_calib
+    )
+    calib_meta = {**(calib_meta or {}), "online": online_meta}
     cct = int(round(normalize_color_temperature_k(cct)))
     image = adapt_rgb_image(image, cct)
     brightness = estimate_relative_brightness(image)
@@ -4023,12 +4168,19 @@ def inspect_image(
     tongue_grid = None
     if shot_type == "tongue":
         tongue_grid, grid_findings, colors = analyze_tongue_grid(
-            image, female=female, severe_gate=severe_gate
+            image,
+            female=female,
+            severe_gate=severe_gate,
+            online_calib=online_calib,
         )
         findings.extend(grid_findings)
     else:
         face_grid, grid_findings, colors = analyze_face_grid(
-            image, personal_lab=personal_lab, female=female, severe_gate=severe_gate
+            image,
+            personal_lab=personal_lab,
+            female=female,
+            severe_gate=severe_gate,
+            online_calib=online_calib,
         )
         findings.extend(grid_findings)
 
@@ -4068,6 +4220,7 @@ def inspect_image(
         "brightness_gain": round(float(brightness_gain), 4),
         "brightness_after": round(float(brightness_after), 4),
         "lighting_calib": calib_meta,
+        "online_calib": online_calib,
         "cct_raw": round(float(raw_cct), 1),
     }
 
@@ -4083,10 +4236,13 @@ def analyze_session(
     color_temperature_k: int | float | str | None = None,
     prior_session: dict[str, Any] | None = None,
     conditions: list[str] | tuple[str, ...] | None = None,
+    allergies: list[str] | tuple[str, ...] | None = None,
     confounders: str | None = None,
     lighting_calib: dict[str, Any] | None = None,
     device_hint: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
+    from .color_calib_online import load_compensation
     from .lighting_calib import device_key_from_hint, learn_from_session, parse_calib_blob
 
     # Prefer camera auto-CCT per shot; ignore legacy discrete UI presets.
@@ -4102,6 +4258,27 @@ def analyze_session(
     gate = severe_health_gate(conditions, symptoms, discomfort)
     device_key = device_key_from_hint(device_hint)
     calib_state = parse_calib_blob(lighting_calib)
+    online_by_mod: dict[str, Any] = {}
+    try:
+        from .db import connect
+
+        conn = connect()
+        try:
+            # Only load modalities present in this request (circle-only skips face/tongue DB).
+            mods = {shot for shot, _raw in images} or {"face", "tongue", "stool", "urine"}
+            for mod in mods:
+                online_by_mod[mod] = load_compensation(
+                    conn,
+                    modality=mod,
+                    user_id=user_id,
+                    device_key=device_key,
+                    conditions=conditions,
+                    allergies=allergies,
+                )
+        finally:
+            conn.close()
+    except Exception:
+        online_by_mod = {}
     color_reports = [
         inspect_image(
             raw,
@@ -4113,6 +4290,7 @@ def analyze_session(
             confounders=confounders if shot_type in ("stool", "urine") else None,
             lighting_calib=calib_state,
             device_key=device_key,
+            online_calib=online_by_mod.get(shot_type),
         )
         for shot_type, raw in images
     ]
@@ -4134,6 +4312,9 @@ def analyze_session(
     crops: dict[str, Any] = {}
     stool_note = None
     urine_note = None
+    face_findings: list[str] = []
+    tongue_findings: list[str] = []
+    shot_types_present = {r.get("shot_type") for r in color_reports if r.get("shot_type")}
     for report in color_reports:
         shot = report.get("shot_type")
         # Keep stool/urine text out of organ-score keyword mapping.
@@ -4143,6 +4324,12 @@ def analyze_session(
                 stool_note = report["stool"]
             if report.get("urine"):
                 urine_note = report["urine"]
+        elif shot == "face":
+            face_findings.extend(report.get("findings") or [])
+            findings.extend(report["findings"])
+        elif shot == "tongue":
+            tongue_findings.extend(report.get("findings") or [])
+            findings.extend(report["findings"])
         else:
             findings.extend(report["findings"])
         for key, value in (report.get("region_colors") or {}).items():
@@ -4163,6 +4350,69 @@ def analyze_session(
         if shot == "tongue" and report.get("preview"):
             tongue_preview = report["preview"]
 
+    # Same calendar day: keep prior modalities until that modality is re-shot.
+    prior = prior_session if isinstance(prior_session, dict) else {}
+    same_day = bool(prior.get("same_day"))
+    prior_day = prior.get("day_modalities") if isinstance(prior.get("day_modalities"), dict) else {}
+    prior_su = prior.get("stool_urine") if isinstance(prior.get("stool_urine"), dict) else {}
+    if same_day:
+        if face_grid is None and isinstance(prior.get("face_grid"), dict):
+            face_grid = prior["face_grid"]
+            prior_face = prior_day.get("face") if isinstance(prior_day.get("face"), dict) else {}
+            face_findings = list(prior_face.get("findings") or [])
+            findings.extend(face_findings)
+            for key, value in (prior.get("region_colors") or {}).items():
+                if key in ("face_color", "lip_color") and value and not region_colors.get(key):
+                    region_colors[key] = value
+            if prior_face.get("color_label") and color_label == "尚未拍照":
+                color_label = str(prior_face["color_label"])
+        if tongue_grid is None and isinstance(prior.get("tongue_grid"), dict):
+            tongue_grid = prior["tongue_grid"]
+            prior_tongue = prior_day.get("tongue") if isinstance(prior_day.get("tongue"), dict) else {}
+            tongue_findings = list(prior_tongue.get("findings") or [])
+            findings.extend(tongue_findings)
+            for key, value in (prior.get("region_colors") or {}).items():
+                if key in ("tongue_body_color", "tongue_coat_color") and value and not region_colors.get(key):
+                    region_colors[key] = value
+            if prior_tongue.get("color_label"):
+                color_label = (
+                    f"{color_label}／{prior_tongue['color_label']}"
+                    if color_label and color_label != "尚未拍照"
+                    else str(prior_tongue["color_label"])
+                )
+        # Carry the other modality only. Re-shot modality keeps the fresh report note/findings.
+        def _prior_circle_note(kind: str) -> dict[str, Any] | None:
+            raw = prior_su.get(kind) if isinstance(prior_su.get(kind), dict) else None
+            if isinstance(raw, dict) and raw:
+                return raw
+            block = prior_day.get(kind) if isinstance(prior_day.get(kind), dict) else None
+            note = block.get("note") if isinstance(block, dict) else None
+            return note if isinstance(note, dict) else None
+
+        if "stool" not in shot_types_present:
+            prior_stool = _prior_circle_note("stool")
+            if isinstance(prior_stool, dict):
+                stool_note = prior_stool
+                prior_stool_findings = prior_su.get("findings") or []
+                stool_bits = [
+                    t for t in prior_stool_findings
+                    if str(t).startswith("大便") or "大便" in str(t)[:8]
+                ]
+                if not stool_bits and isinstance(prior_day.get("stool"), dict):
+                    stool_bits = list(prior_day["stool"].get("findings") or [])
+                stool_urine_findings = list(stool_bits) + list(stool_urine_findings)
+        if "urine" not in shot_types_present:
+            prior_urine = _prior_circle_note("urine")
+            if isinstance(prior_urine, dict):
+                urine_note = prior_urine
+                prior_urine_findings = prior_su.get("findings") or []
+                urine_bits = [
+                    t for t in prior_urine_findings
+                    if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
+                ]
+                if not urine_bits and isinstance(prior_day.get("urine"), dict):
+                    urine_bits = list(prior_day["urine"].get("findings") or [])
+                stool_urine_findings = list(stool_urine_findings) + list(urine_bits)
     evidence = empty_evidence()
     text_notes = apply_text(evidence, f"{symptoms} {discomfort}", include_uterus=female)
     pattern_scores, pattern_notes = score_spleen_stomach_symptoms(f"{symptoms} {discomfort}")
@@ -4182,6 +4432,14 @@ def analyze_session(
             continue
         add(evidence, mark["organ"], mark["pattern"], mark["weight"])
     pulse_notes = apply_pulse(evidence, pulse)
+    if (
+        same_day
+        and not pulse_notes
+        and isinstance(prior_day.get("pulse"), dict)
+        and isinstance(prior_day["pulse"].get("findings"), list)
+    ):
+        # Pulse payload was carried; restore prior pulse narrative if apply_pulse was quiet.
+        pulse_notes = list(prior_day["pulse"]["findings"] or [])
     for organ, name in (("spleen", "脾"), ("stomach", "胃")):
         for kind in pattern_kinds_gained(evidence[organ], pattern_baseline[organ]):
             pattern_scores[f"{name}{kind}"] += 1
@@ -4194,28 +4452,41 @@ def analyze_session(
     body_scores = body_color.get("organ_scores") if tongue_grid else None
     coat_scores = coat_color.get("organ_scores") if tongue_grid else None
     # Modality organ scores only when this session actually captured them with numerics.
+    # Per-organ disease floors: unaffected organs stay ≥4 even when special disease opens
+    # the global ΔE severe band. Score-1 consensus applied after compose.
     stool_scores = None
     urine_scores = None
     if isinstance(stool_note, dict):
         raw = stool_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            stool_scores = {
-                k: clamp_organ_health_score(v, severe_gate=gate)
-                for k, v in raw.items()
-                if v is not None
-            }
+            stool_scores = clamp_score_map_for_conditions(
+                {k: v for k, v in raw.items() if v is not None},
+                conditions,
+                symptoms,
+                discomfort,
+            )
             if not stool_scores:
                 stool_scores = None
     if isinstance(urine_note, dict):
         raw = urine_note.get("organ_scores")
         if isinstance(raw, dict) and raw:
-            urine_scores = {
-                k: clamp_organ_health_score(v, severe_gate=gate)
-                for k, v in raw.items()
-                if v is not None
-            }
+            urine_scores = clamp_score_map_for_conditions(
+                {k: v for k, v in raw.items() if v is not None},
+                conditions,
+                symptoms,
+                discomfort,
+            )
             if not urine_scores:
                 urine_scores = None
+    face_scores = clamp_score_map_for_conditions(
+        face_scores, conditions, symptoms, discomfort
+    )
+    body_scores = clamp_score_map_for_conditions(
+        body_scores, conditions, symptoms, discomfort
+    )
+    coat_scores = clamp_score_map_for_conditions(
+        coat_scores, conditions, symptoms, discomfort
+    )
     # Denominator per organ = sources present this session (unshot modalities omitted).
     source_maps = {
         "face": face_scores,
@@ -4225,10 +4496,14 @@ def analyze_session(
         "urine": urine_scores,
     }
     scores, breakdown = compose_organ_health(source_maps, include_uterus=female)
-    scores = {
-        key: clamp_organ_health_score(value, severe_gate=gate)
-        for key, value in scores.items()
-    }
+    scores = clamp_score_map_for_conditions(
+        scores,
+        conditions,
+        symptoms,
+        discomfort,
+        source_maps=source_maps,
+        apply_one_consensus=True,
+    ) or {}
     used_sources = [key for key, value in source_maps.items() if value is not None]
 
     # Aggregate lighting from this session's shots (mean CCT / brightness).
@@ -4254,6 +4529,17 @@ def analyze_session(
     scores, stabilize_meta = stabilize_organ_scores(
         scores, prior_scores, session_lighting, prior_lighting, severe_gate=gate
     )
+    # Stabilize still uses the global gate; re-apply disease floors + score-1 consensus.
+    scores = clamp_score_map_for_conditions(
+        scores,
+        conditions,
+        symptoms,
+        discomfort,
+        source_maps=source_maps,
+        apply_one_consensus=True,
+    ) or {}
+    stabilize_meta["disease_affected_organs"] = sorted(disease_affected_organs(conditions))
+    stabilize_meta["symptom_severe"] = bool(severe_symptom_wording(symptoms, discomfort))
     for key, info in breakdown.items():
         score_key = next((sk for k, _n, sk, _pk in ORGAN_META if k == key), None)
         if score_key and score_key in scores:
@@ -4314,6 +4600,97 @@ def analyze_session(
             "findings": list(stool_urine_findings),
         }
 
+    # Persist today's modality snapshots so the next shot can update only one item.
+    day_modalities: dict[str, Any] = {}
+    if isinstance(prior_day, dict):
+        day_modalities.update(prior_day)
+    if face_grid is not None:
+        day_modalities["face"] = {
+            "color_label": next(
+                (
+                    r.get("color_label")
+                    for r in color_reports
+                    if r.get("shot_type") == "face" and r.get("color_label")
+                ),
+                (day_modalities.get("face") or {}).get("color_label")
+                or (face_grid.get("complexion") or {}).get("bias")
+                or "臉色已測",
+            ),
+            "findings": list(face_findings)
+            or list((day_modalities.get("face") or {}).get("findings") or []),
+        }
+    if tongue_grid is not None:
+        day_modalities["tongue"] = {
+            "color_label": next(
+                (
+                    r.get("color_label")
+                    for r in color_reports
+                    if r.get("shot_type") == "tongue" and r.get("color_label")
+                ),
+                (day_modalities.get("tongue") or {}).get("color_label") or "舌頭已測",
+            ),
+            "findings": list(tongue_findings)
+            or list((day_modalities.get("tongue") or {}).get("findings") or []),
+        }
+    def _circle_findings(kind: str) -> list[str]:
+        if kind == "stool":
+            matched = [
+                t for t in stool_urine_findings
+                if str(t).startswith("大便") or "大便" in str(t)[:8]
+            ]
+        else:
+            matched = [
+                t for t in stool_urine_findings
+                if str(t).startswith("尿尿") or "尿尿" in str(t)[:8]
+            ]
+        # Re-shot this session: never fall back to yesterday-of-today prior findings.
+        if kind in shot_types_present:
+            if matched:
+                return matched
+            note = stool_note if kind == "stool" else urine_note
+            label = ""
+            if isinstance(note, dict) and isinstance(note.get("class"), dict):
+                label = str(note["class"].get("label") or "").strip()
+            tag = "大便" if kind == "stool" else "尿尿"
+            return [f"{tag}：{label or '已測'}"]
+        return matched or list((day_modalities.get(kind) or {}).get("findings") or [])
+
+    if stool_note is not None:
+        day_modalities["stool"] = {
+            "color_label": (stool_note.get("class") or {}).get("label")
+            if isinstance(stool_note.get("class"), dict)
+            else "大便已測",
+            "findings": _circle_findings("stool"),
+            "note": stool_note,
+        }
+    if urine_note is not None:
+        day_modalities["urine"] = {
+            "color_label": (urine_note.get("class") or {}).get("label")
+            if isinstance(urine_note.get("class"), dict)
+            else "尿尿已測",
+            "findings": _circle_findings("urine"),
+            "note": urine_note,
+        }
+    if pulse is not None or pulse_notes:
+        day_modalities["pulse"] = {
+            "present": True,
+            "findings": list(pulse_notes)
+            or list((day_modalities.get("pulse") or {}).get("findings") or []),
+        }
+    if day_modalities:
+        organ_health["day_modalities"] = day_modalities
+        # Prefer a stable multi-modality color label for UI.
+        label_bits = []
+        for key in ("face", "tongue", "stool", "urine"):
+            block = day_modalities.get(key)
+            if isinstance(block, dict) and block.get("color_label"):
+                tag = {"face": "臉", "tongue": "舌", "stool": "大便", "urine": "尿尿"}[key]
+                label_bits.append(f"{tag}：{block['color_label']}")
+        if day_modalities.get("pulse"):
+            label_bits.append("脈：已測")
+        if label_bits:
+            color_label = "／".join(label_bits)
+
     def merge_color_patterns(pattern_map: dict[str, str] | None) -> None:
         for organ, label in (pattern_map or {}).items():
             if not label or label in ("健康", "待觀察", "未定"):
@@ -4350,7 +4727,10 @@ def analyze_session(
     for key, _name, score_key, pattern_key in ORGAN_META:
         if not female and key == "uterus":
             continue
-        score = scores[score_key]
+        if score_key not in scores or scores.get(score_key) is None:
+            # No real source this session — leave pattern unset; UI shows shoot prompt.
+            continue
+        score = int(scores[score_key])
         if score >= HEALTHY_SCORE_MIN:
             patterns[pattern_key] = "健康"
             overlays[key] = None
@@ -4373,7 +4753,7 @@ def analyze_session(
     if not female:
         all_findings = [item for item in all_findings if "子宮" not in str(item)]
     if not all_findings:
-        all_findings = ["資料不足，各臟腑先記 10 分（正常），不放置證型圖"]
+        all_findings = ["資料不足：尚未有可判分來源的臟腑不記分，請依各格提示拍攝"]
 
     result = {
         "dominant_color": dominant,
@@ -4407,6 +4787,11 @@ def analyze_session(
         "score_stabilize": stabilize_meta,
         "device_key": device_key,
         "lighting_calib_json": updated_calib,
+        "calib_reports": [
+            {k: v for k, v in report.items() if k != "preview"}
+            for report in color_reports
+        ],
+        "online_calib": online_by_mod,
         "disclaimer": "此為教學示範用色彩／臟腑對應邏輯，不能取代醫師診斷。CNN 醫學模型可於蒐集標註照片後再訓練。",
     }
     if not female:

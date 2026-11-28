@@ -16,8 +16,16 @@ from .syndrome import PATTERN_KEYS
 
 logger = logging.getLogger(__name__)
 _schema_ready = False
-_schema_lock = threading.Lock()
+# RLock so ensure_schema → seed → connect(ensure=True) can re-enter safely.
+_schema_lock = threading.RLock()
 _retry_started = False
+
+
+def _color_calib_schema_sql() -> list[str]:
+    from .color_calib_online import CALIB_SCHEMA_SQL
+
+    return list(CALIB_SCHEMA_SQL)
+
 
 SCHEMA_SQL = [
     """
@@ -51,6 +59,19 @@ SCHEMA_SQL = [
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_user_meals_day (user_id, meal_date),
       CONSTRAINT fk_meals_user FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_daily_activity (
+      user_id VARCHAR(32) NOT NULL,
+      activity_date DATE NOT NULL,
+      actual_steps INT NOT NULL DEFAULT 0,
+      burned_kcal DECIMAL(10,1) NULL,
+      source VARCHAR(64) NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, activity_date),
+      INDEX idx_user_activity_day (activity_date),
+      CONSTRAINT fk_activity_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
     """
@@ -100,6 +121,23 @@ SCHEMA_SQL = [
       CONSTRAINT fk_health_user FOREIGN KEY (user_id) REFERENCES users(user_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS affiliate_links (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      slug VARCHAR(100) NOT NULL UNIQUE COMMENT '短網址代稱，例如 olive-oil-01',
+      title VARCHAR(255) NOT NULL COMMENT '商品或餐廳名稱',
+      platform_name VARCHAR(50) NOT NULL COMMENT '主要平台，如 iHerb / Amazon / Klook',
+      button_text VARCHAR(100) DEFAULT '前往查看優惠' COMMENT '按鈕顯示文字',
+      category VARCHAR(32) NOT NULL DEFAULT 'diet' COMMENT 'carousel bucket: diet | fitness',
+      url_tw TEXT NULL COMMENT '台灣訪客專屬網址',
+      url_us TEXT NULL COMMENT '美國/英語系訪客網址',
+      url_jp TEXT NULL COMMENT '日本訪客網址',
+      url_default TEXT NOT NULL COMMENT '預設全球通用網址 (必填防呆)',
+      is_active TINYINT(1) DEFAULT 1 COMMENT '1=啟用, 0=停用',
+      click_count INT DEFAULT 0 COMMENT '點擊次數統計',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 ]
 
 EXTRA_COLUMNS = [
@@ -131,6 +169,21 @@ EXTRA_COLUMNS = [
     ("health_records", "tongue_measurements_json", "TEXT NULL"),
     ("health_records", "organ_composite_json", "TEXT NULL"),
     ("health_records", "stomach_score", "INT NOT NULL DEFAULT 5"),
+    (
+        "catalog_recipes",
+        "affiliate_slug",
+        "VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug'",
+    ),
+    (
+        "catalog_foods",
+        "affiliate_slug",
+        "VARCHAR(100) NULL COMMENT '關聯 affiliate_links.slug'",
+    ),
+    (
+        "affiliate_links",
+        "category",
+        "VARCHAR(32) NOT NULL DEFAULT 'diet' COMMENT 'carousel bucket: diet | fitness'",
+    ),
 ] + [
     ("health_records", col, "VARCHAR(10) NOT NULL DEFAULT '未定'")
     for col in PATTERN_KEYS
@@ -200,7 +253,7 @@ def init_schema(timeout_seconds: int = 8) -> bool:
         try:
             conn = connect(with_db=True, ensure=False)
             with conn.cursor() as cur:
-                for statement in SCHEMA_SQL + _catalog_schema_sql():
+                for statement in SCHEMA_SQL + _catalog_schema_sql() + _color_calib_schema_sql():
                     cur.execute(statement)
                 for table, column, ddl in EXTRA_COLUMNS:
                     cur.execute(

@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +18,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from .advice import build_advice
+from .advice import build_advice, enrich_stored_advice
+from .affiliate import router as affiliate_router
 from .analysis import analyze_session
 from .config import COOKIE_NAME, ROOT, SECRET_KEY
 from .db import connect, init_schema
@@ -49,7 +50,7 @@ from .security import (
 )
 from .syndrome import ORGAN_KEYS, ORGAN_META, PATTERN_KEYS, omit_uterus_judgment, overlay_from_pattern_label
 from .trend import build_trend, iso_time
-from . import user_meals
+from . import user_activity, user_meals
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -77,11 +78,13 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+    # LAN phone/browser origins vary by ipconfig IPv4; regex covers local + RFC1918.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(affiliate_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -94,6 +97,15 @@ def startup():
         seed_from_excel_if_empty()
     except Exception:
         logger.exception("startup catalog seed failed")
+    try:
+        from .affiliate import seed_demo_affiliate_rows
+        from .shared_catalog import invalidate_foods_mysql_cache, invalidate_recipe_mysql_cache
+
+        seed_demo_affiliate_rows()
+        invalidate_recipe_mysql_cache()
+        invalidate_foods_mysql_cache()
+    except Exception:
+        logger.exception("startup affiliate seed failed")
 
 
 GENDER_VALUES = {"female", "male", "other"}
@@ -301,11 +313,15 @@ def decode_image(upload: UploadFile | None, image_base64: str | None) -> bytes |
 
 
 def _stored_organ_score(scores: dict, key: str):
+    """Persist organ score; 0 = no real source this session (DB columns are NOT NULL)."""
     if isinstance(scores, dict) and key in scores and scores[key] is not None:
-        return scores[key]
-    if key == "uterus_score":
-        return 0
-    raise KeyError(key)
+        try:
+            n = int(scores[key])
+        except (TypeError, ValueError):
+            n = 0
+        # Only 1–10 are real composites; 0 means missing source (same sentinel as male uterus).
+        return n if 1 <= n <= 10 else 0
+    return 0
 
 
 def _stored_organ_pattern(patterns: dict, key: str) -> str:
@@ -330,7 +346,13 @@ _HEALTH_RECORD_INSERT_COLUMNS = (
     *PATTERN_KEYS,
     "diet_advice",
     "diet_url",
+    "diet_video_url",
+    "diet_query",
+    "diet_video_query",
     "acupoint_url",
+    "acupoint_video_url",
+    "acupoint_query",
+    "acupoint_video_query",
     "pulse_json",
     "face_grid_json",
     "face_measurements_json",
@@ -368,7 +390,13 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
         *[_stored_organ_pattern(result["patterns"], key) for key in PATTERN_KEYS],
         extra.get("diet_advice"),
         extra.get("diet_url"),
+        extra.get("diet_video_url"),
+        extra.get("diet_query"),
+        extra.get("diet_video_query"),
         extra.get("acupoint_url"),
+        extra.get("acupoint_video_url"),
+        extra.get("acupoint_query"),
+        extra.get("acupoint_video_query"),
         extra.get("pulse_json"),
         json.dumps(face_grid, ensure_ascii=False) if face_grid else None,
         json.dumps(measurements, ensure_ascii=False) if measurements else None,
@@ -403,7 +431,24 @@ def insert_record(user_id: str, result: dict, extra: dict) -> int:
     result["record_id"] = record_id
     result["record_date"] = record_date.isoformat(timespec="seconds")
     result["user_id"] = user_id
-    result.update({k: extra.get(k) for k in ("symptoms", "discomfort", "diet_advice", "diet_url", "acupoint_url")})
+    result.update(
+        {
+            k: extra.get(k)
+            for k in (
+                "symptoms",
+                "discomfort",
+                "diet_advice",
+                "diet_url",
+                "diet_video_url",
+                "diet_query",
+                "diet_video_query",
+                "acupoint_url",
+                "acupoint_video_url",
+                "acupoint_query",
+                "acupoint_video_query",
+            )
+        }
+    )
     return record_id
 
 
@@ -428,6 +473,11 @@ def register_page():
 @app.get("/profile")
 def profile_page():
     return _html_page("profile.html")
+
+
+@app.get("/admin-affiliate")
+def admin_affiliate_page():
+    return _html_page("admin-affiliate.html")
 
 
 @app.get("/media/{name}")
@@ -548,14 +598,33 @@ def backup_export_all(request: Request):
     return {"ok": True, "files": paths}
 
 
+@app.get("/api/config/locale")
+def api_config_locale(request: Request):
+    """Suggest UI lang from query / X-App-Lang / Accept-Language / CF-IPCountry.
+
+    Soft tip only — clients must not force-write preferred_lang from this.
+    """
+    from .locale import detect_locale_payload
+
+    return detect_locale_payload(request)
+
+
 @app.get("/api/flags")
-def health_flag_options():
-    options = list(allergy_options())
-    return {
-        "conditions": list(CONDITION_OPTIONS),
-        "allergies": options,
-        "allergy_options": options,
-    }
+def health_flag_options(request: Request, lang: str | None = None):
+    """Special-disease + allergen checkbox options localized to UI lang.
+
+    Each option is ``{value, label}`` where ``value`` is the canonical zh token
+    stored in profiles, and ``label`` follows ``lang`` (COALESCE MySQL/xls → zh).
+    """
+    from .health_labels import flags_payload, sync_health_labels_from_xls
+    from .locale import resolve_ui_lang
+
+    try:
+        sync_health_labels_from_xls(force=False)
+    except Exception:
+        logger.exception("health label sync before /api/flags failed")
+    code = resolve_ui_lang(request, lang)
+    return flags_payload(code)
 
 
 def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]]:
@@ -583,9 +652,12 @@ def latest_record_judgment(user_id: str) -> tuple[dict[str, int], dict[str, str]
         if raw is None or raw == "":
             continue
         try:
-            scores[key] = int(raw)
+            n = int(raw)
         except (TypeError, ValueError):
             continue
+        if n < 1:
+            continue
+        scores[key] = n
     patterns = {key: (row.get(key) or "") for key in PATTERN_KEYS}
     return scores, patterns
 
@@ -624,9 +696,46 @@ def fetch_week_records_for_advice(user_id: str) -> list[dict]:
     return list(rows)
 
 
+def _parse_json_dict(raw) -> dict | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_same_local_day(record_date) -> bool:
+    if record_date is None:
+        return False
+    try:
+        if isinstance(record_date, datetime):
+            day = record_date.date()
+        elif hasattr(record_date, "year") and hasattr(record_date, "month"):
+            day = record_date  # datetime.date
+        else:
+            text = str(record_date).replace("T", " ")[:10]
+            day = datetime.strptime(text, "%Y-%m-%d").date()
+        return day == datetime.now().date()
+    except (TypeError, ValueError):
+        return False
+
+
 def fetch_prior_session_context(user_id: str) -> dict | None:
-    """Previous record scores + lighting (from organ_composite_json) for day-to-day stabilize."""
-    allowed = [*ORGAN_KEYS, "organ_composite_json", "record_date"]
+    """Latest record: scores/lighting for stabilize; same-day modalities to carry forward."""
+    allowed = [
+        *ORGAN_KEYS,
+        "organ_composite_json",
+        "record_date",
+        "face_grid_json",
+        "tongue_grid_json",
+        "pulse_json",
+        "face_color",
+        "lip_color",
+        "tongue_body_color",
+        "tongue_coat_color",
+    ]
     columns = assert_allowed_columns(allowed, allowed)
     conn = connect()
     try:
@@ -637,7 +746,7 @@ def fetch_prior_session_context(user_id: str) -> dict | None:
                 + """
                 FROM health_records
                 WHERE user_id = %s
-                ORDER BY record_date DESC
+                ORDER BY record_date DESC, record_id DESC
                 LIMIT 1
                 """,
                 (user_id,),
@@ -653,31 +762,74 @@ def fetch_prior_session_context(user_id: str) -> dict | None:
         if raw is None or raw == "":
             continue
         try:
-            scores[key] = int(raw)
+            n = int(raw)
         except (TypeError, ValueError):
             continue
+        # 0 = no real source (do not invent / stabilize from sentinel).
+        if n < 1:
+            continue
+        scores[key] = n
     lighting = None
-    raw_composite = row.get("organ_composite_json")
-    if raw_composite:
-        try:
-            composite = json.loads(raw_composite) if isinstance(raw_composite, str) else raw_composite
-            if isinstance(composite, dict):
-                lighting = composite.get("lighting")
-                if not scores and isinstance(composite.get("scores"), dict):
-                    for key, value in composite["scores"].items():
-                        try:
-                            scores[key] = int(value)
-                        except (TypeError, ValueError):
-                            continue
-        except (TypeError, ValueError, json.JSONDecodeError):
-            lighting = None
-    if not scores and not lighting:
-        return None
-    return {
+    composite = _parse_json_dict(row.get("organ_composite_json"))
+    if composite:
+        lighting = composite.get("lighting")
+        # Prefer composite scores (only real sources) when present.
+        if isinstance(composite.get("scores"), dict):
+            from_json: dict[str, int] = {}
+            for key, value in composite["scores"].items():
+                try:
+                    n = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if n >= 1:
+                    from_json[key] = n
+            if from_json:
+                scores = from_json
+    same_day = _is_same_local_day(row.get("record_date"))
+    out: dict = {
         "scores": scores,
         "lighting": lighting,
         "record_date": row.get("record_date"),
+        "same_day": same_day,
     }
+    if not same_day:
+        if not scores and not lighting:
+            return None
+        return out
+    # Carry today's modalities until that modality is re-shot.
+    face_grid = _parse_json_dict(row.get("face_grid_json"))
+    tongue_grid = _parse_json_dict(row.get("tongue_grid_json"))
+    pulse = _parse_json_dict(row.get("pulse_json"))
+    stool_urine = None
+    day_modalities = None
+    if composite:
+        su = composite.get("stool_urine")
+        if isinstance(su, dict):
+            stool_urine = su
+        dm = composite.get("day_modalities")
+        if isinstance(dm, dict):
+            day_modalities = dm
+    region_colors = {
+        "face_color": row.get("face_color"),
+        "lip_color": row.get("lip_color"),
+        "tongue_body_color": row.get("tongue_body_color"),
+        "tongue_coat_color": row.get("tongue_coat_color"),
+    }
+    out.update(
+        {
+            "face_grid": face_grid,
+            "tongue_grid": tongue_grid,
+            "pulse": pulse,
+            "stool_urine": stool_urine,
+            "day_modalities": day_modalities,
+            "region_colors": region_colors,
+        }
+    )
+    if not scores and not lighting and not any(
+        [face_grid, tongue_grid, pulse, stool_urine, day_modalities]
+    ):
+        return None
+    return out
 
 
 def _json_object(raw: str | None, label: str) -> dict | None:
@@ -762,28 +914,89 @@ def api_recipe_countries(
     }
 
 
+@app.get("/api/foods")
+def api_foods(q: str | None = None, limit: int = 50):
+    """List catalog foods with affiliate JOIN payload (active links only)."""
+    from .shared_catalog import fetch_foods_index
+
+    index = fetch_foods_index() or {}
+    needle = (q or "").strip().lower()
+    seen: set[str] = set()
+    foods: list[dict] = []
+    for key, item in index.items():
+        zh = str(item.get("name_zh") or "").strip()
+        if not zh or zh in seen:
+            continue
+        # Skip alias keys that point at the same row.
+        if key != zh and key in (item.get("name_en"), item.get("name_ja"), item.get("name_ko")):
+            continue
+        seen.add(zh)
+        if needle and needle not in zh.lower() and needle not in str(item.get("name_en") or "").lower():
+            continue
+        foods.append(
+            {
+                "id": item.get("_id"),
+                "name_zh": zh,
+                "name_en": item.get("name_en") or "",
+                "name_ja": item.get("name_ja") or "",
+                "name_ko": item.get("name_ko") or "",
+                "benefit": item.get("benefit") or "",
+                "ban": item.get("ban") or "",
+                "nutrient": item.get("nutrient") or "",
+                "kcal": item.get("kcal"),
+                "protein_g": item.get("protein_g"),
+                "affiliate_slug": item.get("affiliate_slug") or "",
+                "affiliate": item.get("affiliate")
+                if isinstance(item.get("affiliate"), dict)
+                else None,
+            }
+        )
+        if len(foods) >= max(1, min(int(limit or 50), 200)):
+            break
+    return {"foods": foods, "count": len(foods)}
+
+
 @app.get("/api/recipes")
 def api_recipes(
     request: Request,
     country: str = "",
     name: str | None = None,
-    lang: str = "zh",
+    lang: str | None = None,
     patterns: str | None = None,
     scores: str | None = None,
     allergies: str | None = None,
     conditions: str | None = None,
     female: str | None = None,
     by_body: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ):
+    """List recipes for a country (or search by name).
+
+    Pagination: ``limit`` / ``offset`` (default country page = 80 so App dropdowns
+    fill before phone timeouts; pass a larger limit or page to load the rest).
+    Long fields COALESCE from ``recipe_translations`` when lang ≠ zh.
+    """
+    from .locale import resolve_ui_lang
+
+    lang = resolve_ui_lang(request, lang)
     args = _recipe_filter_args(request, patterns, scores, allergies, conditions, female)
     allergy_list = args["allergies"]
     condition_list = args["conditions"]
+    page_offset = max(0, int(offset or 0))
+    # Cap a single page so a buggy client cannot request 20k full payloads.
+    if limit is None:
+        page_limit = 80 if (country or "").strip() else 40
+    else:
+        page_limit = max(1, min(int(limit), 500))
     try:
         if (country or "").strip():
             payload = filter_recipes(
                 country=country,
                 lang=lang,
                 by_body=by_body,
+                limit=page_limit,
+                offset=page_offset,
                 **args,
             )
         else:
@@ -792,6 +1005,8 @@ def api_recipes(
                 name=name or "",
                 lang=lang,
                 by_body=by_body,
+                limit=page_limit,
+                offset=page_offset,
                 **args,
             )
     except ValueError as exc:
@@ -805,10 +1020,33 @@ def api_recipes(
     return payload
 
 
-def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
-    """Find or create a recipe row; country may be blank (lookup / infer / Global)."""
+def _api_recipes_create_or_ensure(
+    country: str,
+    name: str,
+    lang: str | None,
+    request: Request | None = None,
+    background_tasks: BackgroundTasks | None = None,
+):
+    """Find or create a recipe row; country may be blank (lookup / infer / Global).
+
+    On create/update, enqueue non-blocking Gemini translation for the other
+    three UI langs (name_* + recipe_translations). Missing API key → skip quietly.
+    """
+    from .locale import resolve_ui_lang
+    from .recipe_translate import schedule_recipe_translate
+    from .recipes import normalize_lang
+
+    if request is not None:
+        preferred = None
+        user_id = current_user_id(request)
+        if user_id:
+            user = fetch_user(user_id) or {}
+            preferred = user.get("preferred_lang")
+        lang = resolve_ui_lang(request, lang, preferred_lang=preferred)
+    else:
+        lang = normalize_lang(lang)
     try:
-        return ensure_recipe(country=country or "", name=name, lang=lang)
+        result = ensure_recipe(country=country or "", name=name, lang=lang)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -820,24 +1058,45 @@ def _api_recipes_create_or_ensure(country: str, name: str, lang: str):
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"寫入食譜資料失敗：{exc}") from exc
 
+    if background_tasks is not None and isinstance(result, dict):
+        recipe = result.get("recipe") or {}
+        # Names already present on the saved row (wiki / research) are skipped
+        # inside translate_recipe_missing_langs — pass source lang only.
+        schedule_recipe_translate(
+            background_tasks,
+            recipe.get("id"),
+            lang,
+            created=bool(result.get("created")),
+            updated=bool(result.get("updated")),
+        )
+    return result
+
 
 @app.post("/api/recipes/ensure")
 def api_recipes_ensure(
+    request: Request,
+    background_tasks: BackgroundTasks,
     country: str = Form(""),
     name: str = Form(...),
-    lang: str = Form("zh"),
+    lang: str | None = Form(None),
 ):
-    return _api_recipes_create_or_ensure(country, name, lang)
+    return _api_recipes_create_or_ensure(
+        country, name, lang, request, background_tasks=background_tasks
+    )
 
 
 @app.post("/api/recipes/create")
 def api_recipes_create(
+    request: Request,
+    background_tasks: BackgroundTasks,
     country: str = Form(""),
     name: str = Form(...),
-    lang: str = Form("zh"),
+    lang: str | None = Form(None),
 ):
     """Alias of /api/recipes/ensure — country optional; missing rows are researched."""
-    return _api_recipes_create_or_ensure(country, name, lang)
+    return _api_recipes_create_or_ensure(
+        country, name, lang, request, background_tasks=background_tasks
+    )
 
 
 @app.get("/api/nutrient-targets")
@@ -866,7 +1125,8 @@ def api_meals_day(request: Request, date: str | None = None):
     user_id = require_user(request)
     user = fetch_user(user_id) or {}
     try:
-        return user_meals.day_summary(user_id, user, date)
+        summary = user_meals.day_summary(user_id, user, date)
+        return user_activity.attach_activity_to_day(summary, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError:
@@ -942,7 +1202,10 @@ async def api_meals_add(request: Request):
             detail = "找不到食譜或營養建議資料檔"
         raise HTTPException(status_code=404, detail=detail) from exc
     user = fetch_user(user_id) or {}
-    summary = user_meals.day_summary(user_id, user, meal["meal_date"])
+    summary = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, meal["meal_date"]),
+        user_id,
+    )
     return {"ok": True, "meal": meal, "day": summary}
 
 
@@ -952,8 +1215,98 @@ def api_meals_delete(request: Request, meal_id: int, date: str | None = None):
     if not user_meals.delete_meal(user_id, meal_id):
         raise HTTPException(status_code=404, detail="找不到這筆飲食紀錄")
     user = fetch_user(user_id) or {}
-    summary = user_meals.day_summary(user_id, user, date)
+    summary = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, date),
+        user_id,
+    )
     return {"ok": True, "day": summary}
+
+
+def _activity_payload_from_request(payload: dict) -> dict:
+    steps = payload.get("steps")
+    if steps is None:
+        steps = payload.get("actual_steps")
+    return {
+        "date": payload.get("date") or payload.get("activity_date"),
+        "steps": steps,
+        "burned_kcal": payload.get("burned_kcal"),
+        "source": payload.get("source"),
+    }
+
+
+async def _read_json_or_form(request: Request) -> dict:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        body = await request.json()
+        return body if isinstance(body, dict) else {}
+    form = await request.form()
+    return {key: form.get(key) for key in form.keys()}
+
+
+@app.get("/api/activity/today")
+def api_activity_today_get(request: Request, date: str | None = None):
+    """Today's (or date's) meal-based step recommendation + synced phone activity."""
+    user_id = require_user(request)
+    user = fetch_user(user_id) or {}
+    try:
+        return user_activity.today_payload(user_id, user, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="找不到 daily_nutrient.xlsx")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/activity/today")
+async def api_activity_today_post(request: Request):
+    """Upsert today's steps / burned kcal (Android Health Connect, sensor, or manual)."""
+    user_id = require_user(request)
+    payload = _activity_payload_from_request(await _read_json_or_form(request))
+    if payload.get("steps") is None:
+        raise HTTPException(status_code=400, detail="缺少 steps")
+    try:
+        saved = user_activity.upsert_activity(
+            user_id,
+            activity_date=payload.get("date"),
+            steps=payload["steps"],
+            burned_kcal=payload.get("burned_kcal"),
+            source=payload.get("source"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user = fetch_user(user_id) or {}
+    return user_activity.today_payload(user_id, user, saved["date"]) | {
+        "ok": True,
+        "activity": saved,
+    }
+
+
+@app.post("/api/activity/steps")
+async def api_activity_steps(request: Request):
+    """Back-compat alias for POST /api/activity/today."""
+    user_id = require_user(request)
+    payload = _activity_payload_from_request(await _read_json_or_form(request))
+    if payload.get("steps") is None:
+        raise HTTPException(status_code=400, detail="缺少 actual_steps")
+    try:
+        saved = user_activity.upsert_activity(
+            user_id,
+            activity_date=payload.get("date"),
+            steps=payload["steps"],
+            burned_kcal=payload.get("burned_kcal"),
+            source=payload.get("source"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user = fetch_user(user_id) or {}
+    day = user_activity.attach_activity_to_day(
+        user_meals.day_summary(user_id, user, saved["date"]),
+        user_id,
+    )
+    return {"ok": True, "activity": saved, "day": day}
 
 
 @app.post("/api/register")
@@ -1248,11 +1601,17 @@ async def analyze(
     color_temperature_k: str | None = Form(default=None),
     confounders: str | None = Form(default=None),
     device_hint: str | None = Form(default=None),
+    circle_fast: str | None = Form(default=None),
 ):
     user_id = require_user(request)
     images = await collect_images(
         face, tongue, face_base64, tongue_base64, image, image_base64, shot_type
     )
+    # App circle re-shot: skip week-advice + deviation xls (keep same-day modality merge).
+    circle_fast_flag = str(circle_fast or "").strip().lower() in {"1", "true", "yes"}
+    shot_kinds = {s for s, _ in images}
+    circle_only = bool(shot_kinds) and shot_kinds.issubset({"stool", "urine"})
+    use_circle_fast = circle_fast_flag and circle_only
     pulse = None
     if pulse_json:
         try:
@@ -1279,20 +1638,36 @@ async def analyze(
     hint = (device_hint or "").strip() or (request.headers.get("user-agent") or "").strip()
     confirm_with_pulse = str(include_pulse or "").strip().lower() in {"1", "true", "yes", "android"}
     prior_session = fetch_prior_session_context(user_id)
+    # Same calendar day: keep prior pulse until pulse is retested.
+    carried_pulse = False
+    if (
+        pulse is None
+        and isinstance(prior_session, dict)
+        and prior_session.get("same_day")
+        and isinstance(prior_session.get("pulse"), dict)
+    ):
+        pulse = prior_session["pulse"]
+        carried_pulse = True
+        if not pulse_json:
+            pulse_json = json.dumps(pulse, ensure_ascii=False)
+    condition_list = user_conditions(profile)
+    allergy_list = user_allergies(profile)
     result = analyze_session(
         images,
         symptoms or "",
         discomfort or "",
         pulse,
         personal_lab=personal_lab,
-        confirm_with_pulse=confirm_with_pulse,
+        confirm_with_pulse=confirm_with_pulse or carried_pulse,
         female=(profile or {}).get("gender") == "female",
         color_temperature_k=color_temperature_k,
         prior_session=prior_session,
-        conditions=user_conditions(profile),
+        conditions=condition_list,
+        allergies=allergy_list,
         confounders=confounders,
         lighting_calib=lighting_calib,
         device_hint=hint,
+        user_id=user_id,
     )
     # Persist learned lighting compensation for this user+device.
     updated_calib = result.get("lighting_calib_json")
@@ -1311,33 +1686,79 @@ async def analyze(
                 conn.close()
         except Exception:
             logger.exception("lighting_calib_json 寫入失敗")
-    week_records = fetch_week_records_for_advice(user_id)
-    advice = build_advice(
-        result["findings"],
-        symptoms or "",
-        discomfort or "",
-        conditions=user_conditions(profile),
-        allergies=user_allergies(profile),
-        result=result,
-        week_records=week_records,
-    )
+    if use_circle_fast:
+        # Skip week MySQL + heavy advice merge; keep stub keys for App binders.
+        week_records: list[dict] = []
+        advice = {
+            "diet_advice": "",
+            "diet_url": "",
+            "diet_video_url": "",
+            "diet_query": "",
+            "diet_video_query": "",
+            "acupoint_url": "",
+            "acupoint_video_url": "",
+            "acupoint_query": "",
+            "acupoint_video_query": "",
+        }
+    else:
+        week_records = fetch_week_records_for_advice(user_id)
+        advice = build_advice(
+            result["findings"],
+            symptoms or "",
+            discomfort or "",
+            conditions=condition_list,
+            allergies=allergy_list,
+            result=result,
+            week_records=week_records,
+        )
     result["diet_query"] = advice.get("diet_query")
+    result["diet_video_query"] = advice.get("diet_video_query")
     result["diet_video_url"] = advice.get("diet_video_url")
     result["acupoint_query"] = advice.get("acupoint_query")
+    result["acupoint_video_query"] = advice.get("acupoint_video_query")
     result["acupoint_video_url"] = advice.get("acupoint_video_url")
     extra = {
         "symptoms": symptoms,
         "discomfort": discomfort,
-        "diet_advice": advice["diet_advice"],
-        "diet_url": advice["diet_url"],
-        "acupoint_url": advice["acupoint_url"],
+        "diet_advice": advice.get("diet_advice") or "",
+        "diet_url": advice.get("diet_url") or "",
+        "diet_video_url": advice.get("diet_video_url"),
+        "diet_query": advice.get("diet_query"),
+        "diet_video_query": advice.get("diet_video_query"),
+        "acupoint_url": advice.get("acupoint_url") or "",
+        "acupoint_video_url": advice.get("acupoint_video_url"),
+        "acupoint_query": advice.get("acupoint_query"),
+        "acupoint_video_query": advice.get("acupoint_video_query"),
         "pulse_json": pulse_json,
     }
     insert_record(user_id, result, extra)
+    # Online MySQL color calibration: persist features + EWMA state (disease/allergen cross-check).
     try:
-        record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
+        from .analysis import severe_health_gate
+        from .color_calib_online import persist_session_calibration
+
+        quiet = not severe_health_gate(condition_list, symptoms or "", discomfort or "")
+        conn = connect()
+        try:
+            result["color_calib"] = persist_session_calibration(
+                conn,
+                reports=result.get("calib_reports") or [],
+                user_id=user_id,
+                record_id=result.get("record_id"),
+                device_key=result.get("device_key"),
+                conditions=condition_list,
+                allergies=allergy_list,
+                quiet=quiet,
+            )
+        finally:
+            conn.close()
     except Exception:
-        logger.exception("檢測差異沒有寫入 deviation.xls")
+        logger.exception("online color calibration persist failed")
+    if not use_circle_fast:
+        try:
+            record_deviation(user_id, profile, result, symptoms or "", discomfort or "")
+        except Exception:
+            logger.exception("檢測差異沒有寫入 deviation.xls")
     return result
 
 
@@ -1358,13 +1779,14 @@ def records(request: Request):
                 + ", "
                 + pattern_cols
                 + """,
-                       diet_advice, diet_url, acupoint_url,
+                       diet_advice, diet_url, diet_video_url, diet_query, diet_video_query,
+                       acupoint_url, acupoint_video_url, acupoint_query, acupoint_video_query,
                        face_grid_json, face_measurements_json,
                        complexion_label, complexion_hex, complexion_hsv_json,
                        tongue_grid_json, tongue_measurements_json, organ_composite_json
                 FROM health_records
                 WHERE user_id = %s
-                ORDER BY record_date DESC
+                ORDER BY record_date DESC, record_id DESC
                 LIMIT 50
                 """,
                 (user_id,),
@@ -1407,6 +1829,25 @@ def records(request: Request):
         health = row.get("organ_health")
         if isinstance(health, dict) and isinstance(health.get("pattern_scores"), dict):
             row["pattern_scores"] = health["pattern_scores"]
+        # Hoist stool/urine notes so App/Web bind like live /api/record (top-level keys).
+        if isinstance(health, dict):
+            su = health.get("stool_urine") if isinstance(health.get("stool_urine"), dict) else {}
+            dm = health.get("day_modalities") if isinstance(health.get("day_modalities"), dict) else {}
+            for kind in ("stool", "urine"):
+                if row.get(kind):
+                    continue
+                note = su.get(kind) if isinstance(su.get(kind), dict) else None
+                if not note:
+                    block = dm.get(kind) if isinstance(dm.get(kind), dict) else None
+                    nested = block.get("note") if isinstance(block, dict) else None
+                    note = nested if isinstance(nested, dict) else None
+                if isinstance(note, dict) and note:
+                    row[kind] = note
         if not female:
             omit_uterus_judgment(row)
+        enrich_stored_advice(
+            row,
+            allergies=user_allergies(profile),
+            conditions=user_conditions(profile),
+        )
     return {"user_id": user_id, "records": rows, "trend": build_trend(rows, include_uterus=female)}

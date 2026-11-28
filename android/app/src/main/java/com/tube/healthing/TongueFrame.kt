@@ -18,8 +18,10 @@ import kotlin.math.roundToInt
 
 /**
  * Yellow tongue window, same fractions as the web stage.
- * Crop is the rectangle from the teeth line to the bottom of the arc, full frame width.
- * PreviewView uses FILL_CENTER; the saved JPEG is that on-screen rectangle, mirrored like the front preview.
+ * Preview is drawn at [PREVIEW_ZOOM] (view scale around the center) so the
+ * tongue appears ~2× larger under the guide. Crop maps the on-screen yellow
+ * rectangle through that zoom back to the captured frame (FILL_CENTER),
+ * from the teeth line to the bottom of the arc, mirrored like the front preview.
  */
 object TongueFrame {
     const val LEFT = 0.36f
@@ -27,6 +29,7 @@ object TongueFrame {
     const val WIDTH = 0.28f
     const val HEIGHT = 0.52f
     const val TEETH_Y = 12f / 160f
+    const val PREVIEW_ZOOM = 2f
 
     fun cropFileToYellowFrame(file: File, viewW: Int, viewH: Int) {
         if (viewW < 2 || viewH < 2 || !file.isFile) return
@@ -47,14 +50,20 @@ object TongueFrame {
         if (scale <= 0f) return null
         val offX = (viewW - bw * scale) / 2f
         val offY = (viewH - bh * scale) / 2f
-        val frameLeft = viewW * LEFT
-        val frameTop = viewH * TOP
-        val frameW = viewW * WIDTH
-        val frameH = viewH * HEIGHT
+        // Overlay guide sits on the zoomed PreviewView; un-zoom to FILL_CENTER space.
+        fun unzoom(v: Float, size: Float): Float {
+            val c = size / 2f
+            return c + (v - c) / PREVIEW_ZOOM
+        }
+        val frameLeft = unzoom(viewW * LEFT, viewW.toFloat())
+        val frameTop = unzoom(viewH * TOP, viewH.toFloat())
+        val frameRight = unzoom(viewW * (LEFT + WIDTH), viewW.toFloat())
+        val frameBottom = unzoom(viewH * (TOP + HEIGHT), viewH.toFloat())
+        val teethY = unzoom(viewH * (TOP + HEIGHT * TEETH_Y), viewH.toFloat())
         val x0 = (((frameLeft - offX) / scale)).roundToInt().coerceIn(0, bitmap.width - 1)
-        val y0 = (((frameTop + frameH * TEETH_Y - offY) / scale)).roundToInt().coerceIn(0, bitmap.height - 1)
-        val x1 = (((frameLeft + frameW - offX) / scale)).roundToInt().coerceIn(x0 + 1, bitmap.width)
-        val y1 = (((frameTop + frameH - offY) / scale)).roundToInt().coerceIn(y0 + 1, bitmap.height)
+        val y0 = (((teethY - offY) / scale)).roundToInt().coerceIn(0, bitmap.height - 1)
+        val x1 = (((frameRight - offX) / scale)).roundToInt().coerceIn(x0 + 1, bitmap.width)
+        val y1 = (((frameBottom - offY) / scale)).roundToInt().coerceIn(y0 + 1, bitmap.height)
         if (x1 <= x0 || y1 <= y0) return null
         return Bitmap.createBitmap(bitmap, x0, y0, x1 - x0, y1 - y0)
     }

@@ -6,11 +6,17 @@ Optional numeric organ_scores feed compose_organ_health when present.
 
 from __future__ import annotations
 
+import colorsys
 from typing import Any
 
 from PIL import Image, ImageFilter
 
 TEACHING_TAG = "教學示範，非診斷"
+
+# Static teaching note (web shows under stool/urine result; no checkbox questionnaire).
+DYE_CONFUSION_NOTE = (
+    "火龍果, 紅色蔬果, 豬血, 深綠色蔬菜, 鐵劑, 制酸劑, 鋇劑等皆有可能染色排泄物造成混淆"
+)
 
 STOOL_DANGER_NOTE = (
     "教育提醒（非診斷）：若排除飲食／藥物染色後，異常糞色超過約兩日，"
@@ -75,15 +81,100 @@ URINE_CONFOUNDER_LABELS = {
     "drug_stain": "藥物染色",
 }
 
-# Teaching palette centers (L, a*, b*) for optional nearest-class / stain distance.
+# Medical-style urine teaching palette (CIELAB centers) + HSV soft gates.
+# Names: transparent / pale yellow / dehydrated / tea / bilirubin / hematuria.
 URINE_PALETTE = {
-    "clear_colorless": (90.0, 0.0, 5.0),
-    "pale_goose_yellow": (80.0, 0.0, 25.0),
-    "deep_yellow": (67.0, 5.0, 50.0),
-    "dark_tea": (38.0, 18.0, 30.0),
-    "red_pink": (55.0, 28.0, 8.0),
+    "clear_colorless": (90.0, 0.0, 5.0),       # transparent
+    "pale_goose_yellow": (80.0, 0.0, 25.0),    # pale yellow
+    "deep_yellow": (67.0, 5.0, 50.0),          # dehydrated
+    "dark_tea": (38.0, 18.0, 30.0),            # tea / cola
+    "bilirubin": (48.0, 20.0, 48.0),           # bilirubin orange-brown
+    "red_pink": (55.0, 28.0, 8.0),             # hematuria
     "milky_cloudy": (70.0, 0.0, 8.0),
 }
+URINE_OUTSIDE_PALETTE_DE00 = 18.0
+URINE_PALETTE_LABELS = {
+    "clear_colorless": "透明無色",
+    "pale_goose_yellow": "淡／鵝黃色",
+    "deep_yellow": "深黃色（脫水）",
+    "dark_tea": "濃茶／可樂色",
+    "bilirubin": "膽紅素橘褐",
+    "red_pink": "紅色／粉紅色（血尿）",
+    "milky_cloudy": "乳白色／混濁",
+}
+# Soft HSV gates (H degrees, S, V) — dual-space confirm beside Lab.
+URINE_HSV_GATES = {
+    "clear_colorless": {"s_max": 0.18, "v_min": 0.72},
+    "pale_goose_yellow": {"h_lo": 35.0, "h_hi": 75.0, "s_lo": 0.12, "s_hi": 0.55, "v_min": 0.55},
+    "deep_yellow": {"h_lo": 30.0, "h_hi": 70.0, "s_lo": 0.28, "s_hi": 0.85, "v_lo": 0.35, "v_hi": 0.78},
+    "dark_tea": {"h_lo": 15.0, "h_hi": 55.0, "s_lo": 0.25, "v_max": 0.55},
+    "bilirubin": {"h_lo": 18.0, "h_hi": 55.0, "s_lo": 0.35, "v_lo": 0.30, "v_hi": 0.70},
+    "red_pink": {"h_lo": 330.0, "h_hi": 25.0, "s_lo": 0.22, "v_min": 0.35},  # wrap hue
+    "milky_cloudy": {"s_max": 0.22, "v_lo": 0.45, "v_hi": 0.88},
+}
+
+# Stool teaching palette centers — off-palette must NOT force 黃褐／正常.
+# normal_yellow_brown center ≈ mid of user healthy gamut / HEX #8B5A2B.
+STOOL_PALETTE = {
+    "black_tarry": (12.0, 1.0, 2.0),
+    "clay_gray": (78.0, 0.0, 6.0),
+    "bright_dark_red": (40.0, 32.0, 14.0),
+    "dark_green": (38.0, -10.0, 18.0),
+    "normal_yellow_brown": (47.5, 12.0, 35.0),
+    "pale_oily": (66.0, 3.0, 30.0),
+}
+STOOL_OUTSIDE_PALETTE_DE = 22.0
+STOOL_PALETTE_LABELS = {
+    "black_tarry": "黑色／瀝青色",
+    "clay_gray": "灰白色／陶土色",
+    "bright_dark_red": "鮮紅色／暗紅色",
+    "dark_green": "墨綠色／深綠色",
+    "normal_yellow_brown": "黃褐色／金黃色",
+    "pale_oily": "淡黃色／帶油光",
+}
+
+# User healthy yellow-brown / golden stool baseline (shared web+App).
+# Spec: internal/normal-stool-lab-ranges-057.md
+STOOL_NORMAL_LAB = {
+    "L_lo": 35.0,
+    "L_hi": 60.0,
+    "a_lo": 5.0,
+    "a_hi": 18.0,
+    "b_lo": 20.0,
+    "b_hi": 45.0,
+    "ba_min": 1.8,
+}
+# Soft lighting / phone / shadow tolerance around the core gamut (still not black).
+# Shadowed brown medians often land L~28–34, b*~12–18 — keep them 黃褐, not 瀝青.
+STOOL_NORMAL_LAB_SOFT = {
+    "L_lo": 28.0,
+    "L_hi": 65.0,
+    "a_lo": 4.0,
+    "a_hi": 20.0,
+    "b_lo": 12.0,
+    "b_hi": 50.0,
+    "ba_min": 1.3,
+    "de_max": 32.0,
+}
+# Supporting sRGB / HSV gates (same spec).
+STOOL_NORMAL_SRGB = {
+    "r_lo": 110,
+    "r_hi": 185,
+    "g_lo": 75,
+    "g_hi": 135,
+    "b_lo": 25,
+    "b_hi": 70,
+}
+STOOL_NORMAL_HSV = {
+    "h_lo": 25.0,
+    "h_hi": 42.0,
+    "s_lo": 0.45,
+    "s_hi": 0.80,
+    "v_lo": 0.40,
+    "v_hi": 0.72,
+}
+STOOL_BLACK_HSV_V_ALERT = 0.25  # V<25% → black alert
+STOOL_PALE_HSV_S_ALERT = 0.30  # S<30% → pale / bile-low cue
 
 
 def _median(values: list[float]) -> float:
@@ -152,8 +243,77 @@ def _delta_e76(lab1: tuple[float, float, float], lab2: tuple[float, float, float
     ) ** 0.5
 
 
-def _lab_from_roi(image: Image.Image) -> tuple[float, float, float, dict[str, Any]]:
-    """Median CIELAB of circle-crop pixels; soft white-ref WB; drop specular (high L / low S)."""
+def _delta_e00(lab1: tuple[float, float, float], lab2: tuple[float, float, float]) -> float:
+    """CIEDE2000 (ΔE00) — teaching palette distance for urine/stool soft match."""
+    import math
+
+    L1, a1, b1 = lab1
+    L2, a2, b2 = lab2
+    kL = kC = kH = 1.0
+    c1 = math.sqrt(a1 * a1 + b1 * b1)
+    c2 = math.sqrt(a2 * a2 + b2 * b2)
+    c_bar = (c1 + c2) / 2.0
+    c_bar7 = c_bar ** 7
+    g = 0.5 * (1.0 - math.sqrt(c_bar7 / (c_bar7 + 25.0 ** 7)))
+    a1p = (1.0 + g) * a1
+    a2p = (1.0 + g) * a2
+    c1p = math.sqrt(a1p * a1p + b1 * b1)
+    c2p = math.sqrt(a2p * a2p + b2 * b2)
+    h1p = 0.0 if (a1p == 0 and b1 == 0) else math.degrees(math.atan2(b1, a1p)) % 360.0
+    h2p = 0.0 if (a2p == 0 and b2 == 0) else math.degrees(math.atan2(b2, a2p)) % 360.0
+    dLp = L2 - L1
+    dCp = c2p - c1p
+    if c1p * c2p == 0:
+        dhp = 0.0
+    else:
+        raw = h2p - h1p
+        if raw > 180:
+            raw -= 360
+        elif raw < -180:
+            raw += 360
+        dhp = raw
+    dHp = 2.0 * math.sqrt(c1p * c2p) * math.sin(math.radians(dhp) / 2.0)
+    L_bar = (L1 + L2) / 2.0
+    C_bar_p = (c1p + c2p) / 2.0
+    if c1p * c2p == 0:
+        H_bar = h1p + h2p
+    else:
+        if abs(h1p - h2p) > 180:
+            H_bar = (h1p + h2p + 360.0) / 2.0 if (h1p + h2p) < 360 else (h1p + h2p - 360.0) / 2.0
+        else:
+            H_bar = (h1p + h2p) / 2.0
+    t = (
+        1.0
+        - 0.17 * math.cos(math.radians(H_bar - 30.0))
+        + 0.24 * math.cos(math.radians(2.0 * H_bar))
+        + 0.32 * math.cos(math.radians(3.0 * H_bar + 6.0))
+        - 0.20 * math.cos(math.radians(4.0 * H_bar - 63.0))
+    )
+    sL = 1.0 + (0.015 * (L_bar - 50.0) ** 2) / math.sqrt(20.0 + (L_bar - 50.0) ** 2)
+    sC = 1.0 + 0.045 * C_bar_p
+    sH = 1.0 + 0.015 * C_bar_p * t
+    delta_theta = 30.0 * math.exp(-(((H_bar - 275.0) / 25.0) ** 2))
+    c_bar_p7 = C_bar_p ** 7
+    rC = 2.0 * math.sqrt(c_bar_p7 / (c_bar_p7 + 25.0 ** 7))
+    rT = -math.sin(math.radians(2.0 * delta_theta)) * rC
+    return math.sqrt(
+        (dLp / (kL * sL)) ** 2
+        + (dCp / (kC * sC)) ** 2
+        + (dHp / (kH * sH)) ** 2
+        + rT * (dCp / (kC * sC)) * (dHp / (kH * sH))
+    )
+
+
+def _lab_from_roi(
+    image: Image.Image,
+    *,
+    prefer_dark_cluster: bool = False,
+) -> tuple[float, float, float, dict[str, Any]]:
+    """Median CIELAB of circle-crop pixels; soft white-ref WB; drop specular (high L / low S).
+
+    When prefer_dark_cluster=True (stool), ignore porcelain/water and yellow-guide
+    pixels so a black stool on a bright toilet is not diluted to 黃褐色.
+    """
     work = image.convert("RGB")
     rgb = list(work.getdata())
     whites: list[tuple[int, int, int]] = []
@@ -191,9 +351,7 @@ def _lab_from_roi(image: Image.Image) -> tuple[float, float, float, dict[str, An
     lab = _lab_pixels(work, max_side=max(work.size) or 1)
     hsv = _hsv_pixels(work, max_side=max(work.size) or 1)
     rgb2 = list(work.getdata())
-    kept_l: list[float] = []
-    kept_a: list[float] = []
-    kept_b: list[float] = []
+    kept: list[tuple[float, float, float]] = []
     for (r, g, b), (L, a, bb), (_h, s, _v) in zip(rgb2, lab, hsv):
         # Specular / glare: very high L or very bright low-sat
         if max(r, g, b) >= 245 and min(r, g, b) >= 220:
@@ -202,16 +360,102 @@ def _lab_from_roi(image: Image.Image) -> tuple[float, float, float, dict[str, An
             continue
         if L >= 88 and s <= 0.08:
             continue
-        kept_l.append(L)
-        kept_a.append(a)
-        kept_b.append(bb)
-    if not kept_l:
-        kept_l = [p[0] for p in lab]
-        kept_a = [p[1] for p in lab]
-        kept_b = [p[2] for p in lab]
+        if prefer_dark_cluster:
+            chroma = (a * a + bb * bb) ** 0.5
+            # Drop toilet porcelain / water and yellow UI ring contamination.
+            # Do NOT drop mid-pale chalky stool (L~62–78, low chroma) here —
+            # that emptied the ROI onto shadows and locked 黑色／墨绿.
+            # Do NOT drop user-normal 黃褐 (L 35–60, a +5–+18, b +20–+45):
+            # the old L≥55∧b>28∧a>8∧s>0.35 gate erased healthy brown body
+            # and left water/shadows → 黑色／瀝青 or porcelain 灰白.
+            if L >= 82 and chroma < 14:
+                continue
+            if L >= 78 and chroma < 8:
+                continue
+            in_normal_soft = (
+                STOOL_NORMAL_LAB_SOFT["L_lo"] <= L <= STOOL_NORMAL_LAB_SOFT["L_hi"]
+                and STOOL_NORMAL_LAB_SOFT["a_lo"] <= a <= STOOL_NORMAL_LAB_SOFT["a_hi"]
+                and STOOL_NORMAL_LAB_SOFT["b_lo"] <= bb <= STOOL_NORMAL_LAB_SOFT["b_hi"]
+            )
+            if (
+                not in_normal_soft
+                and L >= 62
+                and bb > 48
+                and a > 10
+                and s > 0.45
+            ):
+                # Saturated yellow UI ring / urine splash only (outside normal stool).
+                continue
+        kept.append((L, a, bb))
+    if not kept:
+        kept = [(p[0], p[1], p[2]) for p in lab]
+    cluster = kept
+    cluster_mode = "all"
+    if prefer_dark_cluster and kept:
+        all_L = [p[0] for p in kept]
+        med_all = _median(all_L)
+        pale_frac = sum(1 for lv in all_L if lv >= 58) / float(len(all_L))
+        # Warm brown body (user normal Lab soft gamut): prefer mid-L warm chroma
+        # over minority toilet shadows / creases — those locked 黑色／瀝青.
+        nsoft = STOOL_NORMAL_LAB_SOFT
+        warm_brown = [
+            p
+            for p in kept
+            if nsoft["L_lo"] <= p[0] <= nsoft["L_hi"]
+            and nsoft["a_lo"] <= p[1] <= nsoft["a_hi"]
+            and nsoft["b_lo"] <= p[2] <= nsoft["b_hi"]
+            and (p[1] <= 0 or (p[2] / max(p[1], 1e-6)) >= nsoft["ba_min"])
+        ]
+        warm_frac = len(warm_brown) / float(len(kept))
+        # Brown body before pale majority: porcelain/water often inflate L so
+        # pale_majority used to erase warm stool → wrong class after CCT.
+        # True chalky white has low warm_frac and still takes pale_majority.
+        if warm_frac >= 0.28 and len(warm_brown) >= max(50, len(kept) // 10):
+            cluster = warm_brown
+            cluster_mode = "brown_majority"
+        elif med_all >= 58.0 and pale_frac >= 0.55:
+            # Pale/white stool fills the circle: keep the pale majority. Minority
+            # green water / creases must not become dark_cluster → 墨绿／瀝青.
+            pale = [p for p in kept if p[0] >= 55]
+            cluster = pale if len(pale) >= max(40, len(kept) // 8) else kept
+            cluster_mode = "pale_majority"
+        else:
+            dark = [p for p in kept if p[0] < 40]
+            mid = [p for p in kept if p[0] < 55]
+            need = max(60, len(kept) // 12)
+            # If "dark" pixels are still warm brown (shadowed 黃褐), do not
+            # collapse onto them — use mid or warm subset instead.
+            dark_warm = [
+                p
+                for p in dark
+                if p[1] >= 5.0 and p[2] >= 14.0 and p[2] >= p[1] * 1.3
+            ]
+            if (
+                len(dark) >= need
+                and len(dark_warm) >= max(30, int(0.45 * len(dark)))
+                and warm_brown
+            ):
+                cluster = warm_brown
+                cluster_mode = "brown_majority"
+            elif len(dark) >= need:
+                cluster = dark
+                cluster_mode = "dark"
+            elif len(mid) >= need:
+                cluster = mid
+                cluster_mode = "mid"
+            elif _variance(all_L) > 180:
+                # Bimodal porcelain+stool: use darkest quartile.
+                ordered = sorted(kept, key=lambda p: p[0])
+                q = max(40, len(ordered) // 4)
+                cluster = ordered[:q]
+                cluster_mode = "dark_quartile"
+    kept_l = [p[0] for p in cluster]
+    kept_a = [p[1] for p in cluster]
+    kept_b = [p[2] for p in cluster]
     med = (_median(kept_l), _median(kept_a), _median(kept_b))
     meta = {
         "pixels_used": len(kept_l),
+        "cluster_mode": cluster_mode,
         "white_ref": (
             None
             if white_ref is None
@@ -229,10 +473,11 @@ def _lab_from_roi(image: Image.Image) -> tuple[float, float, float, dict[str, An
     return med[0], med[1], med[2], meta
 
 
-def _surrounding_water_reddish(image: Image.Image) -> bool:
-    work = image.convert("RGB").resize((64, 64), Image.Resampling.BILINEAR)
+def _surrounding_water_a_bloom(image: Image.Image) -> dict[str, Any]:
+    """Ring a* vs stool core: pink water bloom → fresh blood more likely than diet pigment."""
+    work = image.convert("RGB").resize((96, 96), Image.Resampling.BILINEAR)
     w, h = work.size
-    cx0, cy0, cx1, cy1 = int(w * 0.3), int(h * 0.3), int(w * 0.7), int(h * 0.7)
+    cx0, cy0, cx1, cy1 = int(w * 0.32), int(h * 0.32), int(w * 0.68), int(h * 0.68)
     center: list[tuple[int, int, int]] = []
     ring: list[tuple[int, int, int]] = []
     pixels = work.load()
@@ -243,40 +488,217 @@ def _surrounding_water_reddish(image: Image.Image) -> bool:
                 center.append(pix)
             else:
                 ring.append(pix)
+    empty = {
+        "pink_bloom": False,
+        "clear_water": True,
+        "da_ring_minus_center": 0.0,
+        "ring_a": 0.0,
+        "center_a": 0.0,
+    }
     if len(center) < 20 or len(ring) < 20:
-        return False
+        return empty
 
-    def mean_a(samples: list[tuple[int, int, int]]) -> float:
+    def median_lab_a(samples: list[tuple[int, int, int]]) -> float:
         patch = Image.new("RGB", (len(samples), 1))
         patch.putdata(samples)
         labs = _lab_pixels(patch, max_side=max(len(samples), 1))
         return _median([item[1] for item in labs])
 
+    center_a = median_lab_a(center)
+    ring_a = median_lab_a(ring)
+    da = ring_a - center_a
     c_l = _median([max(p) for p in center])
     r_l = _median([max(p) for p in ring])
-    if r_l + 8 < c_l:
-        return False
-    return mean_a(ring) - mean_a(center) >= 8.0
+    # Water usually lighter than stool core; skip if ring is darker debris.
+    if r_l + 6 < c_l:
+        return {
+            **empty,
+            "da_ring_minus_center": round(da, 2),
+            "ring_a": round(ring_a, 2),
+            "center_a": round(center_a, 2),
+        }
+    pink_bloom = da >= 8.0 and ring_a >= 6.0
+    clear_water = (not pink_bloom) and abs(da) < 5.0 and ring_a < 8.0
+    return {
+        "pink_bloom": pink_bloom,
+        "clear_water": clear_water,
+        "da_ring_minus_center": round(da, 2),
+        "ring_a": round(ring_a, 2),
+        "center_a": round(center_a, 2),
+    }
+
+
+def _surrounding_water_reddish(image: Image.Image) -> bool:
+    return bool(_surrounding_water_a_bloom(image).get("pink_bloom"))
+
+
+def _black_surface_metrics(image: Image.Image) -> dict[str, Any]:
+    """GLCM-like contrast + specular: glossy tar vs matte diet/iron black (teaching)."""
+    work = image.convert("RGB")
+    largest = max(work.size)
+    if largest > 128:
+        scale = 128 / float(largest)
+        work = work.resize(
+            (max(1, int(round(work.size[0] * scale))), max(1, int(round(work.size[1] * scale)))),
+            Image.Resampling.BILINEAR,
+        )
+    gray = work.convert("L")
+    # Keep darker stool-like pixels for texture (exclude porcelain).
+    mask = []
+    for L, _a, _b in _lab_pixels(work, max_side=max(work.size) or 1):
+        mask.append(L < 48)
+    vals = list(gray.getdata())
+    w, h = gray.size
+    # Horizontal neighbor co-occurrence contrast / energy (1-px offset, 8-level quantize).
+    levels = 8
+    bins = [[0] * levels for _ in range(levels)]
+    pairs = 0
+    for y in range(h):
+        for x in range(w - 1):
+            i = y * w + x
+            if not mask[i] or not mask[i + 1]:
+                continue
+            g0 = min(levels - 1, vals[i] * levels // 256)
+            g1 = min(levels - 1, vals[i + 1] * levels // 256)
+            bins[g0][g1] += 1
+            bins[g1][g0] += 1
+            pairs += 2
+    contrast = 0.0
+    energy = 0.0
+    if pairs > 0:
+        for i in range(levels):
+            for j in range(levels):
+                p = bins[i][j] / float(pairs)
+                contrast += p * ((i - j) ** 2)
+                energy += p * p
+    spec = _specular_oil_metrics(work)
+    # Glossy tar: higher specular + moderate contrast; matte iron/diet: low specular.
+    glossy_score = max(
+        0.0,
+        min(
+            1.0,
+            0.55 * float(spec.get("specular_score") or 0.0)
+            + 0.45 * min(1.0, contrast / 6.0),
+        ),
+    )
+    surface = "glossy_tar" if glossy_score >= 0.42 else "matte"
+    return {
+        "glcm_contrast": round(contrast, 3),
+        "glcm_energy": round(energy, 4),
+        "specular_score": spec.get("specular_score"),
+        "specular_ratio": spec.get("specular_ratio"),
+        "glossy_score": round(glossy_score, 3),
+        "surface": surface,
+        "pairs": pairs,
+    }
+
+
+def _laplacian_var(gray: Image.Image) -> float:
+    """Approx Laplacian variance via FIND_EDGES energy (Pillow has no cv2 Laplacian)."""
+    edges = gray.filter(ImageFilter.Kernel((3, 3), [0, 1, 0, 1, -4, 1, 0, 1, 0], scale=1))
+    vals = [p / 255.0 for p in edges.getdata()]
+    return _variance(vals)
 
 
 def _turbidity_heuristic(image: Image.Image) -> dict[str, Any]:
-    """High local luminance variance + low edge contrast → milky/cloudy teaching cue."""
+    """Turbidity via luminance std + Laplacian variance (milky/cloudy teaching cue)."""
     gray = image.convert("L").resize((96, 96), Image.Resampling.BILINEAR)
     vals = [p / 255.0 for p in gray.getdata()]
-    local_var = _variance(vals)
+    lum_std = _variance(vals) ** 0.5
+    lap_var = _laplacian_var(gray)
     edges = gray.filter(ImageFilter.FIND_EDGES)
     edge_vals = [p / 255.0 for p in edges.getdata()]
     edge_mean = sum(edge_vals) / max(1, len(edge_vals))
-    cloudy = local_var >= 0.018 and edge_mean <= 0.12
+    # Cloudy: elevated std with muted sharp edges / mid Laplacian energy.
+    cloudy = lum_std >= 0.085 and lap_var <= 0.012 and edge_mean <= 0.14
     return {
-        "local_var": round(local_var, 4),
+        "local_var": round(_variance(vals), 4),
+        "lum_std": round(lum_std, 4),
+        "laplacian_var": round(lap_var, 5),
         "edge_mean": round(edge_mean, 4),
         "cloudy": cloudy,
     }
 
 
-def _foam_metrics(image: Image.Image) -> dict[str, Any]:
-    """Single-frame foam area + fine/coarse granularity (no multi-minute decay yet)."""
+def _foam_glcm_and_roundness(
+    foam_xy: list[tuple[int, int]],
+    w: int,
+    h: int,
+) -> dict[str, Any]:
+    """GLCM-like contrast on foam mask + Hough-ish roundness of foam blobs."""
+    if not foam_xy:
+        return {
+            "glcm_contrast": 0.0,
+            "glcm_energy": 0.0,
+            "mean_roundness": 0.0,
+            "blob_count": 0,
+        }
+    mask = [[0] * w for _ in range(h)]
+    for x, y in foam_xy:
+        if 0 <= x < w and 0 <= y < h:
+            mask[y][x] = 1
+    levels = 2
+    bins = [[0, 0], [0, 0]]
+    pairs = 0
+    for y in range(h):
+        for x in range(w - 1):
+            g0 = mask[y][x]
+            g1 = mask[y][x + 1]
+            bins[g0][g1] += 1
+            bins[g1][g0] += 1
+            pairs += 2
+    contrast = 0.0
+    energy = 0.0
+    if pairs > 0:
+        for i in range(levels):
+            for j in range(levels):
+                p = bins[i][j] / float(pairs)
+                contrast += p * ((i - j) ** 2)
+                energy += p * p
+    # Connected components → roundness (4πA/P²); foam bubbles ≈ round.
+    visited = [[False] * w for _ in range(h)]
+    roundnesses: list[float] = []
+    foam_set = set(foam_xy)
+    for sx, sy in foam_xy:
+        if visited[sy][sx]:
+            continue
+        stack = [(sx, sy)]
+        visited[sy][sx] = True
+        cells: list[tuple[int, int]] = []
+        while stack:
+            x, y = stack.pop()
+            cells.append((x, y))
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in foam_set and not visited[ny][nx]:
+                    visited[ny][nx] = True
+                    stack.append((nx, ny))
+        if len(cells) < 4:
+            continue
+        peri = 0
+        for x, y in cells:
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if (x + dx, y + dy) not in foam_set:
+                    peri += 1
+        area = float(len(cells))
+        if peri <= 0:
+            continue
+        roundness = min(1.5, (12.566 * area) / (peri * peri))  # 4π≈12.566
+        roundnesses.append(roundness)
+    mean_r = sum(roundnesses) / len(roundnesses) if roundnesses else 0.0
+    return {
+        "glcm_contrast": round(contrast, 4),
+        "glcm_energy": round(energy, 4),
+        "mean_roundness": round(mean_r, 3),
+        "blob_count": len(roundnesses),
+    }
+
+
+def _foam_metrics(
+    image: Image.Image,
+    prior_frames: list[Image.Image] | None = None,
+) -> dict[str, Any]:
+    """Foam area ratio + GLCM/Hough-ish granularity; optional multi-frame decay."""
     work = image.convert("RGB").resize((128, 128), Image.Resampling.BILINEAR)
     hsv = work.convert("HSV")
     lab = work.convert("LAB")
@@ -286,11 +708,10 @@ def _foam_metrics(image: Image.Image) -> dict[str, Any]:
     hsv_data = list(hsv.getdata())
     lab_data = list(lab.getdata())
     edge_data = list(edges.getdata())
-    for i, (( _hh, s, v), (Lraw, _a, _b), e) in enumerate(zip(hsv_data, lab_data, edge_data)):
+    for i, ((_hh, s, v), (Lraw, _a, _b), e) in enumerate(zip(hsv_data, lab_data, edge_data)):
         L = Lraw * 100.0 / 255.0
         sat = s / 255.0
         val = v / 255.0
-        # Bright high-frequency / edge-ish on liquid surface
         if L < 72 or sat > 0.28 or val < 0.55:
             continue
         if e < 18 and L < 88:
@@ -298,9 +719,9 @@ def _foam_metrics(image: Image.Image) -> dict[str, Any]:
         foam_xy.append((i % w, i // w))
     total = w * h
     ratio = len(foam_xy) / float(total) if total else 0.0
+    tex = _foam_glcm_and_roundness(foam_xy, w, h)
     granularity = "none"
     if foam_xy:
-        # Neighbor clustering: fine foam → many small isolated peaks; coarse → larger blobs
         foam_set = set(foam_xy)
         neighbors = 0
         for x, y in foam_xy:
@@ -308,18 +729,42 @@ def _foam_metrics(image: Image.Image) -> dict[str, Any]:
                 if (x + dx, y + dy) in foam_set:
                     neighbors += 1
         dens = neighbors / max(1, len(foam_xy))
-        if dens >= 2.2 and ratio >= 0.08:
+        # Fine dense: high neighbor dens + rounder blobs + higher GLCM energy on mask.
+        if dens >= 2.2 and ratio >= 0.08 and tex["mean_roundness"] >= 0.35:
             granularity = "fine_dense"
-        elif dens >= 1.2:
+        elif dens >= 2.0 and ratio >= 0.08:
+            granularity = "fine_dense"
+        elif dens >= 1.2 or tex["blob_count"] >= 6:
             granularity = "mixed"
         else:
             granularity = "coarse_sparse"
+    # Optional multi-frame decay: ratio drop between first and last frame.
+    decay_measured = False
+    decay_half_life_hint = None
+    if prior_frames and len(prior_frames) >= 1:
+        ratios = [ratio]
+        for fr in prior_frames[:3]:
+            try:
+                ratios.append(float(_foam_metrics(fr).get("foam_ratio") or 0.0))
+            except Exception:
+                continue
+        if len(ratios) >= 2 and ratios[0] > 0.02:
+            decay_measured = True
+            drop = ratios[0] - ratios[-1]
+            decay_half_life_hint = "fast" if drop >= ratios[0] * 0.5 else "slow"
     persistent_alert = granularity == "fine_dense" and ratio >= 0.12
+    if decay_measured and decay_half_life_hint == "slow" and ratio >= 0.08:
+        persistent_alert = True
     return {
         "foam_ratio": round(ratio, 4),
         "granularity": granularity,
         "persistent_foam_teaching_alert": persistent_alert,
-        "decay_measured": False,
+        "decay_measured": decay_measured,
+        "decay_half_life_hint": decay_half_life_hint,
+        "glcm_contrast": tex["glcm_contrast"],
+        "glcm_energy": tex["glcm_energy"],
+        "mean_roundness": tex["mean_roundness"],
+        "blob_count": tex["blob_count"],
     }
 
 
@@ -544,8 +989,229 @@ def steatorrhea_score_v1(
     }
 
 
+def _nearest_stool_palette(L: float, a: float, b: float) -> tuple[str | None, float]:
+    nearest_id: str | None = None
+    nearest_de = 1e9
+    for pid, center in STOOL_PALETTE.items():
+        de = _delta_e76((L, a, b), center)
+        if de < nearest_de:
+            nearest_de = de
+            nearest_id = pid
+    return nearest_id, float(nearest_de)
+
+
+def _stool_class_payload_from_id(
+    pid: str,
+    *,
+    nearest_de: float,
+    near_standard: bool = False,
+    measured: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
+    """Build a stool class from a teaching-palette id.
+
+    near_standard=True → label annotated with「接近判定標準」(never 無法對照／偏離教學色盤).
+    """
+    base_label = STOOL_PALETTE_LABELS.get(pid, pid or "未知")
+    meta = {
+        "black_tarry": (
+            "食道／胃／十二指腸",
+            ["stomach", "small_intestine"],
+            "上消化道出血教學提示",
+            "血品食物、鐵劑、鉍劑",
+            True,
+            3,
+        ),
+        "clay_gray": (
+            "肝／膽道／胰",
+            ["liver", "gallbladder", "spleen"],
+            "膽汁排出受阻教學警示",
+            "鋇劑、制酸劑",
+            True,
+            3,
+        ),
+        "bright_dark_red": (
+            "結腸／直腸／肛門",
+            ["large_intestine"],
+            "下消化道出血教學提示",
+            "紅色蔬果",
+            True,
+            3,
+        ),
+        "dark_green": (
+            "小腸／大腸",
+            ["small_intestine", "large_intestine"],
+            "感染／發炎／通過過快教學提示",
+            "深綠色蔬菜、鐵劑、抗生素",
+            True,
+            5,
+        ),
+        "normal_yellow_brown": (
+            "肝膽膽汁正常、腸道通暢（教學）",
+            ["liver", "gallbladder", "large_intestine", "small_intestine"],
+            "相對健康糞色教學示範",
+            "一般飲食",
+            False,
+            7 if near_standard else 8,
+        ),
+        "pale_oily": (
+            "胰臟／膽囊／小腸",
+            ["gallbladder", "spleen", "small_intestine"],
+            "脂肪消化不良／膽汁不足可能；酸臭易浮水面（教學）",
+            "高油脂飲食",
+            True,
+            5,
+        ),
+    }
+    organs, keys, hint, conf, abnormal, score = meta.get(
+        pid,
+        ("未對照", [], "教學色盤最近類", "飲食／藥物染色、光線、取景", True, 5),
+    )
+    if near_standard:
+        label = f"{base_label}（接近判定標準）"
+        hint = f"{hint}；接近判定標準（ΔE≈{nearest_de:.0f}）"
+    else:
+        label = f"{base_label}（近似）"
+        hint = f"{hint}（ΔE≈{nearest_de:.0f}）"
+    out: dict[str, Any] = {
+        "id": pid,
+        "label": label,
+        "organs": organs,
+        "organ_keys": keys,
+        "hint": hint,
+        "confounders": conf,
+        "abnormal": abnormal,
+        "health_score": score,
+        "palette_delta_e": round(nearest_de, 1),
+        "nearest_palette_id": pid,
+    }
+    if near_standard:
+        out["near_standard"] = True
+        out["far_from_palette"] = True  # ΔE above soft gate; still a nearest class
+        if measured is not None:
+            L, a, b = measured
+            out["measured_lab"] = {
+                "L": round(L, 1),
+                "a_star": round(a, 1),
+                "b_star": round(b, 1),
+            }
+    return out
+
+
+def _stool_nearest_standard_class(L: float, a: float, b: float) -> dict[str, Any]:
+    """Fallback when hard/soft rules miss: nearest palette class +「接近判定標準」."""
+    nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
+    pid = nearest_id or "normal_yellow_brown"
+    if pid == "pale_oily":
+        hit = _stool_pale_oily_class(approx=True)
+        hit["label"] = f"{STOOL_PALETTE_LABELS['pale_oily']}（接近判定標準）"
+        hit["hint"] = f"{hit['hint']}；接近判定標準（ΔE≈{nearest_de:.0f}）"
+        hit["palette_delta_e"] = round(nearest_de, 1)
+        hit["nearest_palette_id"] = pid
+        hit["near_standard"] = True
+        hit["far_from_palette"] = True
+        hit["measured_lab"] = {
+            "L": round(L, 1),
+            "a_star": round(a, 1),
+            "b_star": round(b, 1),
+        }
+        return hit
+    return _stool_class_payload_from_id(
+        pid, nearest_de=nearest_de, near_standard=True, measured=(L, a, b)
+    )
+
+
+def _ba_ratio(a: float, b: float) -> float:
+    return float(b) / max(float(a), 1e-6)
+
+
+def _in_normal_stool_lab_core(L: float, a: float, b: float) -> bool:
+    """User healthy gamut: L 35–60, a +5–+18, b +20–+45, prefer b/a > 1.8."""
+    g = STOOL_NORMAL_LAB
+    if not (g["L_lo"] <= L <= g["L_hi"]):
+        return False
+    if not (g["a_lo"] <= a <= g["a_hi"]):
+        return False
+    if not (g["b_lo"] <= b <= g["b_hi"]):
+        return False
+    if a > 0 and _ba_ratio(a, b) < g["ba_min"]:
+        return False
+    return True
+
+
+def _in_normal_stool_lab_soft(L: float, a: float, b: float) -> tuple[bool, float]:
+    """Lighting/shadow soft gamut + ΔE to normal palette center."""
+    g = STOOL_NORMAL_LAB_SOFT
+    de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+    in_box = (
+        g["L_lo"] <= L <= g["L_hi"]
+        and g["a_lo"] <= a <= g["a_hi"]
+        and g["b_lo"] <= b <= g["b_hi"]
+        and (a <= 0 or _ba_ratio(a, b) >= g["ba_min"])
+    )
+    # Soft box alone is enough when warm yellow-brown (ΔE can exceed 26 for
+    # dark-cluster medians of real brown). Cap extreme outliers with de_max+6.
+    if in_box and de <= (g["de_max"] + 6.0):
+        return True, de
+    # Near palette even if one channel slightly outside (phone WB).
+    if (
+        28.0 <= L <= 62.0
+        and 4.0 <= a <= 20.0
+        and 12.0 <= b <= 48.0
+        and _ba_ratio(a, b) >= 1.35
+        and de <= g["de_max"]
+    ):
+        return True, de
+    return False, de
+
+
+def _normal_yellow_brown_hit(
+    *,
+    approx: bool = False,
+    de: float | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": "normal_yellow_brown",
+        "label": "黃褐色／金黃色（近似）" if approx else "黃褐色／金黃色",
+        "organs": "肝膽膽汁正常、腸道通暢（教學）",
+        "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
+        "hint": (
+            f"相對健康糞色教學示範（ΔE≈{de:.0f}）"
+            if approx and de is not None
+            else "相對健康糞色教學示範"
+        ),
+        "confounders": "一般飲食",
+        "abnormal": False,
+        "health_score": 8 if approx else 9,
+    }
+    if de is not None:
+        out["palette_delta_e"] = round(de, 1)
+    return out
+
+
+def _srgb_hsv_supports_normal_brown(
+    r: float, g: float, b: float, h: float, s: float, v: float
+) -> bool:
+    """Optional sRGB/HSV gates from user normal-stool spec."""
+    sr = STOOL_NORMAL_SRGB
+    hv = STOOL_NORMAL_HSV
+    rgb_ok = (
+        sr["r_lo"] <= r <= sr["r_hi"]
+        and sr["g_lo"] <= g <= sr["g_hi"]
+        and sr["b_lo"] <= b <= sr["b_hi"]
+        and r > g > b
+        and 25 <= (r - g) <= 55
+    )
+    hsv_ok = (
+        hv["h_lo"] <= h <= hv["h_hi"]
+        and hv["s_lo"] <= s <= hv["s_hi"]
+        and hv["v_lo"] <= v <= hv["v_hi"]
+    )
+    return bool(rgb_ok or hsv_ok)
+
+
 def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
     chroma = (a * a + b * b) ** 0.5
+    warm_brownish = a >= 4.0 and b >= 14.0 and _ba_ratio(a, b) >= 1.3
 
     if L < 20 and -2 <= a <= 5 and -2 <= b <= 8:
         return {
@@ -591,23 +1257,20 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 5,
         }
-    if 35 <= L <= 60 and 5 <= a <= 18 and 20 <= b <= 45 and b >= a + 8:
-        return {
-            "id": "normal_yellow_brown",
-            "label": "黃褐色／金黃色",
-            "organs": "肝膽膽汁正常、腸道通暢（教學）",
-            "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
-            "hint": "相對健康糞色教學示範",
-            "confounders": "一般飲食",
-            "abnormal": False,
-            "health_score": 9,
-        }
-    # Fat-pale Lab band (steatorrhea teaching): L>60, b>+25, a≈-2..+8
-    if L > 60 and b > 25 and -2 <= a <= 8:
+    # Exact 黃褐 — user healthy Lab baseline (before any black approx).
+    if _in_normal_stool_lab_core(L, a, b):
+        return _normal_yellow_brown_hit(approx=False)
+    # Soft 黃褐 (gamut + ΔE) BEFORE black approx — shadowed phone browns
+    # used to fall through to unbounded L<32 → 黑色／瀝青.
+    soft_ok_yb, de_yb = _in_normal_stool_lab_soft(L, a, b)
+    if soft_ok_yb:
+        return _normal_yellow_brown_hit(approx=True, de=de_yb)
+    # Fat-pale Lab band only (steatorrhea teaching): L>60, b>+25, a≈-2..+6 (low a*).
+    # Do NOT use a wide mid-L pale band — that locked solid yellow-brown → 淡黃色帶油光.
+    if L > 62 and b > 28 and -2 <= a <= 6:
         return _stool_pale_oily_class()
-    if 45 <= L <= 72 and -2 <= a <= 12 and 8 <= b <= 28 and chroma < 32:
-        return _stool_pale_oily_class()
-    if L < 28 and chroma < 14:
+    # Dark / tarry approximate — true black/tar only (low chroma, not warm brown).
+    if L < 36 and chroma < 14 and not warm_brownish and a < 6 and b < 12:
         return {
             "id": "black_tarry",
             "label": "黑色／瀝青色（近似）",
@@ -618,7 +1281,19 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
-    if a > 18 and a >= b:
+    if L < 28 and chroma < 16 and not warm_brownish and a < 5 and b < 10:
+        return {
+            "id": "black_tarry",
+            "label": "黑色／瀝青色（近似）",
+            "organs": "食道／胃／十二指腸",
+            "organ_keys": ["stomach", "small_intestine"],
+            "hint": "上消化道出血教學提示",
+            "confounders": "血品食物、鐵劑、鉍劑",
+            "abnormal": True,
+            "health_score": 3,
+        }
+    # Red approx: require a*>+20 and a*≥b* with b* not purple-negative.
+    if a > 20 and a >= b and b > -5 and L < 70:
         return {
             "id": "bright_dark_red",
             "label": "鮮紅色／暗紅色（近似）",
@@ -629,16 +1304,18 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
-    if a < -3 and b > 8:
+    # Pale / chalky BEFORE loose green: toilet WB / green water often nudge a* slightly
+    # negative on white stool; unbounded green approx used to lock 墨綠色.
+    if L >= 62 and chroma < 22 and -12 <= a <= 8 and b < 20:
         return {
-            "id": "dark_green",
-            "label": "墨綠色／深綠色（近似）",
-            "organs": "小腸／大腸",
-            "organ_keys": ["small_intestine", "large_intestine"],
-            "hint": "感染／發炎／通過過快教學提示",
-            "confounders": "深綠色蔬菜、鐵劑、抗生素",
+            "id": "clay_gray",
+            "label": "灰白色／陶土色（近似）",
+            "organs": "肝／膽道／胰",
+            "organ_keys": ["liver", "gallbladder", "spleen"],
+            "hint": "膽汁排出受阻教學警示",
+            "confounders": "鋇劑、制酸劑",
             "abnormal": True,
-            "health_score": 5,
+            "health_score": 3,
         }
     if L > 65 and chroma < 16:
         return {
@@ -651,16 +1328,263 @@ def classify_stool_lab(L: float, a: float, b: float) -> dict[str, Any]:
             "abnormal": True,
             "health_score": 3,
         }
-    return {
-        "id": "normal_yellow_brown",
-        "label": "黃褐色／金黃色（近似）",
-        "organs": "肝膽膽汁正常、腸道通暢（教學）",
-        "organ_keys": ["liver", "gallbladder", "large_intestine", "small_intestine"],
-        "hint": "相對健康糞色教學示範",
-        "confounders": "一般飲食",
-        "abnormal": False,
-        "health_score": 8,
+    # Green approx: mid/dark L only (pale samples are clay/outside, not 墨绿).
+    if L <= 55 and a < -5 and b > 8:
+        return {
+            "id": "dark_green",
+            "label": "墨綠色／深綠色（近似）",
+            "organs": "小腸／大腸",
+            "organ_keys": ["small_intestine", "large_intestine"],
+            "hint": "感染／發炎／通過過快教學提示",
+            "confounders": "深綠色蔬菜、鐵劑、抗生素",
+            "abnormal": True,
+            "health_score": 5,
+        }
+    # Soft near-match only when close to a known center — never invent 黃褐／正常.
+    nearest_id, nearest_de = _nearest_stool_palette(L, a, b)
+    if nearest_id == "normal_yellow_brown" and nearest_de <= 16.0 and warm_brownish:
+        return _normal_yellow_brown_hit(approx=True, de=nearest_de)
+    # Soft dark_green only when a* is actually greenish — warm brown (a*>0) must not
+    # soft-match 墨绿 just because ΔE to the green center is slightly nearer than 黃褐.
+    soft_ok = nearest_de <= STOOL_OUTSIDE_PALETTE_DE and nearest_id in {
+        "black_tarry",
+        "clay_gray",
+        "bright_dark_red",
+        "dark_green",
+        "pale_oily",
     }
+    if soft_ok and nearest_id == "dark_green" and a >= -2:
+        soft_ok = False
+    # Soft black only for truly dark / low-chroma — never warm brown body.
+    if soft_ok and nearest_id == "black_tarry" and (
+        warm_brownish or L >= 30 or chroma >= 14 or a >= 5 or b >= 10
+    ):
+        soft_ok = False
+    if soft_ok:
+        if nearest_id == "pale_oily":
+            hit = _stool_pale_oily_class(approx=True)
+            hit["palette_delta_e"] = round(nearest_de, 1)
+            return hit
+        return _stool_class_payload_from_id(
+            nearest_id, nearest_de=nearest_de, near_standard=False
+        )
+    # Always report nearest class — never「無法對照／偏離教學色盤」for stool.
+    return _stool_nearest_standard_class(L, a, b)
+
+
+def _hsv_gate_ok(pid: str, h: float, s: float, v: float) -> bool:
+    g = URINE_HSV_GATES.get(pid) or {}
+    if not g:
+        return True
+    if "s_max" in g and s > float(g["s_max"]):
+        return False
+    if "s_lo" in g and s < float(g["s_lo"]):
+        return False
+    if "s_hi" in g and s > float(g["s_hi"]):
+        return False
+    if "v_min" in g and v < float(g["v_min"]):
+        return False
+    if "v_max" in g and v > float(g["v_max"]):
+        return False
+    if "v_lo" in g and v < float(g["v_lo"]):
+        return False
+    if "v_hi" in g and v > float(g["v_hi"]):
+        return False
+    if "h_lo" in g and "h_hi" in g:
+        lo = float(g["h_lo"])
+        hi = float(g["h_hi"])
+        if lo <= hi:
+            if not (lo <= h <= hi):
+                return False
+        else:
+            # wrap (e.g. red 330–25)
+            if not (h >= lo or h <= hi):
+                return False
+    return True
+
+
+def _urine_class_payload(
+    pid: str,
+    *,
+    approx: bool = False,
+    de00: float = 0.0,
+    far: bool = False,
+) -> dict[str, Any]:
+    labels = {
+        "clear_colorless": (
+            "透明無色",
+            "飲水過多教學；若持續清澈且多尿、飲水不多，教學上聯想腦垂體／腎或腎陽虛",
+            True,
+            6,
+            ["kidney", "bladder"],
+        ),
+        "pale_goose_yellow": (
+            "淡／鵝黃色",
+            "相對健康尿色教學示範",
+            False,
+            9 if not approx else 8,
+            ["kidney", "bladder"],
+        ),
+        "deep_yellow": (
+            "深黃色（脫水）",
+            "脫水／內熱／心火旺教學提示",
+            True,
+            6,
+            ["heart", "bladder", "kidney"],
+        ),
+        "dark_tea": (
+            "濃茶／可樂色",
+            "肝膽膽紅素教學，或劇烈運動後可樂色橫紋肌溶解／腎風險教學",
+            True,
+            3,
+            ["liver", "gallbladder", "kidney"],
+        ),
+        "bilirubin": (
+            "膽紅素橘褐",
+            "肝膽膽紅素教學警示；需排除藥物／飲食染色",
+            True,
+            3,
+            ["liver", "gallbladder"],
+        ),
+        "red_pink": (
+            "紅色／粉紅色（血尿）",
+            "血尿教學（腎／輸尿管／膀胱／攝護腺）；劇烈腰痛教學聯想結石，無痛則腫瘤警覺教學",
+            True,
+            3,
+            ["kidney", "bladder"],
+        ),
+        "milky_cloudy": (
+            "乳白色／混濁",
+            "泌尿道感染／膿尿或結晶（痛風／結石）教學提示",
+            True,
+            5,
+            ["bladder", "kidney"],
+        ),
+    }
+    label, hint, abnormal, score, keys = labels[pid]
+    if approx:
+        label = f"{label}（近似）"
+        hint = f"{hint}（ΔE00≈{de00:.0f}）"
+    return {
+        "id": pid,
+        "label": label,
+        "hint": hint,
+        "abnormal": abnormal,
+        "health_score": score,
+        "organ_keys": keys,
+        "palette_delta_e": round(de00, 1),
+        "palette_delta_e00": round(de00, 1),
+        "far_from_palette": far,
+    }
+
+
+def _urine_lab_hsv_from_roi(
+    image: Image.Image,
+) -> tuple[float, float, float, float, float, float, dict[str, Any]]:
+    """Toilet-white WB; mask specular L*>95 & S<5%; median Lab+HSV of urine body ROI."""
+    work = image.convert("RGB")
+    rgb = list(work.getdata())
+    whites: list[tuple[int, int, int]] = []
+    for r, g, b in rgb:
+        peak = max(r, g, b)
+        low = min(r, g, b)
+        if peak < 180:
+            continue
+        sat = 0.0 if peak <= 0 else (peak - low) / float(peak)
+        if sat <= 0.12 and peak >= 200:
+            whites.append((r, g, b))
+    white_ref = None
+    if len(whites) >= max(40, len(rgb) // 40):
+        wr = _median([p[0] for p in whites])
+        wg = _median([p[1] for p in whites])
+        wb = _median([p[2] for p in whites])
+        white_ref = (wr, wg, wb)
+        peak_gain = max(0.85, min(1.25, 235.0 / max(wr, wg, wb, 1.0)))
+        mean_w = (wr + wg + wb) / 3.0
+        gr = max(0.85, min(1.25, mean_w / max(wr, 1.0))) * peak_gain
+        gg = max(0.85, min(1.25, mean_w / max(wg, 1.0))) * peak_gain
+        gb = max(0.85, min(1.25, mean_w / max(wb, 1.0))) * peak_gain
+        adjusted = [
+            (
+                min(255, int(round(r * gr))),
+                min(255, int(round(g * gg))),
+                min(255, int(round(b * gb))),
+            )
+            for r, g, b in rgb
+        ]
+        work = Image.new("RGB", work.size)
+        work.putdata(adjusted)
+
+    ww, hh = work.size
+    lab = _lab_pixels(work, max_side=max(ww, hh) or 1)
+    hsv = _hsv_pixels(work, max_side=max(ww, hh) or 1)
+    # Resize factors for index mapping if max_side shrinks.
+    side = max(ww, hh)
+    if side > max(ww, hh):  # unreachable; keep simple index on resized
+        pass
+    # Recompute on same resized work used by helpers.
+    work_s = work
+    largest = max(work.size)
+    if largest > 160:
+        scale = 160 / float(largest)
+        work_s = work.resize(
+            (max(1, int(round(work.size[0] * scale))), max(1, int(round(work.size[1] * scale)))),
+            Image.Resampling.BILINEAR,
+        )
+        lab = _lab_pixels(work_s, max_side=max(work_s.size) or 1)
+        hsv = _hsv_pixels(work_s, max_side=max(work_s.size) or 1)
+    sw, sh = work_s.size
+    kept_lab: list[tuple[float, float, float]] = []
+    kept_hsv: list[tuple[float, float, float]] = []
+    cx0, cy0, cx1, cy1 = int(sw * 0.18), int(sh * 0.18), int(sw * 0.82), int(sh * 0.82)
+    for i, ((L, a, bb), (h, s, v)) in enumerate(zip(lab, hsv)):
+        x = i % sw
+        y = i // sw
+        # Specular mask: L*>95 and S<5%
+        if L > 95 and s < 0.05:
+            continue
+        if L >= 97 and s < 0.08:
+            continue
+        # Drop porcelain rim (outside soft ROI or ultra-white low chroma)
+        chroma = (a * a + bb * bb) ** 0.5
+        if L >= 92 and chroma < 8:
+            continue
+        in_body = cx0 <= x < cx1 and cy0 <= y < cy1
+        if not in_body and not (L < 88 and chroma >= 6):
+            continue
+        kept_lab.append((L, a, bb))
+        kept_hsv.append((h, s, v))
+    if len(kept_lab) < 30:
+        kept_lab = list(lab)
+        kept_hsv = list(hsv)
+    med_l = _median([p[0] for p in kept_lab])
+    med_a = _median([p[1] for p in kept_lab])
+    med_b = _median([p[2] for p in kept_lab])
+    med_h = _median([p[0] for p in kept_hsv])
+    med_s = _median([p[1] for p in kept_hsv])
+    med_v = _median([p[2] for p in kept_hsv])
+    meta = {
+        "pixels_used": len(kept_lab),
+        "cluster_mode": "urine_body",
+        "white_ref": (
+            None
+            if white_ref is None
+            else {
+                "r": round(white_ref[0], 1),
+                "g": round(white_ref[1], 1),
+                "b": round(white_ref[2], 1),
+            }
+        ),
+        "L": round(med_l, 1),
+        "a_star": round(med_a, 1),
+        "b_star": round(med_b, 1),
+        "H": round(med_h, 1),
+        "S": round(med_s, 3),
+        "V": round(med_v, 3),
+        "specular_mask": "L>95 & S<5%",
+        "roi": "urine_body_center",
+    }
+    return med_l, med_a, med_b, med_h, med_s, med_v, meta
 
 
 def classify_urine_lab(
@@ -668,177 +1592,93 @@ def classify_urine_lab(
     a: float,
     b: float,
     turbidity: dict[str, Any] | None = None,
+    hsv: tuple[float, float, float] | None = None,
 ) -> dict[str, Any]:
-    """v1 practical urine palette / Lab boxes (+ turbidity heuristic)."""
+    """Medical-style urine: dual CIELAB+HSV, ΔE00 to palette; off-palette if all ΔE00>thr."""
     chroma = (a * a + b * b) ** 0.5
     turb = turbidity or {}
+    h = s = v = None
+    if hsv is not None:
+        h, s, v = float(hsv[0]), float(hsv[1]), float(hsv[2])
 
-    # Nearest palette distance for stain flag
-    nearest_id = None
-    nearest_de = 1e9
+    distances: list[tuple[str, float]] = []
     for pid, center in URINE_PALETTE.items():
-        de = _delta_e76((L, a, b), center)
-        if de < nearest_de:
-            nearest_de = de
-            nearest_id = pid
-    far_from_palette = nearest_de > 28.0
+        de = _delta_e00((L, a, b), center)
+        distances.append((pid, de))
+    distances.sort(key=lambda t: t[1])
+    nearest_id, nearest_de = distances[0]
+    far_from_palette = nearest_de > URINE_OUTSIDE_PALETTE_DE00
 
+    # Turbidity can promote milky even when Lab is pale.
     if turb.get("cloudy") and chroma <= 16 and 45 <= L <= 88:
+        hit = _urine_class_payload("milky_cloudy", de00=nearest_de if nearest_id == "milky_cloudy" else _delta_e00((L, a, b), URINE_PALETTE["milky_cloudy"]))
+        hit["via"] = "turbidity_laplacian_std"
+        return hit
+
+    def _hematuria_lab_ok() -> bool:
+        # Require red-dominant with non-purple b* (avoid magenta → 血尿 lock).
+        return 40 <= L <= 72 and a > 22 and -5 <= b < 16 and a >= abs(b) + 4
+
+    # Magenta / blue-purple stain: never force hematuria.
+    purple_stain = a > 15 and b < -12 and a + b < 20
+
+    # If all ΔE00 above threshold → staining / off-palette (keep 無法對照 wording).
+    if far_from_palette or purple_stain:
+        if (not purple_stain) and _hematuria_lab_ok():
+            return _urine_class_payload("red_pink", approx=True, de00=nearest_de, far=False)
+        nearest_label = URINE_PALETTE_LABELS.get(nearest_id or "", nearest_id or "—")
         return {
-            "id": "milky_cloudy",
-            "label": "乳白色／混濁",
-            "hint": "泌尿道感染／膿尿或結晶（痛風／結石）教學提示",
+            "id": "outside_palette",
+            "label": "偏離教學色盤（無法對照已知尿色／可能染色）",
+            "hint": (
+                f"測得 L*{L:.0f} a*{a:.0f} b*{b:.0f}；最近「{nearest_label}」ΔE00≈{nearest_de:.0f}，"
+                "超過門檻 → 教學上先排除火龍果／甜菜／Ｂ群／藥物染色，不強制套色"
+            ),
             "abnormal": True,
-            "health_score": 5,
-            "organ_keys": ["bladder", "kidney"],
+            "health_score": 6,
+            "organ_keys": ["kidney", "bladder"],
             "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": False,
+            "palette_delta_e00": round(nearest_de, 1),
+            "far_from_palette": True,
+            "nearest_palette_id": nearest_id,
+            "measured_lab": {"L": round(L, 1), "a_star": round(a, 1), "b_star": round(b, 1)},
         }
 
-    # Clear: L>85, a~0, b<10
-    if L > 85 and abs(a) <= 6 and b < 10:
-        return {
-            "id": "clear_colorless",
-            "label": "透明無色",
-            "hint": "飲水過多教學；若持續清澈且多尿、飲水不多，教學上聯想腦垂體／腎或腎陽虛",
-            "abnormal": True,
-            "health_score": 6,
-            "organ_keys": ["kidney", "bladder"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    # Normal pale yellow: L65–85, a~0, b12–38 (gentle teaching box)
-    if 65 <= L <= 85 and abs(a) <= 10 and 12 <= b <= 38:
-        return {
-            "id": "pale_goose_yellow",
-            "label": "淡／鵝黃色",
-            "hint": "相對健康尿色教學示範",
-            "abnormal": False,
-            "health_score": 9,
-            "organ_keys": ["kidney", "bladder"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": False,
-        }
-    # Deep yellow / dehydrated: L40–75, a0–12, b≥28 (before dark-tea)
-    if 40 <= L <= 75 and 0 <= a <= 12 and b >= 28 and a < 14:
-        return {
-            "id": "deep_yellow",
-            "label": "深黃色",
-            "hint": "脫水／內熱／心火旺教學提示",
-            "abnormal": True,
-            "health_score": 6,
-            "organ_keys": ["heart", "bladder", "kidney"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    # Dark tea / bilirubin: L25–50, a≥6, b20–45
-    if 25 <= L <= 50 and a >= 6 and 20 <= b <= 45:
-        return {
-            "id": "dark_tea",
-            "label": "濃茶／橘褐色",
-            "hint": "肝膽膽紅素教學，或劇烈運動後可樂色橫紋肌溶解／腎風險教學",
-            "abnormal": True,
-            "health_score": 3,
-            "organ_keys": ["liver", "gallbladder", "kidney"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    # Hematuria red/pink: L40–70, a>20, b<15 (a dominates)
-    if 40 <= L <= 70 and a > 20 and b < 15:
-        return {
-            "id": "red_pink",
-            "label": "紅色／粉紅色",
-            "hint": "血尿教學（腎／輸尿管／膀胱／攝護腺）；劇烈腰痛教學聯想結石，無痛則腫瘤警覺教學",
-            "abnormal": True,
-            "health_score": 3,
-            "organ_keys": ["kidney", "bladder"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
+    # Prefer nearest ΔE00 class; soft-confirm with HSV gate when available.
+    for pid, de in distances:
+        if de > URINE_OUTSIDE_PALETTE_DE00:
+            break
+        if pid == "red_pink" and not _hematuria_lab_ok():
+            continue
+        if h is not None and not _hsv_gate_ok(pid, h, s or 0.0, v or 0.0):
+            continue
+        approx = de > 10.0
+        return _urine_class_payload(pid, approx=approx, de00=de, far=False)
 
-    # Soft fallbacks
-    if L >= 78 and chroma <= 12:
+    # HSV rejected nearest — still accept nearest Lab within threshold (except bad hematuria).
+    if nearest_id == "red_pink" and not _hematuria_lab_ok():
+        for pid, de in distances[1:]:
+            if de > URINE_OUTSIDE_PALETTE_DE00:
+                break
+            return _urine_class_payload(pid, approx=True, de00=de, far=False)
+        nearest_label = URINE_PALETTE_LABELS.get(nearest_id or "", nearest_id or "—")
         return {
-            "id": "clear_colorless",
-            "label": "透明無色（近似）",
-            "hint": "飲水過多教學；持續清澈多尿需進一步評估（教學）",
+            "id": "outside_palette",
+            "label": "偏離教學色盤（無法對照已知尿色／可能染色）",
+            "hint": (
+                f"測得 L*{L:.0f} a*{a:.0f} b*{b:.0f}；最近「{nearest_label}」ΔE00≈{nearest_de:.0f}，"
+                "不強制血尿／套色"
+            ),
             "abnormal": True,
             "health_score": 6,
             "organ_keys": ["kidney", "bladder"],
             "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
+            "palette_delta_e00": round(nearest_de, 1),
+            "far_from_palette": True,
+            "nearest_palette_id": nearest_id,
         }
-    if a >= 18 and a >= abs(b) + 5:
-        return {
-            "id": "red_pink",
-            "label": "紅色／粉紅色（近似）",
-            "hint": "血尿教學（需排除染色）；劇痛／無痛分流為教育說明",
-            "abnormal": True,
-            "health_score": 3,
-            "organ_keys": ["kidney", "bladder"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    if L < 45 and b >= 18 and a >= 8:
-        return {
-            "id": "dark_tea",
-            "label": "濃茶／橘褐色（近似）",
-            "hint": "肝膽膽紅素或運動後深色尿腎風險教學",
-            "abnormal": True,
-            "health_score": 3,
-            "organ_keys": ["liver", "gallbladder", "kidney"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    if L < 70 and b >= 30:
-        return {
-            "id": "deep_yellow",
-            "label": "深黃色（近似）",
-            "hint": "脫水／內熱／心火旺教學提示",
-            "abnormal": True,
-            "health_score": 6,
-            "organ_keys": ["heart", "bladder", "kidney"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    if 60 <= L <= 88 and 10 <= b <= 40 and abs(a) <= 12:
-        return {
-            "id": "pale_goose_yellow",
-            "label": "淡／鵝黃色（近似）",
-            "hint": "相對健康尿色教學示範",
-            "abnormal": False,
-            "health_score": 8,
-            "organ_keys": ["kidney", "bladder"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-    # Milky / cloudy soft: mid-high L, very low chroma (even without turbidity flag)
-    if 50 <= L <= 85 and chroma <= 14 and abs(a) <= 6 and b < 16:
-        return {
-            "id": "milky_cloudy",
-            "label": "乳白色／混濁（近似）",
-            "hint": "泌尿道感染／膿尿或結晶（痛風／結石）教學提示",
-            "abnormal": True,
-            "health_score": 5,
-            "organ_keys": ["bladder", "kidney"],
-            "palette_delta_e": round(nearest_de, 1),
-            "far_from_palette": far_from_palette,
-        }
-
-    # Far from all teaching classes → stain teaching
-    return {
-        "id": "possible_stain",
-        "label": "偏離教學色盤（可能飲食／藥物染色）",
-        "hint": (
-            f"色座標距最近教學色（{nearest_id or '—'}）ΔE≈{nearest_de:.0f}；"
-            "教學上先排除火龍果／甜菜／Ｂ群／藥物染色再解讀"
-        ),
-        "abnormal": True,
-        "health_score": 6,
-        "organ_keys": ["kidney", "bladder"],
-        "palette_delta_e": round(nearest_de, 1),
-        "far_from_palette": True,
-    }
+    approx = nearest_de > 10.0
+    return _urine_class_payload(nearest_id, approx=approx, de00=nearest_de, far=False)
 
 
 def _organ_scores_from_keys(
@@ -865,21 +1705,168 @@ def _organ_scores_from_keys(
     return out
 
 
-def _parse_confounders(raw: str | None, labels: dict[str, str]) -> list[str]:
+_CONFOUNDER_FREE_TIPS: dict[str, tuple[str, ...]] = {
+    "pitaya": ("火龍", "紅色蔬"),
+    "pig_blood": ("豬血", "血品"),
+    "dark_greens": ("深綠",),
+    "iron": ("鐵劑", "鐵片"),
+    "antacid": ("制酸", "鋇"),
+    "bismuth": ("鉍",),
+    "oily": ("油脂", "油膩"),
+    "antibiotics": ("抗生",),
+}
+
+
+def _parse_confounder_keys(raw: str | None, labels: dict[str, str]) -> list[str]:
+    """Return known confounder keys (pitaya, iron, …) from CSV / free-text."""
     if not raw:
         return []
-    out: list[str] = []
-    for token in str(raw).replace("，", ",").split(","):
+    text = str(raw)
+    keys: list[str] = []
+    seen: set[str] = set()
+    for token in text.replace("，", ",").replace("、", ",").split(","):
         key = token.strip().lower()
         if not key:
             continue
-        out.append(labels.get(key, key))
-    return out
+        if key in labels and key not in seen:
+            seen.add(key)
+            keys.append(key)
+            continue
+        for cand, label in labels.items():
+            if cand in seen:
+                continue
+            tips = _CONFOUNDER_FREE_TIPS.get(cand, ())
+            if cand in key or label in token or any(tip in token for tip in tips):
+                seen.add(cand)
+                keys.append(cand)
+    # Broad App checkbox: 「近24小時飲食或藥物可能染色」
+    if "染色" in text or "近24" in text or "24小時" in text or "24h" in text.lower():
+        for cand in ("pitaya", "pig_blood", "dark_greens", "iron", "antacid", "bismuth"):
+            if cand not in seen:
+                seen.add(cand)
+                keys.append(cand)
+    return keys
+
+
+def _parse_confounders(raw: str | None, labels: dict[str, str]) -> list[str]:
+    keys = _parse_confounder_keys(raw, labels)
+    return [labels.get(k, k) for k in keys]
+
+
+def _confirm_stool_class(
+    hit: dict[str, Any],
+    *,
+    surface: dict[str, Any],
+    water: dict[str, Any],
+    conf_keys: list[str],
+) -> tuple[dict[str, Any], list[str]]:
+    """Image-based anti-false-positive notes (no checkbox questionnaire required)."""
+    out = dict(hit)
+    notes: list[str] = []
+    cid = out.get("id") or ""
+    # Optional API confounders still accepted for backward compat; UI no longer collects them.
+    conf_set = set(conf_keys)
+
+    if cid == "black_tarry":
+        surf = surface.get("surface") or "matte"
+        glossy = float(surface.get("glossy_score") or 0.0)
+        diet_black = bool(conf_set & {"iron", "pig_blood", "bismuth"})
+        if surf == "matte" and diet_black:
+            out["label"] = "黑色／瀝青色（近似・飲食／鐵劑染色較可能）"
+            out["hint"] = (
+                f"表面偏啞光（glossy≈{glossy:.2f}）；"
+                "教學上先排除飲食／鐵劑／鉍劑染色再解讀上消化道出血"
+            )
+            out["confirm"] = "diet_or_drug_matte_black"
+            notes.append(
+                f"黑色確認：啞光＋可能染色因子 → 飲食／藥物染色較可能"
+                f"（GLCM對比≈{surface.get('glcm_contrast')}）（{TEACHING_TAG}）"
+            )
+        elif surf == "glossy_tar" and not diet_black:
+            out["hint"] = (
+                f"{out.get('hint')}；表面偏油亮（glossy≈{glossy:.2f}），"
+                "教學上較接近瀝青樣黑便；仍須排除染色"
+            )
+            out["confirm"] = "glossy_tar_like"
+            notes.append(
+                f"黑色確認：高光／紋理偏油亮 → 瀝青樣黑便較可能（教學）（{TEACHING_TAG}）"
+            )
+        elif surf == "matte":
+            out["hint"] = (
+                f"{out.get('hint')}；表面偏啞光（glossy≈{glossy:.2f}），"
+                "教學上亦可能為飲食／鐵劑染色"
+            )
+            out["confirm"] = "diet_or_drug_matte_black"
+            notes.append(
+                f"黑色確認：啞光表面 → 飲食／藥物染色亦可能"
+                f"（GLCM對比≈{surface.get('glcm_contrast')}）（{TEACHING_TAG}）"
+            )
+        elif diet_black:
+            notes.append(f"可能致黑便染色因子存在時，請先排除染色再解讀（{TEACHING_TAG}）")
+
+    if cid == "bright_dark_red":
+        pink = bool(water.get("pink_bloom"))
+        clear = bool(water.get("clear_water"))
+        da = water.get("da_ring_minus_center")
+        if pink:
+            out["hint"] = (
+                f"{out.get('hint')}；周圍水液 a* 偏紅（Δa*≈{da}），"
+                "教學上新鮮血染水較可能"
+            )
+            out["confirm"] = "pink_water_fresh_blood"
+            notes.append(
+                f"紅色確認：水液 a* 暈染偏粉紅 → 新鮮出血較可能（教學）（{TEACHING_TAG}）"
+            )
+        elif clear or not pink:
+            out["label"] = "鮮紅色／暗紅色（近似・飲食色素亦可能）"
+            out["hint"] = (
+                f"水液未見明顯 a* 粉紅暈染（Δa*≈{da}），"
+                "教學上火龍果／紅色蔬果色素亦可能"
+            )
+            out["confirm"] = "clear_water_diet_red"
+            notes.append(
+                f"紅色確認：無粉紅水暈 → 飲食色素亦可能（教學）（{TEACHING_TAG}）"
+            )
+
+    if cid == "dark_green":
+        out["hint"] = f"{out.get('hint')}；深綠色蔬菜／鐵劑亦可能造成混淆"
+        if "dark_greens" in conf_set or "iron" in conf_set:
+            out["label"] = "墨綠色／深綠色（近似・深绿蔬菜／鐵劑混淆可能）"
+            out["confirm"] = "dark_greens_confounder"
+        notes.append(f"綠色確認：深綠色蔬菜／鐵劑染色混淆可能（{TEACHING_TAG}）")
+
+    if cid == "clay_gray":
+        out["hint"] = f"{out.get('hint')}；制酸劑／鋇劑亦可能造成灰白混淆"
+        if "antacid" in conf_set:
+            out["confirm"] = "antacid_confounder"
+        notes.append(f"灰白確認：制酸劑／鋇劑染色混淆可能（{TEACHING_TAG}）")
+
+    if cid in {"black_tarry", "bright_dark_red", "dark_green", "clay_gray", "outside_palette"}:
+        notes.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
+    elif conf_keys and cid not in {"outside_palette"}:
+        notes.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
+    return out, notes
+
+
+def _downscale_circle(image: Image.Image, max_side: int = 720) -> Image.Image:
+    """Phone JPEGs are huge; Lab/WB on 1600px+ was multi-second and timed out App clients."""
+    work = image.convert("RGB")
+    largest = max(work.size)
+    if largest <= max_side:
+        return work
+    scale = max_side / float(largest)
+    return work.resize(
+        (max(1, int(round(work.size[0] * scale))), max(1, int(round(work.size[1] * scale)))),
+        Image.Resampling.BILINEAR,
+    )
 
 
 def _preprocess_circle_image(
     image: Image.Image,
     color_temperature_k: int | float | str | None = "auto",
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> tuple[Image.Image, dict[str, Any]]:
     from .analysis import (
         adapt_brightness_image,
@@ -887,27 +1874,42 @@ def _preprocess_circle_image(
         brightness_gain_to_target,
         estimate_color_temperature_k,
         estimate_relative_brightness,
+        normalize_color_temperature_k,
     )
+    from .color_calib_online import apply_lighting_compensation
+    from .lighting_calib import compensate_lighting
 
-    rgb = image.convert("RGB")
+    rgb = _downscale_circle(image.convert("RGB"), max_side=720)
     if color_temperature_k is None or str(color_temperature_k).strip().lower() in {"", "auto"}:
-        cct = estimate_color_temperature_k(rgb)
+        raw_cct = float(estimate_color_temperature_k(rgb))
         auto = True
     else:
         try:
-            cct = int(round(float(str(color_temperature_k).strip())))
+            raw_cct = float(normalize_color_temperature_k(color_temperature_k))
         except (TypeError, ValueError):
-            cct = estimate_color_temperature_k(rgb)
+            raw_cct = float(estimate_color_temperature_k(rgb))
         auto = False
+    raw_brightness = float(estimate_relative_brightness(rgb))
+    raw_gain = float(brightness_gain_to_target(raw_brightness))
+    cct, blended, gain, device_meta = compensate_lighting(
+        raw_cct, raw_brightness, raw_gain, lighting_calib, device_key
+    )
+    cct, blended, gain, online_meta = apply_lighting_compensation(
+        cct, blended, float(gain), online_calib
+    )
+    cct = int(round(normalize_color_temperature_k(cct)))
     adapted = adapt_rgb_image(rgb, cct)
     brightness = estimate_relative_brightness(adapted)
-    gain = brightness_gain_to_target(brightness)
-    adapted = adapt_brightness_image(adapted, gain)
+    adapted = adapt_brightness_image(adapted, float(gain))
     return adapted, {
         "color_temperature_k": cct,
         "color_temperature_auto": auto,
         "brightness": round(float(brightness), 4),
+        "brightness_raw": round(float(raw_brightness), 4),
         "brightness_gain": round(float(gain), 4),
+        "cct_raw": round(float(raw_cct), 1),
+        "lighting_calib": {**(device_meta or {}), "online": online_meta},
+        "online_calib": online_calib,
     }
 
 
@@ -916,10 +1918,67 @@ def analyze_stool_image(
     color_temperature_k: int | float | str | None = "auto",
     confounders: str | None = None,
     severe_gate: bool = False,
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    work, lighting = _preprocess_circle_image(image, color_temperature_k)
-    L, a, b, lab_meta = _lab_from_roi(work)
+    work, lighting = _preprocess_circle_image(
+        image,
+        color_temperature_k,
+        lighting_calib=lighting_calib,
+        device_key=device_key,
+        online_calib=online_calib,
+    )
+    # Prefer dark stool cluster so porcelain/water does not dilute black → 黃褐色.
+    L, a, b, lab_meta = _lab_from_roi(work, prefer_dark_cluster=True)
     hit = classify_stool_lab(L, a, b)
+    # sRGB/HSV gates (user normal-stool spec): rescue black/tar FP when body is
+    # clearly yellow-brown in RGB/HSV, and reinforce soft Lab near the gamut.
+    try:
+        med_rgb = work.resize((1, 1), Image.Resampling.BOX).getpixel((0, 0))
+        if isinstance(med_rgb, (tuple, list)) and len(med_rgb) >= 3:
+            rr, gg, bb = float(med_rgb[0]), float(med_rgb[1]), float(med_rgb[2])
+            hh, ss, vv = colorsys.rgb_to_hsv(rr / 255.0, gg / 255.0, bb / 255.0)
+            hh_deg = hh * 360.0
+            lab_meta = dict(lab_meta)
+            lab_meta["srgb_median"] = {
+                "r": round(rr, 1),
+                "g": round(gg, 1),
+                "b": round(bb, 1),
+            }
+            lab_meta["hsv_median"] = {
+                "h": round(hh_deg, 1),
+                "s": round(ss, 3),
+                "v": round(vv, 3),
+            }
+            supports_brown = _srgb_hsv_supports_normal_brown(rr, gg, bb, hh_deg, ss, vv)
+            # Spec: V<25% black alert; S<30% pale cue — do not rescue those.
+            if (
+                hit.get("id") == "black_tarry"
+                and supports_brown
+                and vv >= STOOL_BLACK_HSV_V_ALERT
+                and ss >= STOOL_PALE_HSV_S_ALERT
+                and L >= 26
+            ):
+                de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+                hit = _normal_yellow_brown_hit(approx=True, de=de)
+                hit["via"] = "srgb_hsv_normal_rescue"
+            elif (
+                hit.get("id") not in {
+                    "normal_yellow_brown",
+                    "black_tarry",
+                    "bright_dark_red",
+                    "dark_green",
+                    "clay_gray",
+                }
+                and supports_brown
+                and _in_normal_stool_lab_soft(L, a, b)[0]
+            ):
+                de = _delta_e76((L, a, b), STOOL_PALETTE["normal_yellow_brown"])
+                hit = _normal_yellow_brown_hit(approx=True, de=de)
+                hit["via"] = "srgb_hsv_normal_reinforce"
+    except Exception:
+        pass
     steat = steatorrhea_score_v1(work, L, a, b)
     # Multi-cue oily override for pale/yellow-ish color classes only.
     # black / red / green stay intact. clay_gray may flip only when oil specular is clear
@@ -928,10 +1987,17 @@ def analyze_stool_image(
     spec_score = float(
         ((steat.get("components") or {}).get("specular") or {}).get("specular_score") or 0.0
     )
-    overridable = color_id in {"normal_yellow_brown", "pale_oily"} or (
-        color_id == "clay_gray" and spec_score >= 0.25
-    )
-    if steat["triggered"] and overridable:
+    # Never override black / off-palette / red / green into 淡黃色／帶油光.
+    # Only flip yellow-brown → pale_oily when L is pale enough AND specular oil is clear.
+    overridable = color_id == "pale_oily" or (
+        color_id == "normal_yellow_brown" and L >= 55 and spec_score >= 0.22
+    ) or (color_id == "clay_gray" and spec_score >= 0.25 and L >= 55)
+    if (
+        steat["triggered"]
+        and overridable
+        and color_id not in {"black_tarry", "outside_palette", "bright_dark_red", "dark_green"}
+        and L >= 55
+    ):
         if color_id != "pale_oily":
             hit = _stool_pale_oily_class(approx=True)
             hit["via"] = "steatorrhea_score_v1"
@@ -940,8 +2006,21 @@ def analyze_stool_image(
             hit["via"] = hit.get("via") or "color_and_steatorrhea_score"
         hit["steatorrhea_score"] = steat["score"]
 
-    user_conf = _parse_confounders(confounders, STOOL_CONFOUNDER_LABELS)
-    water_red = _surrounding_water_reddish(work)
+    conf_keys = _parse_confounder_keys(confounders, STOOL_CONFOUNDER_LABELS)
+    water = _surrounding_water_a_bloom(work)
+    water_red = bool(water.get("pink_bloom"))
+    surface = _black_surface_metrics(work) if (hit.get("id") == "black_tarry" or L < 40) else {
+        "surface": "n/a",
+        "glossy_score": 0.0,
+        "glcm_contrast": 0.0,
+        "glcm_energy": 0.0,
+        "specular_score": spec_score,
+        "specular_ratio": None,
+        "pairs": 0,
+    }
+    hit, confirm_notes = _confirm_stool_class(
+        hit, surface=surface, water=water, conf_keys=conf_keys
+    )
     organ_scores = _organ_scores_from_keys(
         hit.get("organ_keys") or [], hit.get("health_score", 8), severe_gate=severe_gate
     )
@@ -951,7 +2030,7 @@ def analyze_stool_image(
             f"{hit['hint']}；飲食／藥物混淆：{hit['confounders']}（{TEACHING_TAG}）"
         )
     ]
-    if hit.get("id") == "pale_oily" or (steat["triggered"] and overridable):
+    if hit.get("id") == "pale_oily":
         findings.append(
             f"帶油光教學（Steatorrhea Score v1≈{steat['score']:.2f}，門檻{steat['threshold']}）："
             f"{STEATORRHEA_TEACHING}"
@@ -967,11 +2046,12 @@ def analyze_stool_image(
                 f"（{TEACHING_TAG}）"
             )
         findings.append(f"{STEATORRHEA_FLOAT_NOTE}（{TEACHING_TAG}）")
-    if user_conf:
-        findings.append(f"近２４小時自行勾選可能染色／混淆：{'、'.join(user_conf)}（{TEACHING_TAG}）")
+    findings.extend(confirm_notes)
+    # No checkbox questionnaire; static dye note already appended in confirm_notes when relevant.
     if water_red and hit["id"] in {"bright_dark_red", "normal_yellow_brown", "pale_oily"}:
         findings.append(
-            f"周圍水液偏紅（軟提示）：教學上可對照下消化道出血與飲食色素，需排除染色（{TEACHING_TAG}）"
+            f"周圍水液 a* 暈染偏粉紅（Δa*≈{water.get('da_ring_minus_center')}）："
+            f"教學上新鮮出血較可能；仍需排除染色（{TEACHING_TAG}）"
         )
     if hit.get("abnormal"):
         findings.append(f"{STOOL_DANGER_NOTE}（{TEACHING_TAG}）")
@@ -997,6 +2077,9 @@ def analyze_stool_image(
             "class": hit,
             "lab": lab_meta,
             "water_reddish": water_red,
+            "water_a_bloom": water,
+            "surface": surface,
+            "confounder_keys": conf_keys,
             "organ_scores": organ_scores,
             "steatorrhea": steat,
         },
@@ -1011,13 +2094,23 @@ def analyze_urine_image(
     color_temperature_k: int | float | str | None = "auto",
     confounders: str | None = None,
     severe_gate: bool = False,
+    prior_foam_frames: list[Image.Image] | None = None,
+    lighting_calib: dict[str, Any] | None = None,
+    device_key: str | None = None,
+    online_calib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    work, lighting = _preprocess_circle_image(image, color_temperature_k)
-    L, a, b, lab_meta = _lab_from_roi(work)
+    work, lighting = _preprocess_circle_image(
+        image,
+        color_temperature_k,
+        lighting_calib=lighting_calib,
+        device_key=device_key,
+        online_calib=online_calib,
+    )
+    L, a, b, H, S, V, lab_meta = _urine_lab_hsv_from_roi(work)
     turbidity = _turbidity_heuristic(work)
-    foam = _foam_metrics(work)
-    hit = classify_urine_lab(L, a, b, turbidity=turbidity)
-    user_conf = _parse_confounders(confounders, URINE_CONFOUNDER_LABELS)
+    foam = _foam_metrics(work, prior_frames=prior_foam_frames)
+    hit = classify_urine_lab(L, a, b, turbidity=turbidity, hsv=(H, S, V))
+    # Optional confounders form field kept for API compat; UI no longer collects them.
     organ_scores = _organ_scores_from_keys(
         hit.get("organ_keys") or [], hit.get("health_score", 8), severe_gate=severe_gate
     )
@@ -1029,45 +2122,37 @@ def analyze_urine_image(
             prev = organ_scores.get(key)
             organ_scores[key] = val if prev is None else min(prev, val)
 
-    findings = [
-        (
-            f"尿尿色觀察（已提醒排除火龍果／甜菜／Ｂ群／藥物染色）："
-            f"{hit['label']} → {hit['hint']}（{TEACHING_TAG}）"
-        ),
-    ]
-    if hit.get("far_from_palette"):
-        findings.append(
-            f"色調偏離教學色盤（ΔE≈{hit.get('palette_delta_e')}）："
-            f"優先考慮飲食／藥物染色，勿逕行解讀為病色（{TEACHING_TAG}）"
-        )
+    # Short urine narrative: one status line (foam / stain folded in).
+    outside = hit.get("id") in {"outside_palette", "possible_stain"} or hit.get("far_from_palette")
+    status = "無法對照" if outside else ("需留意" if hit.get("abnormal") else "正常")
+    extras: list[str] = []
+    if outside:
+        extras.append("疑染色／離色盤")
     gran = foam.get("granularity")
-    ratio = foam.get("foam_ratio", 0)
-    if gran == "fine_dense":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、細密均勻 → 教學上提示可能持續性泡沫／蛋白尿警覺"
-            f"（{TEACHING_TAG}）"
-        )
+    if gran == "fine_dense" or foam.get("persistent_foam_teaching_alert"):
+        extras.append("細密泡沫")
     elif gran == "coarse_sparse":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、粗疏 → 教學上較像水柱衝擊等物理泡沫（{TEACHING_TAG}）"
-        )
+        extras.append("粗疏泡沫")
     elif gran == "mixed":
-        findings.append(
-            f"泡沫單幀：面積比≈{ratio:.0%}、粗細混合 → 僅作教學參考（{TEACHING_TAG}）"
-        )
-    else:
-        findings.append(f"泡沫單幀：未見明顯泡沫區（{TEACHING_TAG}）")
-    findings.append(f"{URINE_FOAM_TEACHING}（{TEACHING_TAG}）")
-    findings.append(f"{URINE_FOAM_V1_LIMIT}（{TEACHING_TAG}）")
-    findings.append(f"{URINE_CARE_NOTE}（{TEACHING_TAG}）")
+        extras.append("混合泡沫")
+    if foam.get("decay_measured"):
+        extras.append(f"泡沫衰減={foam.get('decay_half_life_hint')}")
+    tip = hit.get("hint") or TEACHING_TAG
+    if extras:
+        tip = f"{tip}；{'、'.join(extras)}"
+    findings = [f"尿尿：{status} — {hit['label']}（{tip}）"]
+    findings.append(f"{DYE_CONFUSION_NOTE}（{TEACHING_TAG}）")
     findings.append(f"{URINE_PHONE_LIMIT}（{TEACHING_TAG}）")
-    if user_conf:
-        findings.append(f"近２４小時自行勾選可能染色：{'、'.join(user_conf)}（{TEACHING_TAG}）")
-    findings.append(TEACHING_TAG)
+    if foam.get("foam_ratio", 0) >= 0.05:
+        findings.append(
+            f"泡沫：面積比≈{foam.get('foam_ratio')}；粒度={foam.get('granularity')}；"
+            f"圓度≈{foam.get('mean_roundness')}；GLCM對比≈{foam.get('glcm_contrast')}；"
+            f"{URINE_FOAM_V1_LIMIT}（{TEACHING_TAG}）"
+        )
     return {
         "shot_type": "urine",
         "dominant_color": _dominant_hex(work),
-        "hsv": None,
+        "hsv": {"H": round(H, 1), "S": round(S, 3), "V": round(V, 3)},
         "color_label": f"尿尿：{hit['label']}",
         "findings": findings,
         "region_colors": {
@@ -1085,6 +2170,7 @@ def analyze_urine_image(
         "urine": {
             "class": hit,
             "lab": lab_meta,
+            "hsv": {"H": round(H, 1), "S": round(S, 3), "V": round(V, 3)},
             "turbidity": turbidity,
             "foam": foam,
             "organ_scores": organ_scores,

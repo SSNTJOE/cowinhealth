@@ -4,11 +4,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="@dimen/screen_padding"
-    android:fillViewport="true">
+    android:fillViewport="true"
+    android:descendantFocusability="beforeDescendants"
+    android:focusableInTouchMode="true">
     <LinearLayout
         android:orientation="vertical"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:descendantFocusability="beforeDescendants">
         <TextView android:text="Health-ing App" android:textSize="@dimen/title_text" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
         <TextView
             android:id="@+id/appSub"
@@ -27,28 +30,125 @@
             android:id="@+id/langSelect"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/server" android:hint="伺服器。模擬器 http://10.0.2.2:8000；手機請填 http://電腦區網IP:8000" android:text="http://10.0.2.2:8000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/email" android:hint="E-mail" android:inputType="textEmailAddress" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/password" android:hint="密碼" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <LinearLayout
+            android:id="@+id/localeSuggestBox"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/localeSuggestMsg"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#666666"/>
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp">
+                <Button
+                    android:id="@+id/localeSuggestSwitch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="切換"/>
+                <Button
+                    android:id="@+id/localeSuggestKeep"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="維持目前語言"/>
+            </LinearLayout>
+        </LinearLayout>
+        <TextView
+            android:id="@+id/serverNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:textSize="13sp"
+            android:text="手機請填電腦 Wi‑Fi 的真實 IPv4（在 PC 執行 ipconfig 查看，勿照抄範例數字）。格式 http://你的IPv4:8000。不要用 192.168.x.x。模擬器用 http://10.0.2.2:8000。須同一 Wi‑Fi；uvicorn 須綁 0.0.0.0:8000；防火牆放行 TCP 8000。"/>
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical">
+            <EditText
+                android:id="@+id/server"
+                android:hint="http://192.168.66.16:8000"
+                android:inputType="textUri"
+                android:enabled="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:importantForAutofill="no"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+            <Button
+                android:id="@+id/serverApply"
+                android:text="套用"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+        <EditText
+            android:id="@+id/email"
+            android:hint="E-mail"
+            android:inputType="textEmailAddress"
+            android:enabled="true"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <EditText
+            android:id="@+id/password"
+            android:hint="密碼"
+            android:inputType="textPassword"
+            android:enabled="true"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <TextView
+            android:id="@+id/captchaNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="13sp"
+            android:text="圖片驗證碼（不是寄到信箱）。請看左圖字元輸入；「換一張圖」只換圖片。登入／註冊都要填。"/>
         <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
             <ImageView
                 android:id="@+id/captchaImage"
-                android:layout_width="160dp"
-                android:layout_height="56dp"
-                android:contentDescription="驗證碼"
-                android:scaleType="fitXY"
-                android:background="#FFFFFF"/>
+                android:layout_width="200dp"
+                android:layout_height="64dp"
+                android:minWidth="200dp"
+                android:minHeight="64dp"
+                android:contentDescription="圖片驗證碼"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
+                android:background="@drawable/captcha_frame"
+                android:padding="2dp"
+                android:tint="@null"
+                android:focusable="false"
+                android:clickable="false"/>
             <Button
                 android:id="@+id/captchaRefresh"
-                android:text="換驗證碼"
+                android:text="換一張圖"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"/>
         </LinearLayout>
         <EditText
             android:id="@+id/captchaAnswer"
-            android:hint="驗證碼"
+            android:hint="請輸入左圖字元（非郵件）"
             android:inputType="textCapCharacters"
+            android:enabled="true"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"/>
         <!-- Honeypot: never show; bots that autofill may fill it -->
@@ -56,6 +156,7 @@
             android:id="@+id/websiteUrl"
             android:hint="website"
             android:visibility="gone"
+            android:focusable="false"
             android:importantForAutofill="no"
             android:layout_width="0dp"
             android:layout_height="0dp"/>
@@ -66,7 +167,7 @@
         <TextView android:id="@+id/anon" android:text="尚未登入" android:textSize="18sp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
         <TextView android:id="@+id/profileHeading" android:text="基本資料（與網站共用 MySQL，教學參考非診斷）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="12dp"/>
         <EditText android:id="@+id/nickname" android:hint="暱稱" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/birthYear" android:hint="出生年" android:inputType="number" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/birthYear" android:hint="YYYY" android:inputType="number" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <RadioGroup android:id="@+id/genderGroup" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
             <RadioButton android:id="@+id/genderFemale" android:text="女" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
             <RadioButton android:id="@+id/genderMale" android:text="男" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
@@ -88,9 +189,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"/>
         <TextView android:id="@+id/allergiesHeading" android:text="過敏（可複選，食療搜尋會避開）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
-        <LinearLayout
+        <GridLayout
             android:id="@+id/allergiesGroup"
-            android:orientation="vertical"
+            android:columnCount="3"
+            android:alignmentMode="alignBounds"
+            android:useDefaultMargins="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"/>
         <Button android:id="@+id/saveProfile" android:text="儲存基本資料到 MySQL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
@@ -105,6 +208,8 @@
                 android:id="@+id/preview"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 app:implementationMode="compatible"
                 app:scaleType="fillCenter"/>
             <com.tube.healthing.FaceGuideView
@@ -167,45 +272,241 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="12sp"
-            android:text="大便／尿尿：後置鏡頭＋黃圓；只寫文字判斷，不存照片。教學示範，非診斷。"/>
-        <CheckBox
-            android:id="@+id/confounderFood"
+            android:visibility="gone"
+            android:text=""/>
+        <TextView
+            android:id="@+id/circleResult"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="近24小時飲食／藥物可能染色（火龍果、豬血、鐵劑等）"/>
-        <Button android:id="@+id/openPulse" android:text="寸關尺脈診（各 15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            android:minHeight="48dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#1A2A24"
+            android:background="#EEF4F8"
+            android:visibility="gone"
+            android:contentDescription="今日大便尿尿判斷"/>
+        <Button android:id="@+id/openPulse" android:text="寸關尺脈診（前置綠光補光，15 秒）" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <Button android:id="@+id/save" android:text="送出今日紀錄" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <TextView android:id="@+id/trendHeading" android:text="臟腑分數趨勢（與網站同一份 MySQL 紀錄；8–10 健康）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
-        <com.github.mikephil.charting.charts.CombinedChart
-            android:id="@+id/trendChart"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/trend_chart_height"/>
         <TextView android:id="@+id/bodyHeading" android:text="臟腑圖（有證型才放貼圖）" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp"/>
+        <TextView
+            android:id="@+id/bodyNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:text="依性別顯示身體圖；有證型的臟腑才放貼圖。教學示範，非診斷。"/>
+        <HorizontalScrollView
+            android:id="@+id/bodyLegendScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
+            <LinearLayout
+                android:id="@+id/bodyLegend"
+                android:orientation="horizontal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"/>
+        </HorizontalScrollView>
         <FrameLayout
             android:id="@+id/bodyMap"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:minHeight="280dp">
             <ImageView
                 android:id="@+id/bodyImage"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="280dp"
                 android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
                 android:contentDescription="五臟六腑圖"/>
         </FrameLayout>
-        <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:autoLink="web" android:linksClickable="true"/>
+        <TextView
+            android:id="@+id/organScoresHeading"
+            android:text="臟腑平均分（僅有測到的來源）"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:textStyle="bold"/>
+        <GridLayout
+            android:id="@+id/organScores"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="3"
+            android:alignmentMode="alignBounds"
+            android:useDefaultMargins="true"/>
+        <TextView
+            android:id="@+id/sessionSummaryHeading"
+            android:text="今日檢測總結"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:textStyle="bold"/>
+        <TextView
+            android:id="@+id/sessionSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:text="送出紀錄後會顯示今日總結（教學示範，非診斷）。"/>
+        <TextView android:id="@+id/trendHeading" android:text="臟腑分數趨勢" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="12dp"/>
+        <TextView
+            android:id="@+id/trendNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:text="橫軸為檢測時間、縱軸為 1–10 分（近基本色 10；8–10 健康）。每條線一種臟腑顏色，節點形狀也不同。與網站同一份 MySQL 紀錄。教學參考，非診斷。"/>
+        <com.github.mikephil.charting.charts.CombinedChart
+            android:id="@+id/trendChart"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/trend_chart_height"/>
+        <TextView
+            android:id="@+id/trendEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:visibility="gone"
+            android:text="尚無足夠紀錄可畫趨勢。"/>
+        <TextView android:id="@+id/result" android:text="" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:linksClickable="true"/>
         <TextView
             android:id="@+id/dietLink"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="8dp"
-            android:autoLink="web"
-            android:linksClickable="true"/>
+            android:linksClickable="true"
+            android:textColorLink="#1565C0"/>
+        <TextView
+            android:id="@+id/affiliateCarouselLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#2F6F4E"
+            android:visibility="gone"
+            android:text="健康導購推薦"/>
+        <HorizontalScrollView
+            android:id="@+id/affiliateCarouselScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fadeScrollbars="true"
+            android:visibility="gone"
+            android:paddingBottom="4dp">
+            <LinearLayout
+                android:id="@+id/affiliateCarouselTrack"
+                android:orientation="horizontal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingEnd="8dp"/>
+        </HorizontalScrollView>
         <TextView
             android:id="@+id/acupointLink"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autoLink="web"
-            android:linksClickable="true"/>
+            android:linksClickable="true"
+            android:textColorLink="#1565C0"/>
+        <TextView
+            android:id="@+id/stepsHeading"
+            android:text="今日步數（與飲食熱量對照，教學示範）"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:textStyle="bold"/>
+        <TextView
+            android:id="@+id/stepsNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="12sp"
+            android:text="依當日飲食熱量 ÷ 0.04 kcal/步 算出建議步數（約 3000–15000）；優先 Health Connect，否則計步感測器，也可手動。教學示範，非醫療／健身處方。"/>
+        <TextView
+            android:id="@+id/stepsSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"
+            android:text="登入後可讀取／同步今日步數"/>
+        <com.tube.healthing.CalorieRulerView
+            android:id="@+id/calorieRuler"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="2dp"/>
+        <TextView
+            android:id="@+id/kcalNet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:textSize="13sp"/>
+        <TextView
+            android:id="@+id/stepsRemaining"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:textSize="13sp"/>
+        <ProgressBar
+            android:id="@+id/stepsProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:max="100"
+            android:progress="0"/>
+        <EditText
+            android:id="@+id/stepsManual"
+            android:hint="手動步數"
+            android:inputType="number"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <Button
+                android:id="@+id/stepsRefresh"
+                android:text="讀取／同步步數"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+            <Button
+                android:id="@+id/stepsSaveManual"
+                android:text="儲存手動步數"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+        </LinearLayout>
+        <TextView
+            android:id="@+id/fitnessAffiliateCarouselLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#2A6A8A"
+            android:visibility="gone"
+            android:text="健身／運動用品推薦"/>
+        <HorizontalScrollView
+            android:id="@+id/fitnessAffiliateCarouselScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:fadeScrollbars="true"
+            android:visibility="gone"
+            android:paddingBottom="4dp">
+            <LinearLayout
+                android:id="@+id/fitnessAffiliateCarouselTrack"
+                android:orientation="horizontal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingEnd="8dp"/>
+        </HorizontalScrollView>
         <TextView
             android:id="@+id/recipeHeading"
             android:text="今日食譜（教學示範）"
@@ -218,7 +519,8 @@
             android:layout_height="wrap_content"
             android:paddingTop="4dp"
             android:textSize="13sp"
-            android:text="國家只列出過濾後仍有食譜的國家。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。"/>
+            android:visibility="gone"
+            android:text=""/>
         <ToggleButton
             android:id="@+id/recipeBodyAdvice"
             android:layout_width="wrap_content"
@@ -235,29 +537,165 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="輸入國家開頭"
-            android:completionThreshold="1"
+            android:completionThreshold="0"
             android:dropDownHeight="240dp"
             android:inputType="text"
+            android:imeOptions="actionNext"
             android:importantForAutofill="no" />
         <AutoCompleteTextView
             android:id="@+id/recipePick"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="點開列出食譜，或輸入縮小"
-            android:completionThreshold="1"
+            android:completionThreshold="0"
             android:dropDownHeight="240dp"
             android:inputType="text"
+            android:imeOptions="actionSearch"
             android:importantForAutofill="no" />
         <Button
             android:id="@+id/recipeEnsure"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="建立／補齊此食譜（寫入 Recipe.xls，與網站相同）"/>
+            android:text="建立食譜"/>
+        <TextView
+            android:id="@+id/recipeDetailTop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textSize="14sp"/>
+        <LinearLayout
+            android:id="@+id/recipeAffiliatePanel"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:visibility="gone"/>
         <TextView
             android:id="@+id/recipeDetail"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingTop="6dp"
             android:textSize="14sp"/>
+        <LinearLayout
+            android:id="@+id/foodAffiliatePanel"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:visibility="gone"/>
+
+        <TextView
+            android:id="@+id/mealCalendarHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:textStyle="bold"
+            android:text="飲食日曆與營養對照"/>
+        <TextView
+            android:id="@+id/mealCalendarNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="12sp"
+            android:text="依基本資料年齡／性別對照衛福部建議量。選定上方食譜後可加入當日飲食；柱狀圖以達成率（%）比較攝取與建議量；趨勢圖為各日營養差（正＝超量、負＝不足）。教學示範，非營養處方。"/>
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:paddingTop="6dp">
+            <Button
+                android:id="@+id/mealMonthPrev"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="48dp"
+                android:text="‹"/>
+            <TextView
+                android:id="@+id/mealMonthLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:text=""/>
+            <Button
+                android:id="@+id/mealMonthNext"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="48dp"
+                android:text="›"/>
+        </LinearLayout>
+        <GridLayout
+            android:id="@+id/mealCalendarGrid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="7"
+            android:alignmentMode="alignBounds"
+            android:useDefaultMargins="true"/>
+        <TextView
+            android:id="@+id/mealDayMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="12sp"
+            android:text=""/>
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical">
+            <Spinner
+                android:id="@+id/mealSlot"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"/>
+            <EditText
+                android:id="@+id/mealServings"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:hint="份量"
+                android:inputType="numberDecimal"
+                android:text="1"/>
+        </LinearLayout>
+        <Button
+            android:id="@+id/mealAdd"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="加入今日飲食"/>
+        <LinearLayout
+            android:id="@+id/mealList"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"/>
+        <TextView
+            android:id="@+id/mealNutrientHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:textStyle="bold"
+            android:text="當日攝取 vs 建議量（達成率 %）"/>
+        <com.github.mikephil.charting.charts.BarChart
+            android:id="@+id/mealIntakeChart"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/trend_chart_height"/>
+        <TextView
+            android:id="@+id/mealTrendHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:textStyle="bold"
+            android:text="營養差額趨勢（中線＝建議量）"/>
+        <com.github.mikephil.charting.charts.CombinedChart
+            android:id="@+id/mealTrendChart"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/trend_chart_height"/>
+        <TextView
+            android:id="@+id/mealNutrientEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:textSize="12sp"
+            android:text="登入後可查看飲食日曆與營養對照"/>
     </LinearLayout>
 </ScrollView>

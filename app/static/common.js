@@ -87,7 +87,94 @@ function authCaptchaFields() {
 }
 
 let CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
-let ALLERGY_OPTIONS = ["蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+
+/** Builtin display labels (zh value → en/ja/ko) when /api/flags is empty or stuck on zh. */
+const CONDITION_I18N = {
+  糖尿病: { en: "Diabetes", ja: "糖尿病", ko: "당뇨병" },
+  中風: { en: "Stroke", ja: "脳卒中", ko: "뇌졸중" },
+  痛風: { en: "Gout", ja: "痛風", ko: "통풍" },
+  腎臟病: { en: "Kidney disease", ja: "腎臓病", ko: "신장병" },
+  肝病: { en: "Liver disease", ja: "肝疾患", ko: "간질환" },
+  高血壓: { en: "Hypertension", ja: "高血圧", ko: "고혈압" },
+  服用抗凝血劑: {
+    en: "Taking anticoagulants",
+    ja: "抗凝固薬を服用中",
+    ko: "항응고제 복용",
+  },
+};
+
+function localizeConditionLabel(zh, lang) {
+  const code = normalizeUiLang(lang || getUiLang());
+  const value = String(zh || "").trim();
+  if (!value || code === "zh") return value;
+  return (CONDITION_I18N[value] && CONDITION_I18N[value][code]) || value;
+}
+
+/** Builtin allergen labels (zh value → en/ja/ko) when /api/flags is empty or stuck on zh. */
+const ALLERGEN_I18N = {
+  蝦蟹: { en: "Shellfish (shrimp/crab)", ja: "エビ・カニ", ko: "새우·게" },
+  魚: { en: "Fish", ja: "魚", ko: "생선" },
+  芒果: { en: "Mango", ja: "マンゴー", ko: "망고" },
+  花生: { en: "Peanut", ja: "落花生", ko: "땅콩" },
+  堅果: { en: "Tree nuts", ja: "ナッツ類", ko: "견과류" },
+  雞蛋: { en: "Egg", ja: "鶏卵", ko: "달걀" },
+  牛奶: { en: "Milk", ja: "牛乳", ko: "우유" },
+  優格: { en: "Yogurt", ja: "ヨーグルト", ko: "요거트" },
+  南瓜: { en: "Pumpkin", ja: "かぼちゃ", ko: "호박" },
+  南瓜子: { en: "Pumpkin seeds", ja: "かぼちゃの種", ko: "호박씨" },
+  味噌: { en: "Miso", ja: "味噌", ko: "미소" },
+  夏威夷豆: { en: "Macadamia", ja: "マカダミア", ko: "마카다미아" },
+  大麥: { en: "Barley", ja: "オオムギ", ko: "보리" },
+  奶油: { en: "Butter", ja: "バター", ko: "버터" },
+  小麥: { en: "Wheat", ja: "コムギ", ko: "밀" },
+  山葵: { en: "Wasabi", ja: "ワサビ", ko: "와사비" },
+  杏仁果: { en: "Almond", ja: "アーモンド", ko: "아몬드" },
+  松子: { en: "Pine nut", ja: "松の実", ko: "잣" },
+  栗子: { en: "Chestnut", ja: "栗", ko: "밤" },
+  核桃: { en: "Walnut", ja: "クルミ", ko: "호두" },
+  淡菜: { en: "Mussel", ja: "ムール貝", ko: "홍합" },
+  燕麥: { en: "Oat", ja: "オート麦", ko: "귀리" },
+  牡蠣: { en: "Oyster", ja: "カキ", ko: "굴" },
+  白芝麻: { en: "White sesame", ja: "白ごま", ko: "흰깨" },
+  皮蛋: { en: "Century egg", ja: "ピータン", ko: "피단" },
+  芥末: { en: "Mustard", ja: "カラシ", ko: "겨자" },
+  花生油: { en: "Peanut oil", ja: "ピーナッツ油", ko: "땅콩기름" },
+  芹菜: { en: "Celery", ja: "セロリ", ko: "셀러리" },
+  葡萄酒: { en: "Wine", ja: "ワイン", ko: "와인" },
+  蕎麥: { en: "Buckwheat", ja: "ソバ", ko: "메밀" },
+  蛋: { en: "Egg", ja: "卵", ko: "달걀" },
+  蛋白: { en: "Egg white", ja: "卵白", ko: "달걀흰자" },
+  蛋黃: { en: "Egg yolk", ja: "卵黄", ko: "달걀노른자" },
+  蛤蜊: { en: "Clam", ja: "アサリ", ko: "바지락" },
+  豆干: { en: "Dried tofu", ja: "豆腐干", ko: "포두부" },
+  豆漿: { en: "Soy milk", ja: "豆乳", ko: "두유" },
+  豆腐: { en: "Tofu", ja: "豆腐", ko: "두부" },
+  起司: { en: "Cheese", ja: "チーズ", ko: "치즈" },
+  醋: { en: "Vinegar", ja: "酢", ko: "식초" },
+  醬油: { en: "Soy sauce", ja: "醤油", ko: "간장" },
+  麻油: { en: "Sesame oil", ja: "ごま油", ko: "참기름" },
+  黃豆: { en: "Soybean", ja: "大豆", ko: "대두" },
+  黃豆芽: { en: "Soybean sprouts", ja: "大豆もやし", ko: "콩나물" },
+  黃酒: { en: "Yellow rice wine", ja: "黄酒", ko: "황주" },
+  黑豆: { en: "Black soybean", ja: "黒豆", ko: "검은콩" },
+};
+
+function localizeAllergyLabel(zh, lang) {
+  const code = normalizeUiLang(lang || getUiLang());
+  const value = String(zh || "").trim();
+  if (!value || code === "zh") return value;
+  return (ALLERGEN_I18N[value] && ALLERGEN_I18N[value][code]) || value;
+}
+
+// Offline fallback values (zh). Live labels come from GET /api/flags?lang=.
+let ALLERGY_OPTIONS = [
+  "蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶",
+  "優格", "南瓜", "味噌", "夏威夷豆", "大麥", "奶油", "小麥",
+  "山葵", "杏仁果", "松子", "栗子", "核桃", "淡菜", "燕麥", "牡蠣",
+  "白芝麻", "皮蛋", "芥末", "花生油", "芹菜", "葡萄酒", "蕎麥",
+  "蛋", "蛋白", "蛋黃", "蛤蜊", "豆干", "豆漿", "豆腐", "起司",
+  "醋", "醬油", "麻油", "黃豆", "黃豆芽", "黃酒", "黑豆",
+];
 
 const CRUSTACEAN_ALLERGY_TOKENS = new Set([
   "蝦蟹",
@@ -154,34 +241,99 @@ function consolidateAllergyOptions(options) {
   return canonicalizeAllergySelection(options);
 }
 
-async function loadHealthFlagOptions() {
+/** Normalize /api/flags options to {value, label} (value = canonical zh). */
+function normalizeFlagOptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (item && typeof item === "object") {
+        const value = String(item.value || item.name_zh || "").trim();
+        const label = String(item.label || item.name || value).trim();
+        if (!value) return null;
+        return { value, label: label || value };
+      }
+      const text = String(item || "").trim();
+      if (!text) return null;
+      return { value: text, label: text };
+    })
+    .filter(Boolean);
+}
+
+let CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((v) => ({ value: v, label: v }));
+let ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((v) => ({ value: v, label: v }));
+
+async function loadHealthFlagOptions(lang) {
+  const code = normalizeUiLang(lang || getUiLang());
   try {
-    const data = await api("/api/flags");
-    if (Array.isArray(data.conditions) && data.conditions.length) {
-      CONDITION_OPTIONS = data.conditions;
+    const data = await api("/api/flags?lang=" + encodeURIComponent(code));
+    const conditions = normalizeFlagOptions(data.conditions);
+    if (conditions.length) {
+      CONDITION_FLAG_OPTIONS = conditions.map((item) => ({
+        value: item.value,
+        // If API still returns zh for a non-zh UI, fall back to builtins.
+        label:
+          code !== "zh" && item.label === item.value
+            ? localizeConditionLabel(item.value, code)
+            : item.label,
+      }));
+      CONDITION_OPTIONS = conditions.map((item) => item.value);
+    } else if (code !== "zh") {
+      CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((value) => ({
+        value,
+        label: localizeConditionLabel(value, code),
+      }));
     }
-    if (Array.isArray(data.allergies) && data.allergies.length) {
-      ALLERGY_OPTIONS = consolidateAllergyOptions(data.allergies);
+    const allergies = normalizeFlagOptions(data.allergies || data.allergy_options);
+    if (allergies.length) {
+      const consolidatedValues = consolidateAllergyOptions(allergies.map((item) => item.value));
+      const byValue = new Map(allergies.map((item) => [item.value, item.label]));
+      ALLERGY_FLAG_OPTIONS = consolidatedValues.map((value) => {
+        const raw = byValue.get(value) || value;
+        return {
+          value,
+          // If API still returns zh for a non-zh UI, fall back to builtins.
+          label:
+            code !== "zh" && raw === value
+              ? localizeAllergyLabel(value, code)
+              : raw,
+        };
+      });
+      ALLERGY_OPTIONS = consolidatedValues;
+    } else if (code !== "zh") {
+      ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((value) => ({
+        value,
+        label: localizeAllergyLabel(value, code),
+      }));
     }
   } catch (_err) {
-    /* keep defaults if Recipe.xls is unavailable */
+    if (code !== "zh") {
+      CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((value) => ({
+        value,
+        label: localizeConditionLabel(value, code),
+      }));
+      ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((value) => ({
+        value,
+        label: localizeAllergyLabel(value, code),
+      }));
+    }
   }
-  return { conditions: CONDITION_OPTIONS, allergies: ALLERGY_OPTIONS };
+  return { conditions: CONDITION_FLAG_OPTIONS, allergies: ALLERGY_FLAG_OPTIONS };
 }
 
 function renderCheckboxes(container, options, selected) {
   if (!container) return;
   const picked = new Set(Array.isArray(selected) ? selected : []);
-  container.innerHTML = options
-    .map((label) => {
-      const checked = picked.has(label) ? " checked" : "";
+  const items = normalizeFlagOptions(options);
+  container.innerHTML = items
+    .map((item) => {
+      const checked = picked.has(item.value) ? " checked" : "";
       return (
         '<label class="check"><input type="checkbox" value="' +
-        label +
+        item.value +
         '"' +
         checked +
         "> " +
-        label +
+        item.label +
         "</label>"
       );
     })
@@ -192,14 +344,18 @@ function fillHealthFlags(root, user) {
   const scope = root || document;
   renderCheckboxes(
     scope.querySelector("#conditions-group"),
-    CONDITION_OPTIONS,
+    CONDITION_FLAG_OPTIONS,
     user && user.conditions,
   );
-  const allergyOpts = consolidateAllergyOptions(
-    user && Array.isArray(user.allergy_options) && user.allergy_options.length
-      ? user.allergy_options
-      : ALLERGY_OPTIONS,
-  );
+  // Always render from localized ALLERGY_FLAG_OPTIONS (/api/flags?lang=).
+  // user.allergy_options is a zh-value catalog from /api/me — not display labels.
+  let allergyOpts = ALLERGY_FLAG_OPTIONS;
+  if ((!allergyOpts || !allergyOpts.length) && user && Array.isArray(user.allergy_options)) {
+    allergyOpts = consolidateAllergyOptions(user.allergy_options).map((value) => ({
+      value,
+      label: localizeAllergyLabel(value),
+    }));
+  }
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
     allergyOpts,
@@ -302,6 +458,8 @@ function bodyImageSrcFromGender(gender) {
 }
 
 const UI_LANG_KEY = "healthing_lang";
+const UI_LANG_SUGGEST_ACK_KEY = "healthing_lang_suggest_ack";
+const UI_LANG_LABELS = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
 const UI_I18N = {
   zh: {
     langLabel: "語言",
@@ -309,11 +467,13 @@ const UI_I18N = {
     dietLink: "網路食療搜尋連結",
     dietLinkArticles: "食譜文章搜尋",
     dietLinkVideos: "食譜影片搜尋",
+    affiliateCarouselLabel: "健康導購推薦",
+    fitnessAffiliateCarouselLabel: "健身／運動用品推薦",
     acupointLink: "穴道按摩搜尋連結",
     acupointLinkImages: "穴道按摩圖片搜尋",
     acupointLinkVideos: "穴道按摩影片搜尋",
     recipeHeading: "今日食譜（教學示範）",
-    recipeNote: "可不選國家，直接輸入想吃的食譜；系統會先在 Recipe.xls 找出對應國家並帶出，找不到再網路搜尋並補齊欄位（含國家，找不到則用 Global）。有選國家時，食譜欄列出該國可用食譜。沒選「依身體狀況建議」時只排除過敏原；有選才依今日檢測濾除禁忌。選定後顯示食譜、煮法、益處與元素。教學示範，非診斷。",
+    recipeNote: "",
     recipeBodyAdvice: "依身體狀況建議",
     country: "國家",
     recipe: "食譜",
@@ -325,10 +485,14 @@ const UI_I18N = {
     emptyRecipes: "沒有符合過敏條件的食譜。",
     emptyRecipesBody: "沒有符合今日檢測與過敏條件的食譜。",
     recipeSearching: "搜尋中",
-    recipeEnsuring: "搜尋建檔中",
+    recipeEnsuring: "搜尋建檔中（以中文進行）",
+    recipeCreateHint: "清單中沒有此食譜，請點「建立此食譜」",
     recipeCreateAction: "建立此食譜",
+    recipeListLoading: "載入該國食譜中…",
     recipeEnsurePartial: "部分欄位未能從網路可靠取得，已留白，請人工核對。教學示範，非醫療建議。",
     recipeEnsureFailed: "無法建立此食譜，請稍後再試。",
+    recipeLangUnsupported: "目前僅支援中文／英文／日文／韓文食譜名稱；請改用這四種語文再搜尋或建檔。",
+    recipeCountryCorrected: "已依食譜庫找到此菜，並改回正確國家。",
     fieldRecipe: "食譜",
     fieldMethod: "煮法",
     fieldBenefit: "對五臟六腑的幫助",
@@ -360,6 +524,33 @@ const UI_I18N = {
     mealTargetMeta: "對照：{band}｜{gender}",
     mealIntakeSeries: "攝取 %",
     mealTargetSeries: "建議量 100%",
+    mealStepsHeading: "今日步數建議（教學示範）",
+    mealStepsKcal: "當日飲食累計熱量：{intake} kcal（建議量 {target} kcal，差額 {surplus}）→ 建議步行約 {recommended} 步以大致抵銷攝取熱量。",
+    mealStepsKcalEmpty: "尚無當日飲食熱量；加入餐次後會依公式計算建議步數。",
+    mealStepsSummary: "實際 {actual} ／ 建議 {recommended} 步（差距 {gap}）",
+    mealStepsNoActual: "建議 {recommended} 步（尚未同步手機步數；請用 Android App 同步，或下方手動輸入）",
+    mealStepsBurned: "步行／運動消耗約 {burned} kcal（來源：{source}）；與攝取差 {delta} kcal。",
+    mealStepsBurnedNone: "尚無手機活動資料；Android App 可讀取步數並同步到網站。",
+    mealStepsFormula: "公式：recommended_steps = clamp(round(meal_kcal ÷ {k} kcal/步), {min}, {max})。約 0.04 kcal/步（≈25 步/kcal）。教學示範，非醫療／健身處方。",
+    mealStepsManualLabel: "實際步數（可手動）",
+    mealStepsSave: "儲存步數",
+    mealStepsSaved: "已儲存實際步數（網站與 App 同步）。",
+    mealStepsNeedLogin: "請先登入後再儲存步數。",
+    mealStepsSourceHc: "Health Connect",
+    mealStepsSourceSensor: "手機感測器",
+    mealStepsSourceManual: "手動",
+    mealKcalRulerNeed: "每日建議 {target} kcal",
+    mealKcalBarIntake: "攝取 {n} kcal",
+    mealKcalBarBurn: "消耗 {n} kcal",
+    mealKcalNetOver: "淨攝取 {net} kcal，已超過每日建議 {target} kcal（超出 {over}）。",
+    mealKcalNetUnder: "淨攝取 {net} kcal，低於每日建議 {target} kcal（尚餘 {under}）。",
+    mealKcalNetEqual: "淨攝取 {net} kcal，約等於每日建議 {target} kcal。",
+    mealKcalNetNoTarget: "淨攝取 {net} kcal（尚無年齡／性別建議熱量）。",
+    mealKcalNetEmpty: "尚無當日飲食與運動熱量可對照。",
+    mealStepsRemainingNeed: "還需約 {n} 步才達建議。",
+    mealStepsRemainingDone: "已達建議步數（多出 {n} 步）。",
+    mealStepsRemainingExact: "已剛好達建議步數。",
+    mealStepsRemainingUnknown: "建議 {recommended} 步（尚未同步實際步數）。",
   },
   en: {
     langLabel: "Language",
@@ -367,11 +558,13 @@ const UI_I18N = {
     dietLink: "Diet search link",
     dietLinkArticles: "Recipe articles",
     dietLinkVideos: "Recipe videos",
+    affiliateCarouselLabel: "Healthy picks",
+    fitnessAffiliateCarouselLabel: "Fitness & gym gear",
     acupointLink: "Acupoint massage search",
     acupointLinkImages: "Acupoint massage images",
     acupointLinkVideos: "Acupoint massage videos",
     recipeHeading: "Today’s recipes (teaching demo)",
-    recipeNote: "Country is optional. Type a dish to look it up in Recipe.xls (country is filled in) or web-research all fields when missing (country becomes Global if unknown). With a country selected, the recipe list is scoped to that country. Teaching demo, not a diagnosis.",
+    recipeNote: "",
     recipeBodyAdvice: "依身體狀況建議",
     country: "Country",
     recipe: "Recipe",
@@ -383,10 +576,14 @@ const UI_I18N = {
     emptyRecipes: "No recipes pass the allergy filter.",
     emptyRecipesBody: "No recipes pass today’s reading and allergy filters.",
     recipeSearching: "Searching",
-    recipeEnsuring: "Searching and creating data",
+    recipeEnsuring: "Searching in Chinese and creating data",
+    recipeCreateHint: "Not in this country’s list — tap “Create this recipe”",
     recipeCreateAction: "Create this recipe",
+    recipeListLoading: "Loading recipes for this country…",
     recipeEnsurePartial: "Some fields could not be filled reliably from the web and were left blank. Teaching demo, not medical advice.",
     recipeEnsureFailed: "Could not create this recipe. Try again later.",
+    recipeLangUnsupported: "Only Chinese, English, Japanese, and Korean recipe names are supported for now.",
+    recipeCountryCorrected: "Found this dish in the catalog and corrected the country.",
     fieldRecipe: "Recipe",
     fieldMethod: "Method",
     fieldBenefit: "Helpful for organs",
@@ -418,6 +615,33 @@ const UI_I18N = {
     mealTargetMeta: "Targets: {band} · {gender}",
     mealIntakeSeries: "Intake %",
     mealTargetSeries: "Target 100%",
+    mealStepsHeading: "Today’s step suggestion (teaching demo)",
+    mealStepsKcal: "Today’s meal calories: {intake} kcal (target {target} kcal, Δ {surplus}) → about {recommended} walking steps to roughly offset that intake.",
+    mealStepsKcalEmpty: "No meal calories yet; add meals to compute a step suggestion.",
+    mealStepsSummary: "Actual {actual} / recommended {recommended} steps (gap {gap})",
+    mealStepsNoActual: "Recommended {recommended} steps (no phone steps yet — sync via the Android app, or enter below)",
+    mealStepsBurned: "Walking/exercise burn ≈ {burned} kcal (source: {source}); vs intake Δ {delta} kcal.",
+    mealStepsBurnedNone: "No phone activity yet; the Android app can read steps and sync them here.",
+    mealStepsFormula: "Formula: recommended_steps = clamp(round(meal_kcal ÷ {k} kcal/step), {min}, {max}). ≈ 0.04 kcal/step (~25 steps/kcal). Teaching demo, not medical/fitness advice.",
+    mealStepsManualLabel: "Actual steps (manual OK)",
+    mealStepsSave: "Save steps",
+    mealStepsSaved: "Actual steps saved (synced with website & App).",
+    mealStepsNeedLogin: "Sign in to save steps.",
+    mealStepsSourceHc: "Health Connect",
+    mealStepsSourceSensor: "Phone sensor",
+    mealStepsSourceManual: "Manual",
+    mealKcalRulerNeed: "Daily need {target} kcal",
+    mealKcalBarIntake: "Intake {n} kcal",
+    mealKcalBarBurn: "Burn {n} kcal",
+    mealKcalNetOver: "Net intake {net} kcal exceeds daily need {target} kcal (over by {over}).",
+    mealKcalNetUnder: "Net intake {net} kcal is under daily need {target} kcal ({under} left).",
+    mealKcalNetEqual: "Net intake {net} kcal matches daily need {target} kcal.",
+    mealKcalNetNoTarget: "Net intake {net} kcal (no age/gender calorie target yet).",
+    mealKcalNetEmpty: "No meal or exercise calories to compare yet.",
+    mealStepsRemainingNeed: "About {n} more steps to reach the suggestion.",
+    mealStepsRemainingDone: "Step suggestion met ({n} extra).",
+    mealStepsRemainingExact: "Step suggestion met exactly.",
+    mealStepsRemainingUnknown: "Suggested {recommended} steps (actual steps not synced yet).",
   },
   ja: {
     langLabel: "言語",
@@ -425,11 +649,13 @@ const UI_I18N = {
     dietLink: "食事療法の検索リンク",
     dietLinkArticles: "レシピ記事検索",
     dietLinkVideos: "レシピ動画検索",
+    affiliateCarouselLabel: "ヘルシー導購",
+    fitnessAffiliateCarouselLabel: "フィットネス／ジム用品",
     acupointLink: "経穴マッサージ検索",
     acupointLinkImages: "経穴マッサージ画像検索",
     acupointLinkVideos: "経穴マッサージ動画検索",
     recipeHeading: "本日のレシピ（教材デモ）",
-    recipeNote: "国の一覧は、フィルター後にレシピが残っている国だけです。先頭文字で検索して選びます（英字は大文字小文字を区別しません）。レシピ欄を開くとその国の残っているレシピをすべて表示し、入力で絞り込めます。「依身體狀況建議」を選んでいないときはアレルゲンだけを除きます。選んだときだけ、今日の検出で禁忌を除きます。選ぶとレシピ・作り方・益処・栄養素を表示します。教材であり診断ではありません。",
+    recipeNote: "",
     recipeBodyAdvice: "依身體狀況建議",
     country: "国",
     recipe: "レシピ",
@@ -441,10 +667,14 @@ const UI_I18N = {
     emptyRecipes: "アレルギー条件に合うレシピがありません。",
     emptyRecipesBody: "今日の検出とアレルギー条件に合うレシピがありません。",
     recipeSearching: "検索中",
-    recipeEnsuring: "検索してデータを作成中",
+    recipeEnsuring: "中国語で検索してデータを作成中",
+    recipeCreateHint: "一覧にない料理です。「このレシピを作成」を押してください",
     recipeCreateAction: "このレシピを作成",
+    recipeListLoading: "この国のレシピを読み込み中…",
     recipeEnsurePartial: "一部の欄はネットから確実に取れず空欄のままです。教材デモであり医療助言ではありません。",
     recipeEnsureFailed: "このレシピを作成できませんでした。後でもう一度お試しください。",
+    recipeLangUnsupported: "現在は中・英・日・韓のレシピ名のみ対応しています。",
+    recipeCountryCorrected: "カタログで見つけたため、国を正しいものに直しました。",
     fieldRecipe: "レシピ",
     fieldMethod: "作り方",
     fieldBenefit: "五臓六腑への助け",
@@ -476,7 +706,33 @@ const UI_I18N = {
     mealNutrientTrendTitle: "栄養差額トレンド（中央線＝目安）",
     mealNutrientTrendX: "日",
     mealNutrientTrendY: "目安比（%、0＝達成）",
-
+    mealStepsHeading: "本日の歩数目安（教材デモ）",
+    mealStepsKcal: "当日の食事カロリー合計：{intake} kcal（目安 {target} kcal、差 {surplus}）→ およそ {recommended} 歩で摂取熱量を歩行で相殺する目安。",
+    mealStepsKcalEmpty: "当日の食事カロリーがありません。食事を追加すると歩数目安が出ます。",
+    mealStepsSummary: "実際 {actual} ／ 目安 {recommended} 歩（差 {gap}）",
+    mealStepsNoActual: "目安 {recommended} 歩（スマホ歩数未同期。Android App で同期、または下で手入力）",
+    mealStepsBurned: "歩行／運動の消費 ≈ {burned} kcal（出典：{source}）；摂取との差 {delta} kcal。",
+    mealStepsBurnedNone: "スマホ活動データなし。Android App で歩数を読み取り同期できます。",
+    mealStepsFormula: "式：recommended_steps = clamp(round(meal_kcal ÷ {k} kcal/歩), {min}, {max})。約 0.04 kcal/歩（≈25 歩/kcal）。教材デモであり医療／運動処方ではありません。",
+    mealStepsManualLabel: "実際の歩数（手入力可）",
+    mealStepsSave: "歩数を保存",
+    mealStepsSaved: "実際の歩数を保存しました（サイトと App で同期）。",
+    mealStepsNeedLogin: "歩数を保存するにはログインしてください。",
+    mealStepsSourceHc: "Health Connect",
+    mealStepsSourceSensor: "端末センサー",
+    mealStepsSourceManual: "手入力",
+    mealKcalRulerNeed: "1日の目安 {target} kcal",
+    mealKcalBarIntake: "摂取 {n} kcal",
+    mealKcalBarBurn: "消費 {n} kcal",
+    mealKcalNetOver: "純摂取 {net} kcal が1日の目安 {target} kcal を超えています（超過 {over}）。",
+    mealKcalNetUnder: "純摂取 {net} kcal は1日の目安 {target} kcal 未満です（残り {under}）。",
+    mealKcalNetEqual: "純摂取 {net} kcal は1日の目安 {target} kcal とほぼ同じです。",
+    mealKcalNetNoTarget: "純摂取 {net} kcal（年齢・性別の目安熱量なし）。",
+    mealKcalNetEmpty: "当日の食事・運動カロリーがまだありません。",
+    mealStepsRemainingNeed: "目安まであと約 {n} 歩。",
+    mealStepsRemainingDone: "目安歩数に到達（+{n} 歩）。",
+    mealStepsRemainingExact: "目安歩数にちょうど到達。",
+    mealStepsRemainingUnknown: "目安 {recommended} 歩（実際の歩数は未同期）。",
   },
   ko: {
     langLabel: "언어",
@@ -484,11 +740,13 @@ const UI_I18N = {
     dietLink: "식이요법 검색 링크",
     dietLinkArticles: "레시피 글 검색",
     dietLinkVideos: "레시피 영상 검색",
+    affiliateCarouselLabel: "건강 추천 쇼핑",
+    fitnessAffiliateCarouselLabel: "피트니스／운동 용품",
     acupointLink: "혈자리 마사지 검색",
     acupointLinkImages: "혈자리 마사지 이미지 검색",
     acupointLinkVideos: "혈자리 마사지 영상 검색",
     recipeHeading: "오늘의 레시피（교육 시연）",
-    recipeNote: "국가 목록은 걸러낸 뒤 레시피가 남은 국가만 보여 줍니다. 앞글자를 입력해 고릅니다(라틴 문자는 대소문자 무시). 레시피 칸을 열면 그 나라의 남은 레시피가 모두 나오고, 입력하면 좁혀집니다. 「依身體狀況建議」를 끄면 알레르기만 제외합니다. 켰을 때만 오늘 검사로 금기를 제외합니다. 고르면 레시피, 조리법, 유익, 영양소를 보여 줍니다. 교육용이며 진단이 아닙니다.",
+    recipeNote: "",
     recipeBodyAdvice: "依身體狀況建議",
     country: "국가",
     recipe: "레시피",
@@ -500,10 +758,14 @@ const UI_I18N = {
     emptyRecipes: "알레르기 조건에 맞는 레시피가 없습니다.",
     emptyRecipesBody: "오늘 검사와 알레르기 조건에 맞는 레시피가 없습니다.",
     recipeSearching: "검색 중",
-    recipeEnsuring: "검색하며 데이터 작성 중",
+    recipeEnsuring: "중국어로 검색하며 데이터 작성 중",
+    recipeCreateHint: "목록에 없습니다. 「이 레시피 만들기」를 누르세요",
     recipeCreateAction: "이 레시피 만들기",
+    recipeListLoading: "이 국가 레시피 불러오는 중…",
     recipeEnsurePartial: "일부 항목은 웹에서 확실히 채우지 못해 비워 두었습니다. 교육용 시연이며 의료 조언이 아닙니다.",
     recipeEnsureFailed: "이 레시피를 만들 수 없습니다. 나중에 다시 시도하세요.",
+    recipeLangUnsupported: "지금은 중·영·일·한 레시피 이름만 지원합니다.",
+    recipeCountryCorrected: "목록에서 이 요리를 찾아 국가를 올바른 값으로 고쳤습니다.",
     fieldRecipe: "레시피",
     fieldMethod: "조리법",
     fieldBenefit: "오장육부에 도움이 되는 점",
@@ -535,7 +797,33 @@ const UI_I18N = {
     mealNutrientTrendTitle: "영양 차액 추세(중앙선=권장)",
     mealNutrientTrendX: "일",
     mealNutrientTrendY: "권장 대비 %(0=달성)",
-
+    mealStepsHeading: "오늘 걸음 수 권장(교육 시연)",
+    mealStepsKcal: "당일 식사 누적 열량: {intake} kcal (권장 {target} kcal, 차 {surplus}) → 대략 {recommended}걸음으로 섭취 열량을 걷기로 상쇄하는 참고치.",
+    mealStepsKcalEmpty: "당일 식사 열량이 없습니다. 끼니를 추가하면 권장 걸음이 계산됩니다.",
+    mealStepsSummary: "실제 {actual} / 권장 {recommended} 걸음 (차이 {gap})",
+    mealStepsNoActual: "권장 {recommended} 걸음 (폰 걸음 미동기화 — Android 앱으로 동기화하거나 아래 수동 입력)",
+    mealStepsBurned: "걷기/운동 소모 ≈ {burned} kcal (출처: {source}); 섭취 대비 Δ {delta} kcal.",
+    mealStepsBurnedNone: "폰 활동 데이터 없음. Android 앱이 걸음을 읽어 웹에 동기화할 수 있습니다.",
+    mealStepsFormula: "공식: recommended_steps = clamp(round(meal_kcal ÷ {k} kcal/걸음), {min}, {max}). 약 0.04 kcal/걸음(≈25걸음/kcal). 교육 시연이며 의료/운동 처방이 아닙니다.",
+    mealStepsManualLabel: "실제 걸음(수동 가능)",
+    mealStepsSave: "걸음 저장",
+    mealStepsSaved: "실제 걸음을 저장했습니다(웹·앱 동기화).",
+    mealStepsNeedLogin: "걸음을 저장하려면 먼저 로그인하세요.",
+    mealStepsSourceHc: "Health Connect",
+    mealStepsSourceSensor: "폰 센서",
+    mealStepsSourceManual: "수동",
+    mealKcalRulerNeed: "하루 권장 {target} kcal",
+    mealKcalBarIntake: "섭취 {n} kcal",
+    mealKcalBarBurn: "소모 {n} kcal",
+    mealKcalNetOver: "순섭취 {net} kcal이 하루 권장 {target} kcal을 초과했습니다(초과 {over}).",
+    mealKcalNetUnder: "순섭취 {net} kcal이 하루 권장 {target} kcal보다 적습니다(남은 {under}).",
+    mealKcalNetEqual: "순섭취 {net} kcal이 하루 권장 {target} kcal과 거의 같습니다.",
+    mealKcalNetNoTarget: "순섭취 {net} kcal(나이/성별 권장 열량 없음).",
+    mealKcalNetEmpty: "당일 식사·운동 열량이 아직 없습니다.",
+    mealStepsRemainingNeed: "권장까지 약 {n}걸음 더 필요합니다.",
+    mealStepsRemainingDone: "권장 걸음에 도달(+{n}걸음).",
+    mealStepsRemainingExact: "권장 걸음에 정확히 도달했습니다.",
+    mealStepsRemainingUnknown: "권장 {recommended}걸음(실제 걸음 미동기화).",
   },
 };
 
@@ -544,10 +832,10 @@ const UI_I18N_EXTRA = {
     "loginTitle": "E-mail 登入",
     "email": "E-mail",
     "password": "密碼",
-    "captcha": "驗證碼",
-    "captchaRefresh": "換一張",
-    "captchaPlaceholder": "輸入圖片中的字元",
-    "captchaAlt": "驗證碼",
+    "captcha": "圖片驗證碼（非郵件）",
+    "captchaRefresh": "換一張圖",
+    "captchaPlaceholder": "請輸入上方圖片字元（不會寄到信箱）",
+    "captchaAlt": "圖片驗證碼",
     "loginBtn": "登入",
     "goRegister": "前往註冊",
     "mysqlChecking": "正在檢查 MySQL…",
@@ -598,9 +886,6 @@ const UI_I18N_EXTRA = {
     "openDialog": "再開今日狀況對話框",
     "cameraHeading": "相機擷取",
     "alignHintFace": "對準臉：髮際以下～下巴，兩耳以內",
-    "stoolUrineSummary": "近２４小時飲食／藥物（選填，教學用）",
-    "stoolLegend": "大便混淆因子",
-    "urineLegend": "尿尿染色因子",
     "btnFace": "拍臉 / 眼 / 唇",
     "btnTongue": "拍舌頭",
     "btnStool": "大便",
@@ -636,16 +921,20 @@ const UI_I18N_EXTRA = {
     "mealDinner": "晚餐",
     "mealSnack": "點心",
     "teachingDemo": "教學示範，非診斷。",
-    "fallbackZhNote": "（部分內容僅有中文，教學示範）"
+    "fallbackZhNote": "（部分內容僅有中文，教學示範）",
+    "localeSuggest": "偵測到瀏覽器／裝置語言為 {lang}，要切換嗎？（不會強制）",
+    "localeSuggestSwitch": "切換為 {lang}",
+    "localeSuggestKeep": "維持目前語言",
+    "bodyStillZh": "此食譜內文仍為中文；標題已依介面語言顯示。"
   },
   "en": {
     "loginTitle": "Email login",
     "email": "Email",
     "password": "Password",
-    "captcha": "Captcha",
+    "captcha": "Image captcha (not email)",
     "captchaRefresh": "New image",
-    "captchaPlaceholder": "Enter the characters in the image",
-    "captchaAlt": "Captcha",
+    "captchaPlaceholder": "Type characters from the image (not emailed)",
+    "captchaAlt": "Image captcha",
     "loginBtn": "Log in",
     "goRegister": "Create account",
     "mysqlChecking": "Checking MySQL…",
@@ -696,9 +985,6 @@ const UI_I18N_EXTRA = {
     "openDialog": "Open today’s status dialog again",
     "cameraHeading": "Camera capture",
     "alignHintFace": "Align face: hairline to chin, within both ears",
-    "stoolUrineSummary": "Last 24h food/medicine (optional, teaching)",
-    "stoolLegend": "Stool confounders",
-    "urineLegend": "Urine color confounders",
     "btnFace": "Face / eyes / lips",
     "btnTongue": "Tongue",
     "btnStool": "Stool",
@@ -735,16 +1021,20 @@ const UI_I18N_EXTRA = {
     "mealSnack": "Snack",
     "teachingDemo": "Teaching demo, not a diagnosis.",
     "fallbackZhNote": "(Some content is Chinese-only; teaching demo)",
-    "recipeBodyAdvice": "Suggest by body reading"
+    "recipeBodyAdvice": "Suggest by body reading",
+    "localeSuggest": "Browser/device language looks like {lang}. Switch? (optional)",
+    "localeSuggestSwitch": "Switch to {lang}",
+    "localeSuggestKeep": "Keep current language",
+    "bodyStillZh": "Recipe body is still Chinese; the title follows your UI language."
   },
   "ja": {
     "loginTitle": "メールでログイン",
     "email": "メール",
     "password": "パスワード",
-    "captcha": "認証コード",
-    "captchaRefresh": "別の画像",
-    "captchaPlaceholder": "画像の文字を入力",
-    "captchaAlt": "認証コード",
+    "captcha": "画像認証（メールではない）",
+    "captchaRefresh": "画像を更新",
+    "captchaPlaceholder": "画像の文字を入力（メール送信ではありません）",
+    "captchaAlt": "画像認証",
     "loginBtn": "ログイン",
     "goRegister": "新規登録へ",
     "mysqlChecking": "MySQL を確認中…",
@@ -795,9 +1085,6 @@ const UI_I18N_EXTRA = {
     "openDialog": "今日の体調ダイアログを再開",
     "cameraHeading": "カメラ撮影",
     "alignHintFace": "顔合わせ：生え際〜あご、両耳の内側",
-    "stoolUrineSummary": "直近24時間の食事／薬（任意・教材）",
-    "stoolLegend": "便の交絡因子",
-    "urineLegend": "尿の染色因子",
     "btnFace": "顔／目／唇",
     "btnTongue": "舌",
     "btnStool": "便",
@@ -834,16 +1121,20 @@ const UI_I18N_EXTRA = {
     "mealSnack": "間食",
     "teachingDemo": "教材デモであり診断ではありません。",
     "fallbackZhNote": "（一部は中国語のみ・教材デモ）",
-    "recipeBodyAdvice": "体調に合わせて提案"
+    "recipeBodyAdvice": "体調に合わせて提案",
+    "localeSuggest": "ブラウザ／端末の言語が {lang} のようです。切り替えますか？（任意）",
+    "localeSuggestSwitch": "{lang} に切り替える",
+    "localeSuggestKeep": "今の言語のまま",
+    "bodyStillZh": "本文はまだ中国語です。タイトルはUI言語に合わせています。"
   },
   "ko": {
     "loginTitle": "이메일 로그인",
     "email": "이메일",
     "password": "비밀번호",
-    "captcha": "인증코드",
-    "captchaRefresh": "다른 이미지",
-    "captchaPlaceholder": "그림의 글자를 입력",
-    "captchaAlt": "인증코드",
+    "captcha": "그림 인증(이메일이 아님)",
+    "captchaRefresh": "그림 바꾸기",
+    "captchaPlaceholder": "그림 글자 입력(이메일로 보내지 않음)",
+    "captchaAlt": "그림 인증",
     "loginBtn": "로그인",
     "goRegister": "회원가입",
     "mysqlChecking": "MySQL 확인 중…",
@@ -894,9 +1185,6 @@ const UI_I18N_EXTRA = {
     "openDialog": "오늘 상태 대화상자 다시 열기",
     "cameraHeading": "카메라 촬영",
     "alignHintFace": "얼굴 맞춤: 헤어라인~턱, 양 귀 안쪽",
-    "stoolUrineSummary": "최근 24시간 음식/약(선택, 교육용)",
-    "stoolLegend": "대변 교란 요인",
-    "urineLegend": "소변 염색 요인",
     "btnFace": "얼굴 / 눈 / 입술",
     "btnTongue": "혀",
     "btnStool": "대변",
@@ -933,7 +1221,11 @@ const UI_I18N_EXTRA = {
     "mealSnack": "간식",
     "teachingDemo": "교육 시연이며 진단이 아닙니다.",
     "fallbackZhNote": "(일부 내용은 중국어만 있음 · 교육 시연)",
-    "recipeBodyAdvice": "몸 상태에 맞춰 추천"
+    "recipeBodyAdvice": "몸 상태에 맞춰 추천",
+    "localeSuggest": "브라우저/기기 언어가 {lang}인 것 같습니다. 바꿀까요? (선택)",
+    "localeSuggestSwitch": "{lang}(으)로 전환",
+    "localeSuggestKeep": "현재 언어 유지",
+    "bodyStillZh": "본문은 아직 중국어입니다. 제목은 UI 언어를 따릅니다."
   }
 };
 Object.keys(UI_I18N_EXTRA).forEach((lang) => {
@@ -959,7 +1251,51 @@ function normalizeUiLang(value) {
   return "zh";
 }
 
+/** Map Accept-Language / navigator locale tag → zh|en|ja|ko, or null if unsupported. */
+function mapLocaleTagToUiLang(value) {
+  const raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (!raw) return null;
+  const primary = raw.split("-")[0];
+  if (primary === "zh") return "zh";
+  if (primary === "en") return "en";
+  if (primary === "ja") return "ja";
+  if (primary === "ko") return "ko";
+  return null;
+}
+
+/** Browser language from navigator.languages (mirrors Accept-Language preference order). */
+function detectBrowserUiLang() {
+  const candidates = [];
+  try {
+    if (Array.isArray(navigator.languages)) candidates.push(...navigator.languages);
+  } catch (_err) { /* ignore */ }
+  try {
+    if (navigator.language) candidates.push(navigator.language);
+  } catch (_err) { /* ignore */ }
+  for (let i = 0; i < candidates.length; i += 1) {
+    const mapped = mapLocaleTagToUiLang(candidates[i]);
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
+function getLocaleSuggestAck() {
+  try {
+    return String(localStorage.getItem(UI_LANG_SUGGEST_ACK_KEY) || "").trim().toLowerCase();
+  } catch (_err) {
+    return "";
+  }
+}
+
+function setLocaleSuggestAck(lang) {
+  const value = String(lang || "").trim().toLowerCase();
+  if (!value) return;
+  try { localStorage.setItem(UI_LANG_SUGGEST_ACK_KEY, value); } catch (_err) { /* ignore */ }
+}
+
 function getUiLang() {
+  // Stored preference only. First-visit detect uses soft tip (navigator → /api/config/locale),
+  // never force-write preferred_lang / LS from detection alone.
   return normalizeUiLang(localStorage.getItem(UI_LANG_KEY) || readCookie(UI_LANG_KEY) || "zh");
 }
 
@@ -970,6 +1306,101 @@ function setUiLang(lang) {
   const htmlLang = { zh: "zh-Hant", en: "en", ja: "ja", ko: "ko" }[value] || "zh-Hant";
   document.documentElement.lang = htmlLang;
   return value;
+}
+
+function uiTextForLang(lang, key) {
+  const pack = UI_I18N[lang] || UI_I18N.zh;
+  return pack[key] || UI_I18N.zh[key] || key;
+}
+
+function hideLocaleSuggestTips() {
+  document.querySelectorAll(".js-locale-suggest").forEach((el) => {
+    el.classList.add("hidden");
+  });
+}
+
+function renderLocaleSuggestTip(suggested) {
+  const label = UI_LANG_LABELS[suggested] || suggested;
+  // Tip copy in the suggested language so the visitor can read the offer.
+  const msg = uiTextForLang(suggested, "localeSuggest").replace(/\{lang\}/g, label);
+  const switchLabel = uiTextForLang(suggested, "localeSuggestSwitch").replace(/\{lang\}/g, label);
+  const keepLabel = uiTextForLang(suggested, "localeSuggestKeep");
+  document.querySelectorAll(".js-locale-suggest").forEach((box) => {
+    const msgEl = box.querySelector(".locale-suggest-msg");
+    const switchBtn = box.querySelector(".locale-suggest-switch");
+    const keepBtn = box.querySelector(".locale-suggest-keep");
+    if (msgEl) msgEl.textContent = msg;
+    if (switchBtn) {
+      switchBtn.textContent = switchLabel;
+      switchBtn.dataset.suggested = suggested;
+    }
+    if (keepBtn) {
+      keepBtn.textContent = keepLabel;
+      keepBtn.dataset.suggested = suggested;
+    }
+    box.classList.remove("hidden");
+  });
+}
+
+function maybeShowLocaleSuggest() {
+  const boxes = document.querySelectorAll(".js-locale-suggest");
+  if (!boxes.length) return;
+  const detected = detectBrowserUiLang();
+  if (detected) {
+    const current = getUiLang();
+    if (detected === current || getLocaleSuggestAck() === detected) {
+      hideLocaleSuggestTips();
+      return;
+    }
+    renderLocaleSuggestTip(detected);
+    return;
+  }
+  // Navigator unsupported → soft-check /api/config/locale (CF-IPCountry) without force-write.
+  hideLocaleSuggestTips();
+  if (typeof api !== "function") return;
+  api("/api/config/locale")
+    .then((data) => {
+      const suggested = mapLocaleTagToUiLang(data && (data.suggested || data.detected));
+      if (!suggested) return;
+      const current = getUiLang();
+      if (suggested === current || getLocaleSuggestAck() === suggested) return;
+      renderLocaleSuggestTip(suggested);
+    })
+    .catch(() => {});
+}
+
+function bindLocaleSuggestTips(onChange) {
+  document.querySelectorAll(".js-locale-suggest").forEach((box) => {
+    if (box.dataset.bound === "1") return;
+    box.dataset.bound = "1";
+    const switchBtn = box.querySelector(".locale-suggest-switch");
+    const keepBtn = box.querySelector(".locale-suggest-keep");
+    if (switchBtn) {
+      switchBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const suggested = switchBtn.dataset.suggested || detectBrowserUiLang();
+        if (!suggested) return;
+        setLocaleSuggestAck(suggested);
+        const lang = setUiLang(suggested);
+        document.querySelectorAll(".js-ui-lang, #ui-lang").forEach((sel) => {
+          if (sel) sel.value = lang;
+        });
+        applyUiLangChrome();
+        syncPreferredLangToServer(lang);
+        hideLocaleSuggestTips();
+        if (typeof onChange === "function") onChange(lang);
+      });
+    }
+    if (keepBtn) {
+      keepBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const suggested = keepBtn.dataset.suggested || detectBrowserUiLang();
+        if (suggested) setLocaleSuggestAck(suggested);
+        hideLocaleSuggestTips();
+      });
+    }
+  });
+  maybeShowLocaleSuggest();
 }
 
 function uiText(key) {
@@ -1018,7 +1449,11 @@ function applyUiLangChrome() {
   const heading = document.getElementById("recipe-heading");
   if (heading) heading.textContent = uiText("recipeHeading");
   const note = document.getElementById("recipe-note");
-  if (note) note.textContent = uiText("recipeNote");
+  if (note) {
+    const recipeNoteText = uiText("recipeNote");
+    note.textContent = recipeNoteText;
+    note.classList.toggle("hidden", !String(recipeNoteText || "").trim());
+  }
   const bodyAdvice = document.getElementById("recipe-body-advice");
   if (bodyAdvice) bodyAdvice.textContent = uiText("recipeBodyAdvice");
   const countryLabel = document.getElementById("recipe-country-label");
@@ -1043,6 +1478,12 @@ function applyUiLangChrome() {
   if (mealDateLabel) mealDateLabel.textContent = uiText("mealDate");
   const mealChartEmpty = document.getElementById("meal-chart-empty");
   if (mealChartEmpty) mealChartEmpty.textContent = uiText("mealChartEmpty");
+  const mealStepsHeading = document.getElementById("meal-steps-heading");
+  if (mealStepsHeading) mealStepsHeading.textContent = uiText("mealStepsHeading");
+  const mealStepsManualLabel = document.getElementById("meal-steps-manual-label");
+  if (mealStepsManualLabel) mealStepsManualLabel.textContent = uiText("mealStepsManualLabel");
+  const mealStepsSaveBtn = document.getElementById("meal-steps-save-btn");
+  if (mealStepsSaveBtn) mealStepsSaveBtn.textContent = uiText("mealStepsSave");
   const mealSlot = document.getElementById("meal-slot");
   if (mealSlot) {
     const map = {
@@ -1083,12 +1524,21 @@ function bindUiLang(onChange) {
       unique.forEach((other) => {
         if (other !== select) other.value = lang;
       });
+      // Manual switcher choice counts as acknowledging the current browser locale tip.
+      const detected = detectBrowserUiLang();
+      if (detected) setLocaleSuggestAck(detected);
       applyUiLangChrome();
       syncPreferredLangToServer(lang);
+      hideLocaleSuggestTips();
+      loadHealthFlagOptions(lang).then(() => fillHealthFlags(document, window.__healthingUser || {}));
       if (typeof onChange === "function") onChange(lang);
     });
   });
   applyUiLangChrome();
+  bindLocaleSuggestTips((lang) => {
+    loadHealthFlagOptions(lang).then(() => fillHealthFlags(document, window.__healthingUser || {}));
+    if (typeof onChange === "function") onChange(lang);
+  });
 }
 
 function applyPreferredLangFromUser(user) {

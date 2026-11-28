@@ -26,11 +26,13 @@ docker compose up -d
 cd C:\tube\Health-ing
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# Phone App needs 0.0.0.0 (not 127.0.0.1 only) so LAN can reach /api/captcha
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Or: .\scripts\start-healthing.ps1
 ```
 
-瀏覽器打開 http://127.0.0.1:8000  
-VS Code：用「Health-ing FastAPI」偵錯設定即可。
+瀏覽器打開 http://127.0.0.1:8000（本機）或 `http://<ipconfig IPv4>:8000`（手機）。  
+VS Code：用「Health-ing FastAPI」偵錯設定即可；手機連線請確認綁 `0.0.0.0`。
 
 ## 網站功能
 

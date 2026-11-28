@@ -35,6 +35,10 @@ let alignMode = "face";
 let lastFaceGrid = null;
 let lastTongueGrid = null;
 let complexionHistory = [];
+/** Today's modality short lines (persist until that modality is re-shot). */
+let lastDayLines = { face: "", tongue: "", stool: "", urine: "", pulse: "" };
+/** @deprecated alias kept for stool/urine helpers */
+let lastCircleLines = lastDayLines;
 
 const organs = [
   { key: "lung", name: "肺", score: "lung_score", pattern: "lung_pattern", spots: [{ x: 44, y: 31.5 }, { x: 56, y: 31.5 }] },
@@ -198,6 +202,7 @@ function applyUserBodyImage(user) {
 fillHealthFlags(document, {});
 
 function fillProfile(user) {
+  window.__healthingUser = user || {};
   document.getElementById("anon-id").textContent = user.user_id;
   document.getElementById("height").value = user.height ?? "";
   document.getElementById("weight").value = user.weight ?? "";
@@ -221,6 +226,8 @@ async function loadMe() {
   authCard.classList.add("hidden");
   appCard.classList.remove("hidden");
   applyPreferredLangFromUser(data.user);
+  // Preferred lang may differ from the lang used on first /api/flags load.
+  await loadHealthFlagOptions(getUiLang());
   fillProfile(data.user);
   applyUiLangChrome();
   bindRecipePickers();
@@ -666,13 +673,9 @@ function captureFrame(kind) {
   return captureFaceFrame();
 }
 
-function selectedConfounders(kind) {
-  const name = kind === "urine" ? "urine-cf" : "stool-cf";
-  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
-    .map((el) => el.value)
-    .filter(Boolean)
-    .join(",");
-}
+/** Static teaching note under stool/urine interpretation (no checkbox questionnaire). */
+const DYE_CONFUSION_NOTE =
+  "火龍果, 紅色蔬果, 豬血, 深綠色蔬菜, 鐵劑, 制酸劑, 鋇劑等皆有可能染色排泄物造成混淆";
 
 const SYNDROME_STICKERS = new Set([
   "strong-hot.png",
@@ -949,9 +952,42 @@ function renderComplexionHistory(records) {
   box.innerHTML = `<table><thead><tr><th>日期</th><th>臉色色碼</th><th>偏色</th><th>證型傾向</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function shownScore(score) {
+function isRealOrganScore(score) {
   const n = Number(score);
-  return Number.isFinite(n) ? String(n) : "10";
+  return Number.isFinite(n) && n >= 1 && n <= 10;
+}
+
+function shownScore(score) {
+  return isRealOrganScore(score) ? String(Math.round(Number(score))) : "—";
+}
+
+/** Server missing_source_prompts, or a sensible local fallback by organ key. */
+function organShootPrompt(result, org) {
+  const oh = (result && result.organ_health) || {};
+  const prompts = oh.missing_source_prompts || {};
+  if (prompts[org.score]) return String(prompts[org.score]);
+  if (prompts[org.key]) return String(prompts[org.key]);
+  const info = (oh.organs || {})[org.key];
+  if (info && info.shoot_prompt) return String(info.shoot_prompt);
+  if (info && Number(info.n_sources) === 0 && info.composite == null) {
+    // Fall through to defaults below.
+  } else if (isRealOrganScore(result && result.scores ? result.scores[org.score] : result && result[org.score])) {
+    return "";
+  }
+  const defaults = {
+    heart: "請拍攝臉／舌以便判讀",
+    liver: "請拍攝臉／舌／大便以便判讀",
+    spleen: "請拍攝臉／舌／大便以便判讀",
+    stomach: "請拍攝臉／舌／大便以便判讀",
+    lung: "請拍攝臉／舌以便判讀",
+    kidney: "請拍攝臉／舌／尿尿以便判讀",
+    gallbladder: "請拍攝臉／舌／大便以便判讀",
+    large_intestine: "請拍攝臉／舌／大便以便判讀",
+    small_intestine: "請拍攝臉／舌／大便以便判讀",
+    bladder: "請拍攝尿尿以便判讀",
+    uterus: "請拍攝臉／舌以便判讀",
+  };
+  return defaults[org.key] || "請拍攝以便判讀";
 }
 
 function hidesSpleenStomachPatternList(text) {
@@ -965,8 +1001,9 @@ function hidesSpleenStomachPatternList(text) {
 }
 
 function patternLabel(score, pattern) {
+  if (!isRealOrganScore(score)) return "";
   const n = Number(score);
-  if (!Number.isFinite(n) || n >= 8) return "健康";
+  if (n >= 8) return "健康";
   if (n === 5 && (pattern === "未定" || pattern == null || pattern === "")) return "待觀察";
   return pattern || "";
 }
@@ -979,13 +1016,353 @@ function renderScoreCards(result) {
     const div = document.createElement("div");
     div.className = "score";
     const score = result.scores ? result.scores[org.score] : result[org.score];
-    const rawPattern = result.patterns ? result.patterns[org.pattern] : "";
+    const rawPattern = result.patterns ? result.patterns[org.pattern] : result[org.pattern];
+    if (!isRealOrganScore(score)) {
+      const prompt = organShootPrompt(result, org);
+      div.classList.add("score-missing");
+      div.innerHTML = `<span>${org.name}</span><b class="shoot-prompt">${prompt}</b>`;
+      scores.appendChild(div);
+      return;
+    }
     div.innerHTML = `<span>${org.name}</span><b>${shownScore(score)}</b><small>${patternLabel(score, rawPattern)}</small>`;
     scores.appendChild(div);
   });
 }
 
+function briefCircleLine(note, kind) {
+  if (!note || typeof note !== "object") return "";
+  // day_modalities.<kind>.note holds class; legacy callers may pass note or class itself.
+  const hit = (note.note && note.note.class) || note.class || note.note || note;
+  const label = String((hit && hit.label) || "").trim();
+  if (!label) return "";
+  const tag = kind === "urine" ? "尿尿" : "大便";
+  // Stool nearest-standard: show class +「接近判定標準」, never「無法對照」.
+  const nearStd = Boolean(
+    hit &&
+      (hit.near_standard ||
+        label.includes("接近判定標準"))
+  );
+  if (nearStd && kind !== "urine") {
+    const abnormal = Boolean(hit && hit.abnormal);
+    return abnormal
+      ? `${tag}：需留意 — ${label}`
+      : `${tag}：正常 — ${label}`;
+  }
+  const outside = Boolean(
+    hit &&
+      (hit.id === "outside_palette" ||
+        (hit.far_from_palette && !nearStd))
+  );
+  if (outside) {
+    const hint = String((hit && hit.hint) || "").trim();
+    return hint
+      ? `${tag}：無法對照 — ${label}（${hint.slice(0, 48)}）`
+      : `${tag}：無法對照 — ${label}`;
+  }
+  const abnormal = Boolean(hit && hit.abnormal);
+  const confirm = String((hit && hit.confirm) || "").trim();
+  const confirmHint =
+    confirm === "diet_or_drug_matte_black" || confirm === "clear_water_diet_red"
+      ? "（染色較可能）"
+      : confirm === "pink_water_fresh_blood"
+        ? "（水液偏粉紅）"
+        : confirm === "glossy_tar_like"
+          ? "（偏油亮）"
+          : "";
+  return abnormal
+    ? `${tag}：需留意 — ${label}${confirmHint}`
+    : `${tag}：正常 — ${label}`;
+}
+
+/** Face Lab teaching lines must not appear under 食療整理 / findings. */
+function isFaceColorTeachingFinding(text) {
+  const s = String(text || "");
+  return (
+    s.startsWith("教學正常值") ||
+    s.includes("臉色分數") ||
+    s.includes("ΔE*/20") ||
+    s.includes("8–10 健康") ||
+    s.includes("8-10 健康")
+  );
+}
+
+/** Drop Lab / YCrCb measurement asides; keep short TCM conclusion words. */
+function stripColorMeasurementProse(text) {
+  let s = String(text || "").trim();
+  s = s.replace(/（[^）]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb|教學|色澤|健康分)[^）]*）/g, "");
+  s = s.replace(/\([^)]*(?:Cr|Cb|Δ[CELab]|ΔE|L\*|a\*|b\*|YCrCb)[^)]*\)/g, "");
+  s = s.replace(/#[0-9A-Fa-f]{6}/g, "");
+  s = s.replace(/\s*[Δ]?Cr\s*[-+]?\d+(\.\d+)?/g, "");
+  s = s.replace(/\s*[Δ]?Cb\s*[-+]?\d+(\.\d+)?/g, "");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  return s.replace(/^[，,／/\s→\-]+|[，,／/\s→\-]+$/g, "");
+}
+
+/** Regional tongue zone lines (上中下左右／舌尖Δa*) — detail only. */
+function isTongueRegionalFinding(text) {
+  const s = String(text || "");
+  if (!s) return false;
+  const markers = [
+    "（脾胃／舌中）", "（心肺／舌尖）", "（腎／舌根）",
+    "（肝膽／舌邊）", "／舌中）", "／舌尖）", "／舌根）", "／舌邊）",
+    "舌尖−舌中", "舌尖-舌中", "心肺區偏紅", "上區舌質",
+    "上（腎", "中（脾胃", "下（心肺", "左（肝膽", "右（肝膽",
+  ];
+  if (markers.some((m) => s.includes(m))) return true;
+  return /^[上下中左右]（[^）]+）/.test(s);
+}
+
+/**
+ * Long face/tongue/stool/urine teaching bullets → 「細部說明」 only.
+ * Short conclusions stay on the main findings list / circle panel.
+ */
+function isLongTeachingDetailFinding(text) {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  if (isFaceColorTeachingFinding(s)) return true;
+  if (/第\d+格/.test(s)) return true;
+  if (
+    s.includes("ΔCr") || s.includes("ΔCb") || s.includes("L*") ||
+    s.includes("a*") || s.includes("b*") || s.includes("YCrCb")
+  ) return true;
+  if (/\bCr\s*[-+]?\d/.test(s) || /\bCb\s*[-+]?\d/.test(s)) return true;
+  if (
+    /^(面色|臉色|唇|額頭)/.test(s) ||
+    s.includes("滿面") || s.includes("兩頰") || s.includes("下頜") ||
+    s.includes("白睛") || s.includes("眼眥") || s.includes("眼瞼") || s.includes("瞼內")
+  ) return true;
+  if (
+    s.includes("未見明顯偏色") || s.includes("未見全臉色偏") || s.includes("未見明顯色差")
+  ) return true;
+  if (isTongueRegionalFinding(s)) return true;
+  if (
+    s.startsWith("舌質") || s.startsWith("舌苔") || s.startsWith("舌苔（") ||
+    s.startsWith("黃苔") || s.startsWith("白苔") || s.startsWith("剝苔") ||
+    s.startsWith("焦黃") || s.startsWith("黑灰苔") || s.startsWith("光剝")
+  ) return true;
+  if (s.includes("舌質") || s.includes("舌苔") || (s.includes("舌") && s.includes("→"))) {
+    // Keep ultra-short 「舌：…」 conclusions on summary when already brief.
+    if (/^舌[：:]/.test(s) && s.length <= 24 && !s.includes("教學")) return false;
+    return true;
+  }
+  if (s.startsWith("大便色觀察")) return true;
+  if (s.startsWith("大便") && (s.includes("臟腑聯想") || s.includes("飲食／藥物") || s.includes("混淆"))) {
+    return true;
+  }
+  if (s === DYE_CONFUSION_NOTE || s.startsWith("火龍果,") || s.startsWith("火龍果，")) return true;
+  if (s.includes("火龍果") && (s.includes("染色") || s.includes("混淆"))) return true;
+  if (
+    s.includes("取景限制") || s.includes("泡沫時序限制") || s.includes("泡沫：面積比") ||
+    s.includes("GLCM") || s.includes("泡沫衰減")
+  ) return true;
+  if (
+    s.includes("Steatorrhea") || s.includes("帶油光教學") || s.includes("油光線索") ||
+    s.includes("浮水／水面線")
+  ) return true;
+  if (
+    s.includes("紅色確認") || s.includes("綠色確認") || s.includes("灰白確認") ||
+    s.includes("周圍水液") || s.includes("教育提醒") || s.includes("就醫參考")
+  ) return true;
+  if (s === "教學示範，非診斷" || s === "教學示範，非中醫診斷") return true;
+  // Long stool/urine teaching prose with teaching tag; keep brief status lines.
+  if (s.includes("教學示範") && s.length > 48) {
+    if (/^(大便|尿尿)[：:]\s*(正常|需留意|無法對照)/.test(s) && s.length <= 56) return false;
+    return true;
+  }
+  if (/^(尿尿|大便)[：:]/.test(s) && s.length > 56) return true;
+  return false;
+}
+
+/** Short face color conclusions only (bias / lip). */
+function faceFinalConclusions(result) {
+  const out = [];
+  const complexion =
+    (result && result.face_grid && result.face_grid.complexion) ||
+    (result && result.complexion) ||
+    {};
+  const bias = String(complexion.bias || "").trim();
+  if (bias && bias !== "基本色" && bias !== "色差基準") {
+    out.push(`臉色：${stripColorMeasurementProse(bias)}`);
+  } else {
+    const dm = ((result && result.organ_health) || {}).day_modalities || {};
+    const label = String((dm.face && dm.face.color_label) || "").trim();
+    if (label === "臉色已測" || label === "已測") out.push("臉色：已測");
+    else if (label && !isLongTeachingDetailFinding(label) && label.length <= 24) {
+      out.push(label.startsWith("臉") ? label : `臉色：${label}`);
+    } else if (label) {
+      const token = ["實熱", "實寒", "虛熱", "虛寒", "濕氣", "血瘀"].find((t) => label.includes(t));
+      if (token) out.push(`臉色：${token}`);
+    }
+  }
+  const lip = String(
+    (result && result.region_colors && result.region_colors.lip_color) || ""
+  ).trim();
+  if (lip) {
+    const short = stripColorMeasurementProse(lip.replace(/^唇/, "").trim());
+    if (short) out.push(`唇：${short}`);
+  }
+  return out;
+}
+
+/** Short tongue conclusions only (舌質 + 舌苔). */
+function tongueFinalConclusions(result) {
+  const out = [];
+  const colors = (result && result.region_colors) || {};
+  const body = stripColorMeasurementProse(colors.tongue_body_color || "");
+  const coat = stripColorMeasurementProse(colors.tongue_coat_color || "");
+  if (body) out.push(`舌質：${body}`);
+  if (coat) out.push(`舌苔：${coat}`);
+  if (out.length) return out;
+  const dm = ((result && result.organ_health) || {}).day_modalities || {};
+  const label = String((dm.tongue && dm.tongue.color_label) || "").trim();
+  if (!label || isTongueRegionalFinding(label)) return out;
+  if (label.includes("舌質") || label.includes("舌苔") || label.includes("→")) {
+    const parts = label.split(/[；;／]/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const bodyPart = stripColorMeasurementProse(parts.find((p) => p.includes("舌質")) || parts[0]);
+      const coatPart = stripColorMeasurementProse(parts.find((p) => p.includes("苔")) || parts[1]);
+      out.push(bodyPart.startsWith("舌質") ? bodyPart : `舌質：${bodyPart}`);
+      out.push(
+        coatPart.startsWith("舌苔") || coatPart.startsWith("苔")
+          ? (coatPart.startsWith("舌苔") ? coatPart : `舌苔：${coatPart}`)
+          : `舌苔：${coatPart}`
+      );
+    } else {
+      const short = stripColorMeasurementProse(label);
+      out.push(short.startsWith("舌") ? short : `舌：${short}`);
+    }
+  }
+  return out;
+}
+
+/** Partition API findings into short summary lines vs expandable detail bullets. */
+function splitFindingsForDisplay(result) {
+  const raw = Array.isArray(result && result.findings) ? result.findings : [];
+  const summary = [];
+  const detail = [];
+  const seen = new Set();
+  const pushUnique = (list, text) => {
+    const line = withoutUterusStatement(String(text || "").trim());
+    if (!line || hidesSpleenStomachPatternList(line)) return;
+    if (seen.has(line)) return;
+    seen.add(line);
+    list.push(line);
+  };
+
+  faceFinalConclusions(result).forEach((t) => pushUnique(summary, t));
+  tongueFinalConclusions(result).forEach((t) => pushUnique(summary, t));
+
+  const oh = (result && result.organ_health) || {};
+  const su = oh.stool_urine || {};
+  const dm = oh.day_modalities || {};
+  const stoolNote =
+    (result && result.stool) || su.stool || (dm.stool && (dm.stool.note || dm.stool.class)) || null;
+  const urineNote =
+    (result && result.urine) || su.urine || (dm.urine && (dm.urine.note || dm.urine.class)) || null;
+  const stoolBrief = briefCircleLine(stoolNote, "stool");
+  const urineBrief = briefCircleLine(urineNote, "urine");
+  if (stoolBrief) pushUnique(summary, stoolBrief);
+  if (urineBrief) pushUnique(summary, urineBrief);
+
+  raw.forEach((text) => {
+    const s = String(text || "").trim();
+    if (!s) return;
+    if (isLongTeachingDetailFinding(s)) {
+      pushUnique(detail, s);
+      return;
+    }
+    // Avoid duplicating brief stool/urine already emitted as short conclusions.
+    if (/^(大便|尿尿)[：:]/.test(s) && (stoolBrief || urineBrief)) {
+      if (isLongTeachingDetailFinding(s) || s.length > 40) {
+        pushUnique(detail, s);
+        return;
+      }
+      return;
+    }
+    pushUnique(summary, s);
+  });
+
+  if ((stoolBrief || urineBrief) && !detail.some((t) => t.includes("火龍果") || t === DYE_CONFUSION_NOTE)) {
+    pushUnique(detail, DYE_CONFUSION_NOTE);
+  }
+  return { summary, detail };
+}
+
+function findingsFromDayModalities(organHealth) {
+  const dm = (organHealth && organHealth.day_modalities) || {};
+  const out = [];
+  for (const key of ["face", "tongue", "stool", "urine", "pulse"]) {
+    const block = dm[key];
+    if (!block || typeof block !== "object") continue;
+    const list = Array.isArray(block.findings) ? block.findings : [];
+    list.forEach((t) => {
+      const s = String(t || "").trim();
+      if (s) out.push(s);
+    });
+  }
+  return out;
+}
+
+function updateCircleLinesFromResult(result) {
+  if (!result) return;
+  const oh = result.organ_health || {};
+  const dm = oh.day_modalities || {};
+  const su = oh.stool_urine || {};
+  if (dm.face && dm.face.color_label) {
+    lastDayLines.face = `臉：${dm.face.color_label}`;
+  }
+  if (dm.tongue && dm.tongue.color_label) {
+    lastDayLines.tongue = `舌：${dm.tongue.color_label}`;
+  }
+  if (dm.pulse && (dm.pulse.present || (dm.pulse.findings || []).length)) {
+    lastDayLines.pulse = "脈：已測";
+  }
+  const stoolNote =
+    result.stool || su.stool || (dm.stool && (dm.stool.note || dm.stool.class)) || null;
+  const urineNote =
+    result.urine || su.urine || (dm.urine && (dm.urine.note || dm.urine.class)) || null;
+  const stoolLine = briefCircleLine(stoolNote, "stool");
+  const urineLine = briefCircleLine(urineNote, "urine");
+  if (stoolLine) lastDayLines.stool = stoolLine;
+  else if (dm.stool && dm.stool.color_label) lastDayLines.stool = `大便：${dm.stool.color_label}`;
+  if (urineLine) lastDayLines.urine = urineLine;
+  else if (dm.urine && dm.urine.color_label) lastDayLines.urine = `尿尿：${dm.urine.color_label}`;
+  // Fallback: newest matching finding (re-shots append; first match was stale).
+  if (Array.isArray(result.findings)) {
+    let stoolHit = "";
+    let urineHit = "";
+    result.findings.forEach((t) => {
+      const s = String(t || "");
+      if (s.startsWith("大便")) stoolHit = s.split("（")[0].trim();
+      if (s.startsWith("尿尿")) urineHit = s.split("（")[0].trim();
+    });
+    if (!lastDayLines.stool && stoolHit) lastDayLines.stool = stoolHit;
+    if (!lastDayLines.urine && urineHit) lastDayLines.urine = urineHit;
+  }
+}
+
+function renderCircleResultPanel() {
+  const el = document.getElementById("circle-result");
+  if (!el) return;
+  const lines = [];
+  if (lastDayLines.face) lines.push(lastDayLines.face);
+  if (lastDayLines.tongue) lines.push(lastDayLines.tongue);
+  // Short stool/urine status only — dye / framing / foam live under 「細部說明」.
+  if (lastDayLines.stool) lines.push(lastDayLines.stool);
+  if (lastDayLines.urine) lines.push(lastDayLines.urine);
+  if (lastDayLines.pulse) lines.push(lastDayLines.pulse);
+  if (!lines.length) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = lines.join("\n");
+  el.classList.remove("hidden");
+}
+
 function renderResult(result) {
+  updateCircleLinesFromResult(result);
+  renderCircleResultPanel();
   if (result.dominant_color) {
     document.getElementById("color-chip").style.background = result.dominant_color;
     document.getElementById("color-hex").textContent = result.dominant_color;
@@ -1002,55 +1379,84 @@ function renderResult(result) {
   document.getElementById("color-label").textContent = " " + (result.color_label || "") + lightNote;
   syncTongueDetailFold(result.tongue_grid || lastTongueGrid);
   document.getElementById("disclaimer").textContent = result.disclaimer || "";
+  const split = splitFindingsForDisplay(result);
   const findings = document.getElementById("findings");
   findings.innerHTML = "";
-  (result.findings || []).forEach((text) => {
-    if (hidesSpleenStomachPatternList(text)) return;
-    const line = withoutUterusStatement(text);
-    if (!line) return;
+  split.summary.forEach((line) => {
     const li = document.createElement("li");
     li.textContent = line;
     findings.appendChild(li);
   });
+  const detailFold = document.getElementById("findings-detail-fold");
+  const detailList = document.getElementById("findings-detail");
+  if (detailFold && detailList) {
+    detailList.innerHTML = "";
+    split.detail.forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      detailList.appendChild(li);
+    });
+    if (split.detail.length) detailFold.classList.remove("hidden");
+    else detailFold.classList.add("hidden");
+  }
   const advice = withoutUterusStatement(result.diet_advice || "");
-  document.getElementById("advice").textContent = advice ? "食療整理：" + advice : "";
-  const links = document.getElementById("links");
-  links.innerHTML = "";
-  const dietArticle = result.diet_url || "";
-  const dietVideo = result.diet_video_url || (() => {
+  // Hide face color-analysis teaching blobs if they ever ride inside diet_advice.
+  const adviceClean = isFaceColorTeachingFinding(advice) || isLongTeachingDetailFinding(advice)
+    ? ""
+    : advice;
+  document.getElementById("advice").textContent = adviceClean ? "食療整理：" + adviceClean : "";
+  const dietLinks = document.getElementById("diet-links") || document.getElementById("links");
+  const acuLinks = document.getElementById("acupoint-links") || dietLinks;
+  if (dietLinks) dietLinks.innerHTML = "";
+  if (acuLinks && acuLinks !== dietLinks) acuLinks.innerHTML = "";
+  const dietArticleQ = (result.diet_query || "").trim() || (() => {
     try {
-      if (!dietArticle) return "";
-      const u = new URL(dietArticle, window.location.origin);
-      const q = u.searchParams.get("q");
-      if (!q) return "";
-      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+      const u = new URL(result.diet_url || "", window.location.origin);
+      return (u.searchParams.get("q") || "").trim();
     } catch (_err) {
       return "";
     }
   })();
-  if (dietArticle) {
-    links.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
+  const dietVideoQ = (result.diet_video_query || "").trim() || (
+    dietArticleQ ? `食譜 影片 ${dietArticleQ}` : ""
+  );
+  const dietArticle = result.diet_url || (dietArticleQ
+    ? `https://www.google.com/search?q=${encodeURIComponent(dietArticleQ)}`
+    : "");
+  const dietVideo = result.diet_video_url || (dietVideoQ
+    ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(dietVideoQ)}`
+    : "");
+  if (dietLinks && dietArticle) {
+    dietLinks.innerHTML += `<a href="${dietArticle}" target="_blank" rel="noreferrer">${uiText("dietLinkArticles")}</a>　`;
   }
-  if (dietVideo) {
-    links.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
+  if (dietLinks && dietVideo) {
+    dietLinks.innerHTML += `<a href="${dietVideo}" target="_blank" rel="noreferrer">${uiText("dietLinkVideos")}</a>　`;
   }
-  const acuImages = result.acupoint_url || "";
-  const acuVideo = result.acupoint_video_url || (() => {
+  renderAffiliateCarousel();
+  const acuImageQ = (result.acupoint_query || "").trim() || (() => {
     try {
-      if (!acuImages) return "";
-      const u = new URL(acuImages, window.location.origin);
-      const q = u.searchParams.get("q");
-      if (!q) return "";
-      return `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(q)}`;
+      const u = new URL(result.acupoint_url || "", window.location.origin);
+      return (u.searchParams.get("q") || "").trim();
     } catch (_err) {
       return "";
     }
   })();
-  if (acuImages) {
-    links.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
+  const acuVideoQ = (result.acupoint_video_query || "").trim() || (
+    acuImageQ
+      ? `穴道 影片 ${acuImageQ.replace(/^穴道\s+(?:照片|圖片)\s+/, "")}`
+      : ""
+  );
+  const acuImages = result.acupoint_url || (acuImageQ
+    ? `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(acuImageQ)}`
+    : "");
+  const acuVideo = result.acupoint_video_url || (acuVideoQ
+    ? `https://www.google.com/search?tbm=vid&q=${encodeURIComponent(acuVideoQ)}`
+    : "");
+  if (acuLinks && acuImages) {
+    acuLinks.innerHTML += `<a href="${acuImages}" target="_blank" rel="noreferrer">${uiText("acupointLinkImages")}</a>　`;
   }
-  if (acuVideo) {
-    links.innerHTML += `<a href="${acuVideo}" target="_blank" rel="noreferrer">${uiText("acupointLinkVideos")}</a>`;
+  if (acuLinks && acuVideo) {
+    acuLinks.innerHTML += `<a href="${acuVideo}" target="_blank" rel="noreferrer">${uiText("acupointLinkVideos")}</a>`;
   }
   renderScoreCards(result);
   drawOrgans(result);
@@ -1215,9 +1621,180 @@ function formatRecipeNutrients(nutrients) {
 }
 
 let recipeEnsureSeq = 0;
+let recipeListSeq = 0;
+let recipeEnsureBusy = false;
+let recipeEnsureFollowUp = null;
+
+function isRecipeStatusMessage(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return value === uiText("recipeSearching")
+    || value === uiText("recipeEnsuring")
+    || value === uiText("recipeCreateHint")
+    || value === uiText("recipeListLoading")
+    || value === uiText("recipeEnsureFailed")
+    || value.startsWith(uiText("recipeEnsureFailed"));
+}
+
+function clearAffiliatePanels() {
+  const recipeAff = document.getElementById("recipe-affiliate");
+  const foodAff = document.getElementById("food-affiliate");
+  if (recipeAff) {
+    recipeAff.hidden = true;
+    recipeAff.innerHTML = "";
+  }
+  if (foodAff) {
+    foodAff.hidden = true;
+    foodAff.innerHTML = "";
+  }
+}
+
+const affiliateCarouselCacheByCategory = Object.create(null);
+const affiliateCarouselPromiseByCategory = Object.create(null);
+
+async function fetchAffiliateCarouselItems(category) {
+  const key = category || "all";
+  if (Array.isArray(affiliateCarouselCacheByCategory[key])) {
+    return affiliateCarouselCacheByCategory[key];
+  }
+  if (affiliateCarouselPromiseByCategory[key]) {
+    return affiliateCarouselPromiseByCategory[key];
+  }
+  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+  affiliateCarouselPromiseByCategory[key] = fetch(`/api/affiliates${qs}`, {
+    credentials: "same-origin",
+  })
+    .then((resp) => (resp.ok ? resp.json() : { affiliates: [] }))
+    .then((data) => {
+      const list = Array.isArray(data.affiliates) ? data.affiliates : [];
+      affiliateCarouselCacheByCategory[key] = list.filter((item) => item && item.go_url);
+      return affiliateCarouselCacheByCategory[key];
+    })
+    .catch(() => {
+      affiliateCarouselCacheByCategory[key] = [];
+      return affiliateCarouselCacheByCategory[key];
+    })
+    .finally(() => {
+      affiliateCarouselPromiseByCategory[key] = null;
+    });
+  return affiliateCarouselPromiseByCategory[key];
+}
+
+function affiliateCarouselCardHtml(aff) {
+  if (!aff || !aff.go_url) return "";
+  const title = aff.title || aff.button_text || "健康推薦";
+  const platform = aff.platform_name || "";
+  const cta = aff.button_text || "前往查看優惠";
+  return `<a class="affiliate-carousel-card" href="${aff.go_url}" target="_blank" rel="nofollow sponsored noopener" role="listitem">
+    <span class="affiliate-carousel-title">${title}</span>
+    ${platform ? `<span class="affiliate-carousel-platform">${platform}</span>` : ""}
+    <span class="affiliate-carousel-cta">${cta}</span>
+  </a>`;
+}
+
+async function renderAffiliateCarouselBox(boxId, trackId, labelKey, category) {
+  const box = document.getElementById(boxId);
+  const track = document.getElementById(trackId);
+  if (!box || !track) return;
+  const label = box.querySelector(".affiliate-carousel-label");
+  if (label) label.textContent = uiText(labelKey);
+  const items = await fetchAffiliateCarouselItems(category);
+  if (!items.length) {
+    track.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  track.innerHTML = items.map(affiliateCarouselCardHtml).join("");
+  box.hidden = false;
+}
+
+async function renderAffiliateCarousel() {
+  await Promise.all([
+    renderAffiliateCarouselBox(
+      "affiliate-carousel",
+      "affiliate-carousel-track",
+      "affiliateCarouselLabel",
+      "diet",
+    ),
+    renderAffiliateCarouselBox(
+      "fitness-affiliate-carousel",
+      "fitness-affiliate-carousel-track",
+      "fitnessAffiliateCarouselLabel",
+      "fitness",
+    ),
+  ]);
+}
+
+function affiliateCtaHtml(aff, extraClass) {
+  if (!aff || !aff.go_url) return "";
+  const label = `${aff.button_text || "前往查看優惠"}${aff.platform_name ? `（${aff.platform_name}）` : ""}`;
+  const cls = extraClass ? ` class="${extraClass}"` : "";
+  return `<a${cls} href="${aff.go_url}" target="_blank" rel="nofollow sponsored noopener">${label}</a>`;
+}
+
+function renderRecipeAffiliate(aff) {
+  const box = document.getElementById("recipe-affiliate");
+  if (!box) return;
+  if (!aff || !aff.go_url) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  const href = aff.go_url;
+  box.innerHTML = `
+    <h4>懶人外食／體驗替代方案</h4>
+    <a href="${href}" target="_blank" rel="nofollow sponsored noopener">沒時間自己煮？👉 預訂周邊健康蔬食餐廳（OpenTable / Klook 優惠餐券）</a>
+    <a href="${href}" target="_blank" rel="nofollow sponsored noopener">想學更多道地料理？👉 報名健康烹飪體驗課（Viator / GetYourGuide）</a>
+    <div class="food-affiliate-item" style="margin-top:8px">${affiliateCtaHtml(aff, "food-affiliate-cta")}</div>
+  `;
+  box.hidden = false;
+}
+
+function renderFoodAffiliates(items, recipeAffiliate) {
+  const box = document.getElementById("food-affiliate");
+  if (!box) return;
+  const list = Array.isArray(items) ? items.filter((item) => item && (item.affiliate || item.affiliate_slug)) : [];
+  // Prefer JOIN affiliate objects; fall back to slug-only ingredient rows.
+  const blocks = [];
+  for (const item of list) {
+    const aff = item.affiliate || (item.affiliate_slug ? {
+      slug: item.affiliate_slug,
+      go_url: `/go/${encodeURIComponent(item.affiliate_slug)}`,
+      button_text: "🛒 購買推薦食材（iHerb / Amazon）",
+      platform_name: "",
+      title: item.name || "",
+    } : null);
+    if (!aff || !aff.go_url) continue;
+    const name = String(item.name || aff.title || "").trim();
+    const bits = [];
+    if (item.kcal != null && item.kcal !== "") bits.push(`${Math.round(Number(item.kcal))} kcal`);
+    if (item.protein_g != null && item.protein_g !== "") {
+      const p = Number(item.protein_g);
+      bits.push(`蛋白 ${Number.isFinite(p) ? (Math.abs(p) >= 1 ? Math.round(p) : p.toFixed(2)) : item.protein_g} g`);
+    }
+    const meta = bits.length ? `<span class="food-affiliate-meta">${bits.join(" · ")}</span>` : "";
+    const cta = affiliateCtaHtml(
+      Object.assign({}, aff, {
+        button_text: aff.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
+      }),
+      "food-affiliate-cta"
+    );
+    blocks.push(`<div class="food-affiliate-item"><strong>${name}</strong>${meta}${cta}</div>`);
+  }
+  // If recipe has no ingredient affiliates but foods detail CTA needed via recipe.affiliate alone, skip here.
+  void recipeAffiliate;
+  if (!blocks.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = blocks.join("");
+  box.hidden = false;
+}
 
 function showSelectedRecipe(extraNote) {
   const pick = document.getElementById("recipe-name");
+  const detailTop = document.getElementById("recipe-detail-top");
   const detail = document.getElementById("recipe-detail");
   if (!pick || !detail) return;
   const label = pick.value.trim();
@@ -1226,23 +1803,63 @@ function showSelectedRecipe(extraNote) {
     || findRecipeByTypedName(label);
   if (!row) {
     selectedRecipeId = null;
-    if (!label) detail.textContent = "";
+    // Never keep another dish's ingredients/method under a different typed name.
+    if (!label) {
+      detail.textContent = "";
+      if (detailTop) detailTop.textContent = "";
+    } else if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+      detail.textContent = "";
+      if (detailTop) detailTop.textContent = "";
+    }
+    clearAffiliatePanels();
     return;
   }
   selectedRecipeId = row.id;
-  const lines = [
+  const beforeAffiliate = [
     ["fieldRecipe", row.recipe],
     ["fieldMethod", row.method],
+  ].filter((item) => item[1]);
+  const afterAffiliate = [
     ["fieldBenefit", row.benefit],
     ["fieldNutrient", row.nutrient],
     ["fieldBan", row.ban],
     ["fieldAllergens", row.allergens],
   ].filter((item) => item[1]);
-  let text = lines.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  const topText = beforeAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
+  if (detailTop) detailTop.textContent = topText;
+  else detail.textContent = topText;
+  // Recipe affiliate card sits visually below steps (method).
+  renderRecipeAffiliate(row.affiliate);
+  let rest = afterAffiliate.map((item) => uiText(item[0]) + "\n" + item[1]).join("\n\n");
   const nutrientLine = row.nutrient_line || formatRecipeNutrients(row.nutrients);
-  if (nutrientLine) text = (text ? text + "\n\n" : "") + nutrientLine;
-  if (extraNote) text = (text ? text + "\n\n" : "") + extraNote;
-  detail.textContent = text;
+  if (nutrientLine) rest = (rest ? rest + "\n\n" : "") + nutrientLine;
+  if (row.body_still_zh && getUiLang() !== "zh") {
+    rest = (rest ? rest + "\n\n" : "") + uiText("bodyStillZh");
+  }
+  if (extraNote) rest = (rest ? rest + "\n\n" : "") + extraNote;
+  // Keep status/search messages in #recipe-detail; body copy goes below the CTA.
+  detail.textContent = detailTop ? rest : ((topText ? topText + "\n\n" : "") + rest);
+  // Food CTAs sit below nutrition (kcal/protein).
+  const foodItems = (row.ingredient_affiliates || []).map((item) => Object.assign({}, item, {
+    affiliate: item.affiliate || (item.affiliate_slug ? {
+      slug: item.affiliate_slug,
+      title: item.name,
+      platform_name: item.platform_name || "iHerb / Amazon",
+      button_text: item.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
+      go_url: `/go/${encodeURIComponent(item.affiliate_slug)}`,
+    } : null),
+  }));
+  // If recipe has affiliate but no ingredient hits, still show a buy CTA under nutrients.
+  if (!foodItems.length && row.affiliate && row.affiliate.go_url) {
+    foodItems.push({
+      name: row.affiliate.title || "推薦食材",
+      affiliate_slug: row.affiliate.slug,
+      affiliate: Object.assign({}, row.affiliate, {
+        button_text: row.affiliate.button_text || "🛒 購買推薦食材（iHerb / Amazon）",
+      }),
+    });
+  }
+  renderFoodAffiliates(foodItems, row.affiliate);
 }
 
 function recipeHasSubstringMatch(typed) {
@@ -1256,16 +1873,26 @@ function showRecipeSearchStatus(typed) {
   if (!detail) return;
   const plain = recipeNamePlain(typed);
   if (!plain) {
-    if (!selectedRecipeId) detail.textContent = "";
+    selectedRecipeId = null;
+    if (!recipeEnsureBusy) detail.textContent = "";
+    clearAffiliatePanels();
     return;
   }
   if (findRecipeByTypedName(typed)) {
     showSelectedRecipe();
     return;
   }
-  if (!recipeHasSubstringMatch(typed)) {
-    detail.textContent = uiText("recipeSearching");
+  if (recipeEnsureBusy) {
+    detail.textContent = uiText("recipeEnsuring");
+    return;
   }
+  if (!recipeHasSubstringMatch(typed)) {
+    // Do not auto-create — user must tap「建立此食譜」.
+    detail.textContent = uiText("recipeCreateHint");
+    return;
+  }
+  // Substring hits exist but exact dish not selected — drop stale detail from another dish.
+  if (!isRecipeStatusMessage(detail.textContent)) detail.textContent = "";
 }
 
 async function ensureRecipeFromInput(options) {
@@ -1302,21 +1929,33 @@ async function ensureRecipeFromInput(options) {
     return null;
   }
   const seq = ++recipeEnsureSeq;
+  recipeEnsureBusy = true;
   closeCombo(pick, list);
   pick.value = plain;
   detail.textContent = uiText("recipeEnsuring");
   try {
+    // Re-read country at request time so a late country fill is included.
+    let ensureCountry = countryInput.value.trim();
+    if (ensureCountry && !countryNames.includes(ensureCountry)) ensureCountry = "";
     const data = await api("/api/recipes/create", {
       method: "POST",
-      body: formBody({ country, name: plain, lang: getUiLang() }),
+      body: formBody({ country: ensureCountry, name: plain, lang: getUiLang() }),
     });
     if (seq !== recipeEnsureSeq) return null;
+    if (data && data.rejected) {
+      detail.textContent = data.note || uiText("recipeLangUnsupported");
+      return null;
+    }
     const created = data && data.recipe;
     if (created && created.id != null) selectedRecipeId = created.id;
     if (created) applyRecipeCountry(created);
     const resolvedCountry = (created && created.country) || countryInput.value.trim();
-    if (resolvedCountry && countryNames.includes(resolvedCountry)) {
-      await loadRecipesForCountry({ keepSelection: true });
+    // Always reload that country's list when catalog corrected the country selector.
+    if (resolvedCountry && (countryNames.includes(resolvedCountry) || data.country_corrected)) {
+      if (resolvedCountry && !countryNames.includes(resolvedCountry)) {
+        countryNames = countryNames.concat([resolvedCountry]);
+      }
+      await loadRecipesForCountry({ keepSelection: true, preserveTyped: plain });
     } else if (created) {
       recipeRows = [created].concat(recipeRows.filter((item) => String(item.id) !== String(created.id)));
     }
@@ -1347,6 +1986,18 @@ async function ensureRecipeFromInput(options) {
     if (seq !== recipeEnsureSeq) return null;
     detail.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
     return null;
+  } finally {
+    if (seq === recipeEnsureSeq) {
+      recipeEnsureBusy = false;
+      const followUp = recipeEnsureFollowUp;
+      recipeEnsureFollowUp = null;
+      if (followUp && followUp.name) {
+        ensureRecipeFromInput(followUp).catch((err) => {
+          const box = document.getElementById("recipe-detail");
+          if (box) box.textContent = formatApiError(err) || uiText("recipeEnsureFailed");
+        });
+      }
+    }
   }
 }
 
@@ -1370,10 +2021,38 @@ function recipeFilterParams() {
   return params;
 }
 
-function recipeQueryParams(country) {
+function recipeQueryParams(country, options) {
   const params = recipeFilterParams();
   params.set("country", country);
+  const limit = options && options.limit != null ? options.limit : 80;
+  const offset = options && options.offset != null ? options.offset : 0;
+  params.set("limit", String(limit));
+  params.set("offset", String(Math.max(0, offset)));
   return params;
+}
+
+/** Fetch all country (or name-search) pages until has_more is false. */
+async function fetchRecipePages(buildParams, pageLimit) {
+  const limit = pageLimit || 80;
+  let offset = 0;
+  let recipes = [];
+  let last = null;
+  while (true) {
+    const params = buildParams(limit, offset);
+    const data = await api("/api/recipes?" + params.toString());
+    last = data;
+    const batch = data.recipes || [];
+    recipes = recipes.concat(batch);
+    if (!data.has_more) break;
+    const next = (data.offset != null ? data.offset : offset) + batch.length;
+    if (next <= offset || !batch.length) break;
+    offset = next;
+  }
+  if (last) {
+    last.recipes = recipes;
+    last.count = recipes.length;
+  }
+  return last || { recipes: [], count: 0, has_more: false };
 }
 
 function clearRecipeSelection() {
@@ -1420,14 +2099,20 @@ async function loadRecipesByName(name, options) {
   const list = document.getElementById("recipe-name-list");
   if (!pick || !detail) return;
   const plain = recipeNamePlain(name || pick.value);
+  const seq = ++recipeListSeq;
   closeCombo(pick, list);
   if (!plain) {
     recipeRows = [];
     return;
   }
-  const params = recipeFilterParams();
-  params.set("name", plain);
-  const data = await api("/api/recipes?" + params.toString());
+  const data = await fetchRecipePages((limit, offset) => {
+    const params = recipeFilterParams();
+    params.set("name", plain);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    return params;
+  }, 40);
+  if (seq !== recipeListSeq) return;
   recipeRows = data.recipes || [];
   if (keepId != null) {
     const row = recipeRows.find((item) => String(item.id) === String(keepId));
@@ -1444,31 +2129,69 @@ async function loadRecipesByName(name, options) {
 async function loadRecipesForCountry(options) {
   const keepSelection = Boolean(options && options.keepSelection);
   const keepId = keepSelection ? selectedRecipeId : null;
+  const preserveTypedRaw = options && options.preserveTyped;
   const countryInput = document.getElementById("recipe-country");
   const pick = document.getElementById("recipe-name");
   const detail = document.getElementById("recipe-detail");
   const list = document.getElementById("recipe-name-list");
   if (!countryInput || !pick || !detail) return;
   const country = countryInput.value.trim();
+  const typedBefore = recipeNamePlain(
+    preserveTypedRaw != null && preserveTypedRaw !== true && preserveTypedRaw !== false
+      ? preserveTypedRaw
+      : pick.value
+  );
+  const preserveTyped = Boolean(preserveTypedRaw) || Boolean(typedBefore && (keepSelection || recipeEnsureBusy));
+  const seq = ++recipeListSeq;
   closeCombo(pick, list);
-  if (!keepSelection) {
+  if (!keepSelection && !preserveTyped) {
     selectedRecipeId = null;
     recipeRows = [];
     pick.value = "";
     detail.textContent = "";
+  } else if (preserveTyped && typedBefore) {
+    // Keep the pending dish name; do not flash another country's first recipe.
+    pick.value = typedBefore;
   }
   if (!countryNames.includes(country)) {
     // Country optional: keep typed dish name and search across Recipe.xls.
-    const typed = recipeNamePlain(pick.value);
+    const typed = typedBefore || recipeNamePlain(pick.value);
     if (typed) {
       await loadRecipesByName(typed, { keepSelection: true });
       return;
     }
-    recipeRows = [];
+    if (seq === recipeListSeq) recipeRows = [];
     return;
   }
-  const data = await api("/api/recipes?" + recipeQueryParams(country).toString());
-  recipeRows = data.recipes || [];
+  // First page fills the dropdown quickly; remaining pages append in the same call.
+  const first = await api("/api/recipes?" + recipeQueryParams(country, { limit: 80, offset: 0 }).toString());
+  if (seq !== recipeListSeq) return;
+  recipeRows = first.recipes || [];
+  const openCountryList = () => {
+    if (pick && list && recipeRows.length) {
+      renderCombo(pick, list, recipeRows.map(recipeLabel), (label) => {
+        rememberRecipeChoice(label);
+        showSelectedRecipe();
+      }, "all");
+    }
+  };
+  openCountryList();
+  if (first.has_more) {
+    let offset = (first.offset != null ? first.offset : 0) + recipeRows.length;
+    while (true) {
+      const more = await api(
+        "/api/recipes?" + recipeQueryParams(country, { limit: 80, offset }).toString()
+      );
+      if (seq !== recipeListSeq) return;
+      const batch = more.recipes || [];
+      recipeRows = recipeRows.concat(batch);
+      openCountryList();
+      if (!more.has_more) break;
+      const next = (more.offset != null ? more.offset : offset) + batch.length;
+      if (next <= offset || !batch.length) break;
+      offset = next;
+    }
+  }
   if (keepId != null) {
     const row = recipeRows.find((item) => String(item.id) === String(keepId));
     if (row) {
@@ -1478,9 +2201,61 @@ async function loadRecipesForCountry(options) {
       return;
     }
   }
+  if (preserveTyped && typedBefore) {
+    const matched = findRecipeByTypedName(typedBefore);
+    if (matched) {
+      selectedRecipeId = matched.id;
+      pick.value = recipeLabel(matched);
+      showSelectedRecipe();
+      return;
+    }
+    // Typed dish is not in this country list — keep name; user taps create explicitly.
+    selectedRecipeId = null;
+    pick.value = typedBefore;
+    if (!recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+      detail.textContent = uiText("recipeCreateHint");
+    }
+    return;
+  }
   selectedRecipeId = null;
   pick.value = "";
   detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
+}
+
+/** Country just became valid: reload that country's recipe list into the dropdown. */
+function onRecipeCountryChosen() {
+  const pick = document.getElementById("recipe-name");
+  const detail = document.getElementById("recipe-detail");
+  const pickList = document.getElementById("recipe-name-list");
+  const typed = pick ? recipeNamePlain(pick.value) : "";
+  if (detail && !recipeEnsureBusy) detail.textContent = uiText("recipeListLoading");
+  loadRecipesForCountry({ preserveTyped: typed || true })
+    .then(() => {
+      // Always open/refresh the country recipe dropdown after a successful load.
+      if (pick && pickList && recipeRows.length) {
+        renderCombo(pick, pickList, recipeRows.map(recipeLabel), (label) => {
+          rememberRecipeChoice(label);
+          showSelectedRecipe();
+        }, "all");
+      } else if (pick && pickList) {
+        renderCombo(pick, pickList, [], () => {}, "all", uiText("emptyRecipes"));
+      }
+      if (!typed) {
+        if (detail && !recipeEnsureBusy) {
+          detail.textContent = recipeRows.length ? "" : uiText(recipeByBody ? "emptyRecipesBody" : "emptyRecipes");
+        }
+        return;
+      }
+      if (findRecipeByTypedName(typed)) {
+        showSelectedRecipe();
+        return;
+      }
+      // Missing from this country's list — hint to tap create; do not silent-create.
+      if (detail && !recipeEnsureBusy) detail.textContent = uiText("recipeCreateHint");
+    })
+    .catch((err) => {
+      if (detail) detail.textContent = formatApiError(err);
+    });
 }
 
 async function reloadRecipesForLanguage() {
@@ -1514,12 +2289,9 @@ function bindRecipePickers() {
       });
     });
   }
-  const showCountries = () => renderCombo(country, countryList, countryNames, (label) => {
-    rememberRecipeChoice("");
-    loadRecipesForCountry().catch((err) => {
-      const detail = document.getElementById("recipe-detail");
-      if (detail) detail.textContent = formatApiError(err);
-    });
+  const showCountries = () => renderCombo(country, countryList, countryNames, () => {
+    // Keep a typed pending dish; do not clear selection into the country's first recipe.
+    onRecipeCountryChosen();
   }, "prefix");
   const hasCountry = () => countryNames.includes(country.value.trim());
   const usableRecipeLabels = () => {
@@ -1590,26 +2362,23 @@ function bindRecipePickers() {
     if (!button) return;
     country.value = button.textContent;
     closeCombo(country, countryList);
-    loadRecipesForCountry().catch((err) => {
-      const detail = document.getElementById("recipe-detail");
-      if (detail) detail.textContent = formatApiError(err);
-    });
+    onRecipeCountryChosen();
   });
   country.addEventListener("input", () => {
     showCountries();
     const exact = countryNames.includes(country.value.trim());
     if (exact) {
-      loadRecipesForCountry().catch((err) => {
-        const detail = document.getElementById("recipe-detail");
-        if (detail) detail.textContent = formatApiError(err);
-      });
+      onRecipeCountryChosen();
     } else {
       // Keep dish text; search across countries when the user types a recipe name.
       selectedRecipeId = null;
       recipeRows = [];
       closeCombo(pick, pickList);
       const detail = document.getElementById("recipe-detail");
-      if (detail && !recipeNamePlain(pick.value)) detail.textContent = "";
+      if (detail && !recipeNamePlain(pick.value) && !recipeEnsureBusy) detail.textContent = "";
+      else if (detail && recipeNamePlain(pick.value) && !recipeEnsureBusy && !isRecipeStatusMessage(detail.textContent)) {
+        detail.textContent = "";
+      }
       searchRecipesWithoutCountry();
     }
   });
@@ -1632,10 +2401,8 @@ function bindRecipePickers() {
       return;
     }
     closeCombo(pick, pickList);
-    if (!recipeHasSubstringMatch(typed)) {
-      startCreateRecipe(typed);
-      return;
-    }
+    // Enter without an exact list pick: open filter + create button; never silent-create.
+    filterRecipes();
     showRecipeSearchStatus(typed);
   });
   pick.addEventListener("input", () => {
@@ -1647,19 +2414,14 @@ function bindRecipePickers() {
   });
   pick.addEventListener("blur", () => {
     closeCombo(pick, pickList);
-    // Create only via Enter or「建立此食譜」; keep「搜尋中」if still unmatched.
     const typed = pick.value.trim();
     if (!typed || findRecipeByTypedName(typed)) return;
-    if (!recipeHasSubstringMatch(typed)) {
-      const detail = document.getElementById("recipe-detail");
-      if (detail && detail.textContent !== uiText("recipeEnsuring")) {
-        detail.textContent = uiText("recipeSearching");
-      }
-    }
+    // No silent create on blur — user taps「建立此食譜」explicitly.
+    showRecipeSearchStatus(typed);
   });
 }
 
-async function loadRecords() {
+async function loadRecords(opts = {}) {
   const data = await api("/api/records");
   const box = document.getElementById("records");
   renderTrend(data.trend);
@@ -1669,27 +2431,54 @@ async function loadRecords() {
     return;
   }
   const latest = data.records[0];
-  renderResult({
-    scores: latest,
-    patterns: latest,
-    overlays: latest.overlays || {},
-    pattern_scores: latest.pattern_scores,
-    organ_health: latest.organ_health,
-    findings: [latest.symptoms, latest.discomfort].filter(Boolean),
-    diet_advice: latest.diet_advice,
-    diet_url: latest.diet_url,
-    diet_video_url: latest.diet_video_url,
-    acupoint_url: latest.acupoint_url,
-    acupoint_video_url: latest.acupoint_video_url,
-    color_label: [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
-    face_grid: latest.face_grid,
-    tongue_grid: latest.tongue_grid,
-    complexion: (latest.face_grid && latest.face_grid.complexion) || {
-      bias: latest.complexion_label,
-      hex: latest.complexion_hex,
-    },
-    disclaimer: "以下為最近一次 MySQL 紀錄。教學示範，非診斷。",
-  });
+  const oh = latest.organ_health || {};
+  const su = oh.stool_urine || {};
+  const dmFindings = findingsFromDayModalities(oh);
+  const circleFindings = Array.isArray(su.findings) ? su.findings.slice() : [];
+  const textBits = [latest.symptoms, latest.discomfort].filter(Boolean);
+  // Keep today's modality findings; do not replace them with only symptoms.
+  const mergedFindings = (dmFindings.length ? dmFindings : circleFindings).concat(textBits);
+  const findings = opts.preserveFindings ? undefined : mergedFindings;
+  if (!opts.skipResult) {
+    const payload = {
+      scores: latest,
+      patterns: latest,
+      overlays: latest.overlays || {},
+      pattern_scores: latest.pattern_scores,
+      organ_health: latest.organ_health,
+      stool: su.stool || null,
+      urine: su.urine || null,
+      findings: findings || textBits,
+      diet_advice: latest.diet_advice,
+      diet_url: latest.diet_url,
+      diet_video_url: latest.diet_video_url,
+      diet_query: latest.diet_query,
+      diet_video_query: latest.diet_video_query,
+      acupoint_url: latest.acupoint_url,
+      acupoint_video_url: latest.acupoint_video_url,
+      acupoint_query: latest.acupoint_query,
+      acupoint_video_query: latest.acupoint_video_query,
+      color_label: latest.color_label
+        || [latest.face_color, latest.lip_color, latest.tongue_body_color, latest.tongue_coat_color].filter(Boolean).join("／"),
+      face_grid: latest.face_grid,
+      tongue_grid: latest.tongue_grid,
+      complexion: (latest.face_grid && latest.face_grid.complexion) || {
+        bias: latest.complexion_label,
+        hex: latest.complexion_hex,
+      },
+      disclaimer: "以下為今日累積檢測（同一天內換拍只更新該項）。教學示範，非診斷。",
+    };
+    renderResult(payload);
+  } else {
+    // Live shot just rendered — refresh persistent day panel from DB merge.
+    updateCircleLinesFromResult({
+      organ_health: latest.organ_health,
+      stool: su.stool || null,
+      urine: su.urine || null,
+      findings: mergedFindings,
+    });
+    renderCircleResultPanel();
+  }
   renderComplexionHistory(data.records);
   const shownOrgans = visibleOrgans();
   const head = ["日期", "狀況", ...shownOrgans.map((o) => o.name), "食療"].map((h) => `<th>${h}</th>`).join("");
@@ -1697,8 +2486,13 @@ async function loadRecords() {
     .map((r) => {
       const date = (r.record_date || "").toString().replace("T", " ").slice(0, 19);
       const cells = shownOrgans.map((o) => {
-        const pattern = patternLabel(r[o.score], r[o.pattern]);
-        return `<td>${shownScore(r[o.score])} ${pattern}</td>`;
+        const score = r[o.score];
+        if (!isRealOrganScore(score)) {
+          const prompt = organShootPrompt({ organ_health: r.organ_health, scores: r, ...r }, o);
+          return `<td class="score-missing">${prompt}</td>`;
+        }
+        const pattern = patternLabel(score, r[o.pattern]);
+        return `<td>${shownScore(score)} ${pattern}</td>`;
       }).join("");
       return `<tr><td>${date}</td><td>${(r.symptoms || "").slice(0, 12)}</td>${cells}<td>${withoutUterusStatement(r.diet_advice || "")}</td></tr>`;
     })
@@ -1763,6 +2557,54 @@ function bindMealCalendarControls() {
   if (addBtn && !addBtn.dataset.bound) {
     addBtn.dataset.bound = "1";
     addBtn.addEventListener("click", () => addSelectedRecipeMeal());
+  }
+  const stepsSave = document.getElementById("meal-steps-save-btn");
+  if (stepsSave && !stepsSave.dataset.bound) {
+    stepsSave.dataset.bound = "1";
+    stepsSave.addEventListener("click", () => saveMealActualSteps());
+  }
+}
+
+async function saveMealActualSteps() {
+  const msg = document.getElementById("meal-steps-msg");
+  const input = document.getElementById("meal-steps-input");
+  if (!input) return;
+  if (typeof getToken === "function" && !getToken()) {
+    if (msg) {
+      msg.textContent = uiText("mealStepsNeedLogin");
+      msg.className = "status err";
+    }
+    return;
+  }
+  const raw = String(input.value || "").trim();
+  if (raw === "" || Number.isNaN(Number(raw))) {
+    if (msg) {
+      msg.textContent = uiText("mealStepsManualLabel");
+      msg.className = "status err";
+    }
+    return;
+  }
+  try {
+    const data = await api("/api/activity/today", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: mealSelectedDate,
+        steps: Math.round(Number(raw)),
+        source: "web_manual",
+      }),
+    });
+    if (data.day) mealDayData = data.day;
+    if (msg) {
+      msg.textContent = uiText("mealStepsSaved");
+      msg.className = "status ok";
+    }
+    renderMealDay();
+  } catch (err) {
+    if (msg) {
+      msg.textContent = formatApiError(err);
+      msg.className = "status err";
+    }
   }
 }
 
@@ -1902,8 +2744,225 @@ function renderMealDay() {
       ? uiText("mealChartMissingLib")
       : uiText("mealChartEmpty");
   }
+  renderMealSteps(mealDayData);
   renderMealCharts(mealDayData);
   renderMealNutrientTrend(mealMonthData);
+}
+
+function formatStepsSource(source) {
+  const key = String(source || "").toLowerCase();
+  if (key === "android_health_connect") return uiText("mealStepsSourceHc");
+  if (key === "android_sensor") return uiText("mealStepsSourceSensor");
+  if (key === "web_manual" || key === "manual") return uiText("mealStepsSourceManual");
+  return source || uiText("mealStepsSourceManual");
+}
+
+function renderMealSteps(day) {
+  const kcalEl = document.getElementById("meal-steps-kcal");
+  const summaryEl = document.getElementById("meal-steps-summary");
+  const remainingEl = document.getElementById("meal-steps-remaining");
+  const burnedEl = document.getElementById("meal-steps-burned");
+  const formulaEl = document.getElementById("meal-steps-formula");
+  const intakeBar = document.getElementById("meal-kcal-intake-bar");
+  const burnBar = document.getElementById("meal-kcal-burn-bar");
+  const intakeLabelEl = document.getElementById("meal-kcal-intake-label");
+  const burnLabelEl = document.getElementById("meal-kcal-burn-label");
+  const burnLabelAboveEl = document.getElementById("meal-kcal-burn-label-above");
+  const needMark = document.getElementById("meal-kcal-need-mark");
+  const needLabel = document.getElementById("meal-kcal-ruler-need");
+  const netEl = document.getElementById("meal-kcal-net");
+  const input = document.getElementById("meal-steps-input");
+  if (!summaryEl) return;
+
+  const intake = Number(
+    day && day.calories_intake != null
+      ? day.calories_intake
+      : (day && day.totals && day.totals["每日熱量(大卡)"]) || 0
+  );
+  const recommended = Number(day && day.recommended_steps != null ? day.recommended_steps : 0);
+  const k = Number(day && day.kcal_per_step != null ? day.kcal_per_step : 0.04);
+  const minS = Number(day && day.steps_min != null ? day.steps_min : 3000);
+  const maxS = Number(day && day.steps_max != null ? day.steps_max : 15000);
+  const actual = day && day.actual_steps != null ? Number(day.actual_steps) : null;
+  const burned = day && day.burned_kcal != null ? Number(day.burned_kcal) : null;
+  const burnedSafe = burned != null && !Number.isNaN(burned) ? Math.max(0, burned) : 0;
+  const gap = actual == null
+    ? null
+    : (day.steps_gap != null ? Number(day.steps_gap) : actual - recommended);
+  const targetRaw = day && day.calories_target != null
+    ? Number(day.calories_target)
+    : (day && day.targets && day.targets["每日熱量(大卡)"] != null
+      ? Number(day.targets["每日熱量(大卡)"])
+      : null);
+  const targetNum = targetRaw != null && !Number.isNaN(targetRaw) && targetRaw > 0
+    ? targetRaw
+    : null;
+  const target = targetNum != null ? Math.round(targetNum) : "—";
+  const surplusRaw = day && day.calories_surplus != null
+    ? Number(day.calories_surplus)
+    : (targetNum != null ? Math.round(intake - targetNum) : null);
+  const surplus = surplusRaw == null || Number.isNaN(surplusRaw)
+    ? "—"
+    : (surplusRaw > 0 ? `+${Math.round(surplusRaw)}` : String(Math.round(surplusRaw)));
+  const net = Math.round((intake - burnedSafe) * 10) / 10;
+
+  if (kcalEl) {
+    if (intake > 0) {
+      kcalEl.textContent = uiText("mealStepsKcal")
+        .replace("{intake}", String(Math.round(intake)))
+        .replace("{target}", String(target))
+        .replace("{surplus}", surplus)
+        .replace("{recommended}", String(recommended));
+    } else {
+      kcalEl.textContent = uiText("mealStepsKcalEmpty");
+    }
+  }
+
+  // Daily need spans ~half the track; remaining half absorbs intake overflow.
+  // Yellow = intake L→R. Green burn from yellow tip R→L as overlay. Never >100%.
+  const halfScale = targetNum != null ? targetNum * 2 : null;
+  const scale = Math.max(halfScale || 0, intake, burnedSafe, 1);
+  const intakePct = Math.min(100, Math.max(0, (100 * intake) / scale));
+  const burnPctRaw = Math.max(0, (100 * burnedSafe) / scale);
+  const burnWidthPct = Math.min(burnPctRaw, intakePct);
+  const burnLeftPct = Math.max(0, intakePct - burnWidthPct);
+  const needPct = targetNum != null
+    ? Math.min(100, Math.max(0, (100 * targetNum) / scale))
+    : 50;
+  if (intakeBar) intakeBar.style.width = `${intakePct}%`;
+  if (burnBar) {
+    burnBar.style.left = `${burnLeftPct}%`;
+    burnBar.style.width = `${burnWidthPct}%`;
+  }
+  if (intakeLabelEl) {
+    intakeLabelEl.textContent = intake > 0
+      ? uiText("mealKcalBarIntake").replace("{n}", String(Math.round(intake)))
+      : "";
+    intakeLabelEl.style.display = intake > 0 ? "" : "none";
+  }
+  const burnText = burnedSafe > 0
+    ? uiText("mealKcalBarBurn").replace("{n}", String(Math.round(burnedSafe)))
+    : "";
+  if (burnLabelEl) {
+    burnLabelEl.textContent = burnText;
+    // Measure after layout: if green bar is too narrow for the label, lift it above.
+    burnLabelEl.style.display = burnedSafe > 0 ? "" : "none";
+  }
+  if (burnLabelAboveEl) {
+    burnLabelAboveEl.textContent = burnText;
+    burnLabelAboveEl.hidden = true;
+  }
+  const placeBurnLabel = () => {
+    if (!burnedSafe || burnWidthPct <= 0) {
+      if (burnLabelEl) burnLabelEl.style.display = "none";
+      if (burnLabelAboveEl) burnLabelAboveEl.hidden = true;
+      return;
+    }
+    const pad = 8;
+    const barW = burnBar ? burnBar.clientWidth : 0;
+    const textW = burnLabelEl ? burnLabelEl.scrollWidth : 0;
+    const fitsInside = barW >= textW + pad && textW > 0;
+    if (burnLabelEl) burnLabelEl.style.display = fitsInside ? "" : "none";
+    if (burnLabelAboveEl) {
+      if (fitsInside) {
+        burnLabelAboveEl.hidden = true;
+      } else {
+        burnLabelAboveEl.hidden = false;
+        burnLabelAboveEl.style.left = `${burnLeftPct + burnWidthPct / 2}%`;
+      }
+    }
+  };
+  requestAnimationFrame(placeBurnLabel);
+  if (needMark) {
+    needMark.style.left = `${needPct}%`;
+    needMark.style.display = targetNum != null ? "" : "none";
+  }
+  if (needLabel) {
+    needLabel.textContent = targetNum != null
+      ? uiText("mealKcalRulerNeed").replace("{target}", String(target))
+      : "— kcal";
+    needLabel.style.left = `${needPct}%`;
+  }
+
+  if (netEl) {
+    netEl.classList.remove("is-over", "is-under", "is-equal");
+    if (!(intake > 0 || burnedSafe > 0)) {
+      netEl.textContent = uiText("mealKcalNetEmpty");
+    } else if (targetNum == null) {
+      netEl.textContent = uiText("mealKcalNetNoTarget").replace("{net}", String(net));
+    } else {
+      const diff = Math.round((net - targetNum) * 10) / 10;
+      if (diff > 0) {
+        netEl.classList.add("is-over");
+        netEl.textContent = uiText("mealKcalNetOver")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target))
+          .replace("{over}", String(diff));
+      } else if (diff < 0) {
+        netEl.classList.add("is-under");
+        netEl.textContent = uiText("mealKcalNetUnder")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target))
+          .replace("{under}", String(Math.abs(diff)));
+      } else {
+        netEl.classList.add("is-equal");
+        netEl.textContent = uiText("mealKcalNetEqual")
+          .replace("{net}", String(net))
+          .replace("{target}", String(target));
+      }
+    }
+  }
+
+  if (actual == null) {
+    summaryEl.textContent = uiText("mealStepsNoActual")
+      .replace("{recommended}", String(recommended));
+  } else {
+    const gapText = gap > 0 ? `+${gap}` : String(gap);
+    summaryEl.textContent = uiText("mealStepsSummary")
+      .replace("{actual}", String(actual))
+      .replace("{recommended}", String(recommended))
+      .replace("{gap}", gapText);
+  }
+
+  if (remainingEl) {
+    if (actual == null) {
+      remainingEl.textContent = uiText("mealStepsRemainingUnknown")
+        .replace("{recommended}", String(recommended));
+    } else {
+      const remain = recommended - actual;
+      if (remain > 0) {
+        remainingEl.textContent = uiText("mealStepsRemainingNeed").replace("{n}", String(remain));
+      } else if (remain < 0) {
+        remainingEl.textContent = uiText("mealStepsRemainingDone").replace("{n}", String(-remain));
+      } else {
+        remainingEl.textContent = uiText("mealStepsRemainingExact");
+      }
+    }
+  }
+
+  if (burnedEl) {
+    if (burned == null) {
+      burnedEl.textContent = uiText("mealStepsBurnedNone");
+    } else {
+      const delta = Math.round((burned - intake) * 10) / 10;
+      const deltaText = delta > 0 ? `+${delta}` : String(delta);
+      burnedEl.textContent = uiText("mealStepsBurned")
+        .replace("{burned}", String(burned))
+        .replace("{source}", formatStepsSource(day && day.steps_source))
+        .replace("{delta}", deltaText);
+    }
+  }
+
+  if (formulaEl) {
+    formulaEl.textContent = uiText("mealStepsFormula")
+      .replace("{k}", String(k))
+      .replace("{min}", String(minS))
+      .replace("{max}", String(maxS));
+  }
+
+  if (input && document.activeElement !== input) {
+    input.value = actual != null ? String(actual) : "";
+  }
 }
 
 function destroyMealChart(kind) {
@@ -2286,13 +3345,13 @@ async function sendRecord(extraShot) {
     }
     body.append("shot_type", extraShot);
     body.append("image", blob, `${extraShot}.jpg`);
-    if (CIRCLE_SHOTS.has(extraShot)) {
-      const cf = selectedConfounders(extraShot);
-      if (cf) body.append("confounders", cf);
-    }
   }
-  if (lastShots.face && extraShot !== "face") body.append("face", lastShots.face, "face.jpg");
-  if (lastShots.tongue && extraShot !== "tongue") body.append("tongue", lastShots.tongue, "tongue.jpg");
+  // Circle re-shot: only send this modality image (server keeps other day_modalities).
+  // Re-attaching face/tongue re-runs heavy grids and can time out phones / slow web.
+  if (!CIRCLE_SHOTS.has(extraShot)) {
+    if (lastShots.face && extraShot !== "face") body.append("face", lastShots.face, "face.jpg");
+    if (lastShots.tongue && extraShot !== "tongue") body.append("tongue", lastShots.tongue, "tongue.jpg");
+  }
   const result = await api("/api/record", { method: "POST", body });
   camMsg.textContent = CIRCLE_SHOTS.has(extraShot)
     ? "已產生文字判斷（未存照片）"
@@ -2306,7 +3365,21 @@ async function sendRecord(extraShot) {
     }
   }
   renderResult(result);
-  await loadRecords();
+  // Circle shots: keep live findings; do not let loadRecords wipe them.
+  await loadRecords(CIRCLE_SHOTS.has(extraShot) ? { skipResult: true } : {});
+  // Live /api/record wins for the modality just shot (DB same-second race / prior merge).
+  if (CIRCLE_SHOTS.has(extraShot) && result) {
+    const dm = ((result.organ_health || {}).day_modalities || {})[extraShot] || {};
+    const note = result[extraShot] || dm.note || dm;
+    const line = briefCircleLine(note, extraShot)
+      || (dm.color_label
+        ? `${extraShot === "urine" ? "尿尿" : "大便"}：${dm.color_label}`
+        : "");
+    if (line) {
+      lastDayLines[extraShot] = line;
+      renderCircleResultPanel();
+    }
+  }
 }
 
 const loginCaptcha = bindCaptchaControls();
@@ -2464,6 +3537,9 @@ const updateHomeBmi = bindBmiInputs(
 );
 
 bindUiLang(() => {
+  loadHealthFlagOptions(getUiLang()).then(() =>
+    fillHealthFlags(document, window.__healthingUser || {}),
+  );
   if (appCard && !appCard.classList.contains("hidden")) {
     reloadRecipesForLanguage().catch((err) => {
       const detail = document.getElementById("recipe-detail");
@@ -2475,6 +3551,6 @@ bindUiLang(() => {
 });
 
 checkMysql()
-  .then(() => loadHealthFlagOptions())
-  .then(() => fillHealthFlags(document, {}))
+  .then(() => loadHealthFlagOptions(getUiLang()))
+  .then(() => fillHealthFlags(document, window.__healthingUser || {}))
   .then(loadMe);

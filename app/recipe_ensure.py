@@ -33,6 +33,10 @@ USER_AGENT = "Health-ingRecipeBot/1.0 (teaching demo; contact: local)"
 CREATE_NOTE = "此列由網路公開資料自動彙整，欄位可能不完整；教學示範，非醫療建議。"
 PARTIAL_NOTE = "部分欄位未能從網路可靠取得，已標示留白，請人工核對。"
 UPDATE_NOTE = "已依網路公開資料補齊先前空白欄位；教學示範，非醫療建議。"
+UNSUPPORTED_LANG_NOTE = (
+    "目前僅支援中文／英文／日文／韓文食譜名稱；請改用這四種語文再搜尋或建檔。"
+)
+COUNTRY_CORRECTED_NOTE = "已依 Recipe.xls／目錄找到此食譜，並改回正確國家。"
 
 FOOD_HEADERS = ("食材中文", "食材英文", "食材日文", "食材韓文", "益處", "禁忌", "元素表")
 
@@ -103,8 +107,15 @@ def ensure_recipe(
 ) -> dict:
     """Return existing recipe, backfill incomplete rows, or append a researched row.
 
-    Country may be empty: look up the dish across Recipe.xls first and reuse its
-    country; otherwise web-research and infer country (fallback ``Global``).
+    Lookup order:
+    1. Country-scoped match (when country is provided).
+    2. Global match on zh/en/ja/ko name columns in Recipe.xls / MySQL catalog —
+       even when the selected country is wrong; return the real country so UI can
+       correct the selector (no create).
+    3. On miss: only zh/en/ja/ko name scripts may web-research and create; other
+       scripts soft-fail without writing.
+    Country may be empty: same global lookup, then research with inferred country
+    (fallback ``Global``).
     """
     wanted_country = (country or "").strip()
     wanted_name = (name or "").strip()
@@ -112,20 +123,32 @@ def ensure_recipe(
         raise ValueError("請輸入食譜名稱")
     lang = normalize_lang(lang)
 
-    existing = (
-        _find_existing(wanted_country, wanted_name, lang)
-        if wanted_country
-        else _find_existing_by_name(wanted_name, lang)
-    )
-    if existing is not None and not wanted_country:
-        wanted_country = (existing.get("country") or "").strip()
+    existing, country_corrected = _resolve_existing_recipe(wanted_country, wanted_name, lang)
+    if existing is not None:
+        wanted_country = (existing.get("country") or "").strip() or wanted_country
     if existing is not None and not _row_needs_fill(existing):
+        note = COUNTRY_CORRECTED_NOTE if country_corrected else ""
         return {
             "created": False,
             "partial": False,
+            "country_corrected": country_corrected,
             "recipe": public_recipe(existing, lang, 0),
             "foods_added": [],
-            "note": "",
+            "note": note,
+            "disclaimer": TEACHING_DISCLAIMER,
+        }
+
+    # Miss in catalog: reject unsupported scripts before any web create.
+    if not name_script_supported(wanted_name):
+        return {
+            "created": False,
+            "rejected": True,
+            "reason": "unsupported_lang",
+            "partial": False,
+            "country_corrected": False,
+            "recipe": None,
+            "foods_added": [],
+            "note": UNSUPPORTED_LANG_NOTE,
             "disclaimer": TEACHING_DISCLAIMER,
         }
 
@@ -134,20 +157,18 @@ def ensure_recipe(
     try:
         # Re-check under lock in case a parallel request just wrote.
         invalidate_recipe_cache()
-        existing = (
-            _find_existing(wanted_country, wanted_name, lang)
-            if wanted_country
-            else _find_existing_by_name(wanted_name, lang)
-        )
-        if existing is not None and not wanted_country:
-            wanted_country = (existing.get("country") or "").strip()
+        existing, country_corrected = _resolve_existing_recipe(wanted_country, wanted_name, lang)
+        if existing is not None:
+            wanted_country = (existing.get("country") or "").strip() or wanted_country
         if existing is not None and not _row_needs_fill(existing):
+            note = COUNTRY_CORRECTED_NOTE if country_corrected else ""
             return {
                 "created": False,
                 "partial": False,
+                "country_corrected": country_corrected,
                 "recipe": public_recipe(existing, lang, 0),
                 "foods_added": [],
-                "note": "",
+                "note": note,
                 "disclaimer": TEACHING_DISCLAIMER,
             }
 
@@ -181,6 +202,7 @@ def ensure_recipe(
             "created": not updated,
             "updated": updated,
             "partial": partial,
+            "country_corrected": country_corrected,
             "recipe": public_recipe(row, lang, 0),
             "foods_added": foods_added,
             "note": " ".join(note_parts),
@@ -188,6 +210,84 @@ def ensure_recipe(
         }
     finally:
         _WRITE_LOCK.release()
+
+
+def _resolve_existing_recipe(
+    country: str, name: str, lang: str
+) -> tuple[dict[str, str] | None, bool]:
+    """Country-scoped hit first; else global zh/en/ja/ko name match.
+
+    Returns ``(row, country_corrected)``. ``country_corrected`` is True when the
+    caller supplied a country that did not match, but a same-name row exists
+    under another country (UI should switch the country selector).
+    """
+    wanted_country = (country or "").strip()
+    wanted_name = (name or "").strip()
+    if not wanted_name:
+        return None, False
+    if wanted_country:
+        scoped = _find_existing(wanted_country, wanted_name, lang)
+        if scoped is not None:
+            return scoped, False
+    global_hit = _find_existing_by_name(wanted_name, lang)
+    if global_hit is None:
+        return None, False
+    found_country = (global_hit.get("country") or "").strip()
+    corrected = bool(wanted_country and found_country and found_country != wanted_country)
+    return global_hit, corrected
+
+
+def name_script_supported(name: str) -> bool:
+    """True when dish name uses only zh / en (Latin) / ja / ko letter scripts.
+
+    Digits, spaces, and punctuation are ignored. Any other letter script
+    (Cyrillic, Arabic, Thai, Devanagari, …) soft-fails create/search-and-create.
+    """
+    text = (name or "").strip()
+    if not text:
+        return False
+    saw_letter = False
+    for ch in text:
+        if ch.isspace() or ch.isdigit():
+            continue
+        code = ord(ch)
+        if code < 0x80 and not ch.isalpha():
+            continue
+        if 0x2000 <= code <= 0x206F:
+            continue
+        if 0x3000 <= code <= 0x303F:
+            continue
+        if 0xFF00 <= code <= 0xFFEF:
+            if 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:
+                saw_letter = True
+                continue
+            if not (0xFF10 <= code <= 0xFF19):
+                if not ch.isalpha() and not ("\u4e00" <= ch <= "\u9fff"):
+                    continue
+        if ("A" <= ch <= "Z") or ("a" <= ch <= "z") or (0x00C0 <= code <= 0x024F):
+            saw_letter = True
+            continue
+        if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf":
+            saw_letter = True
+            continue
+        if "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff":
+            saw_letter = True
+            continue
+        if "\uac00" <= ch <= "\ud7af" or "\u1100" <= ch <= "\u11ff":
+            saw_letter = True
+            continue
+        if _unicode_letter_category(ch):
+            return False
+    return saw_letter or bool(text)
+
+
+def _unicode_letter_category(ch: str) -> bool:
+    try:
+        import unicodedata
+
+        return unicodedata.category(ch).startswith("L")
+    except Exception:
+        return ch.isalpha()
 
 
 def _row_needs_fill(row: dict) -> bool:
@@ -259,35 +359,124 @@ def _find_existing(country: str, name: str, lang: str) -> dict[str, str] | None:
     return None
 
 
+def _normalize_dish_key(name: str) -> str:
+    """Casefold + unify common noodle/script variants for fuzzy catalog match."""
+    text = (name or "").strip().casefold()
+    if not text:
+        return ""
+    # Traditional/simplified / JP noodle variants and whitespace noise.
+    for src, dst in (
+        ("麵", "面"),
+        ("麺", "面"),
+        ("鷄", "雞"),
+        ("鶏", "雞"),
+        (" ", ""),
+        ("\u3000", ""),
+        ("·", ""),
+        ("・", ""),
+    ):
+        text = text.replace(src, dst)
+    return text
+
+
+def _name_lookup_candidates(name: str) -> list[str]:
+    """Exact typed form plus normalized noodle-script variants for SQL/XLS lookup."""
+    raw = (name or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for candidate in (
+        raw,
+        raw.replace("面", "麵").replace("麺", "麵"),
+        raw.replace("麵", "面").replace("麺", "面"),
+        raw.replace("麵", "麺").replace("面", "麺"),
+    ):
+        key = candidate.strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _score_name_row(
+    row: dict[str, str], needle: str, needle_norm: str, name_field: str
+) -> tuple | None:
+    labels = {
+        "lang": (row.get(name_field) or "").strip().casefold(),
+        "zh": (row.get("name_zh") or "").strip().casefold(),
+        "en": (row.get("name_en") or "").strip().casefold(),
+        "ja": (row.get("name_ja") or "").strip().casefold(),
+        "ko": (row.get("name_ko") or "").strip().casefold(),
+    }
+    norms = {key: _normalize_dish_key(val) for key, val in labels.items() if val}
+    exact = any(label == needle for label in labels.values() if label)
+    fuzzy = bool(needle_norm) and any(val == needle_norm for val in norms.values())
+    if not exact and not fuzzy:
+        return None
+    return (
+        0 if exact else 1,
+        0 if labels.get("lang") == needle or norms.get("lang") == needle_norm else 1,
+        0 if labels.get("zh") == needle or norms.get("zh") == needle_norm else 1,
+        0 if labels.get("en") == needle or norms.get("en") == needle_norm else 1,
+        0
+        if labels.get("ja") == needle
+        or labels.get("ko") == needle
+        or norms.get("ja") == needle_norm
+        or norms.get("ko") == needle_norm
+        else 1,
+        0 if (row.get("recipe") or "").strip() else 1,
+        0 if (row.get("method") or "").strip() else 1,
+        row.get("country") or "",
+        str(row.get("id") or ""),
+    )
+
+
 def _find_existing_by_name(name: str, lang: str) -> dict[str, str] | None:
-    """Exact name match across all countries; prefer rows that already have recipe text."""
+    """Global zh/en/ja/ko name match (exact, then noodle-script fuzzy).
+
+    Prefers MySQL name query, then full catalog scan. Ranking prefers an exact hit
+    on the UI language column, then name_zh, then other name_* columns — so a
+    polluted foreign-name cell does not beat the real dish.
+    """
     needle = (name or "").strip().casefold()
     if not needle:
         return None
+    needle_norm = _normalize_dish_key(name)
     name_field = NAME_FIELDS.get(lang, "name_zh")
-    hits: list[dict[str, str]] = []
-    for row in recipe_rows():
-        candidates = [
-            row.get(name_field) or "",
-            row.get("name_zh") or "",
-            row.get("name_en") or "",
-            row.get("name_ja") or "",
-            row.get("name_ko") or "",
-            localized_name(row, lang),
-        ]
-        if any(label and label.strip().casefold() == needle for label in candidates):
-            hits.append(row)
-    if not hits:
+    scored: list[tuple[tuple, dict[str, str]]] = []
+    seen_ids: set[str] = set()
+
+    def consider(row: dict[str, str]) -> None:
+        rid = str(row.get("id") or "")
+        if rid and rid in seen_ids:
+            return
+        rank = _score_name_row(row, needle, needle_norm, name_field)
+        if rank is None:
+            return
+        if rid:
+            seen_ids.add(rid)
+        scored.append((rank, row))
+
+    # Fast path: exact (+ script-variant) SQL hits across countries.
+    try:
+        from .shared_catalog import fetch_recipe_rows_by_names
+
+        mysql_hits = fetch_recipe_rows_by_names(_name_lookup_candidates(name))
+        if mysql_hits:
+            for row in mysql_hits:
+                consider(row)
+    except Exception:
+        pass
+
+    if not scored:
+        for row in recipe_rows():
+            consider(row)
+
+    if not scored:
         return None
-    hits.sort(
-        key=lambda row: (
-            0 if (row.get("recipe") or "").strip() else 1,
-            0 if (row.get("method") or "").strip() else 1,
-            row.get("country") or "",
-            str(row.get("id") or ""),
-        )
-    )
-    return hits[0]
+    scored.sort(key=lambda item: item[0])
+    return scored[0][1]
 
 
 # Well-known dishes → Recipe.xls country spelling (fallback before Global).

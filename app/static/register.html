@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="registerPageTitle">註冊 — Health-ing</title>
-  <link rel="stylesheet" href="/static/styles.css?v=lang-login1" />
+  <link rel="stylesheet" href="/static/styles.css?v=locale-suggest1" />
 </head>
 <body>
   <div class="wrap">
@@ -22,6 +22,13 @@
           <option value="ja">日本語</option>
           <option value="ko">한국어</option>
         </select>
+        <div class="js-locale-suggest locale-suggest hidden" role="status">
+          <p class="locale-suggest-msg"></p>
+          <div class="locale-suggest-actions">
+            <button type="button" class="locale-suggest-switch secondary">切換</button>
+            <button type="button" class="locale-suggest-keep ghost">維持目前語言</button>
+          </div>
+        </div>
         <label data-i18n="emailAccount">E-mail 帳號</label>
         <input type="email" id="email" required placeholder="you@example.com" autocomplete="email" />
         <label data-i18n="password">密碼</label>
@@ -44,7 +51,7 @@
       <p id="auth-msg" class="status"></p>
     </section>
   </div>
-  <script src="/static/common.js?v=lang-login1"></script>
-  <script src="/static/register.js?v=lang-login1"></script>
+  <script src="/static/common.js?v=locale-suggest1"></script>
+  <script src="/static/register.js?v=locale-suggest1"></script>
 </body>
 </html>
