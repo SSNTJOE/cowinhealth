@@ -47,6 +47,11 @@ class ApiClient(
         if (wifiFactory != null) {
             b.socketFactory(wifiFactory)
         }
+        // Align Accept-Language + country/currency with App UI lang on every call.
+        val ctx = appContext
+        if (ctx != null) {
+            b.addInterceptor(LocaleHeaderInterceptor(ctx))
+        }
         return b.build()
     }
 

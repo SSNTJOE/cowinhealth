@@ -1,6 +1,17 @@
 package com.tube.healthing
 
+import android.content.Context
+
 object UiLang {
+    /** camelCase / mixed UiLang key → Android resource name (snake_case). */
+    fun resourceName(key: String): String {
+        val snake = key.replace(Regex("([a-z0-9])([A-Z])"), "$1_$2")
+            .replace('-', '_')
+            .lowercase()
+            .replace(Regex("[^a-z0-9_]"), "_")
+        return if (snake.isNotEmpty() && snake[0].isDigit()) "n_$snake" else snake
+    }
+
     private val packs: Map<String, Map<String, String>> = mapOf(
         "zh" to mapOf(
             "appSub" to "與網站共用同一 MySQL：帳號、檢測、食譜皆同步。教學示範，非診斷。",
@@ -162,6 +173,9 @@ object UiLang {
             "toastFaceShot" to "已拍臉／唇",
             "toastTongueShot" to "已拍舌頭",
             "fallbackZh" to "（部分內容僅有中文，教學示範）",
+            "localeSuggest" to "偵測到裝置語言為 {lang}，要切換嗎？（不會強制）",
+            "localeSuggestSwitch" to "切換為 {lang}",
+            "localeSuggestKeep" to "維持目前語言",
         ),
         "en" to mapOf(
             "appSub" to "Same MySQL as the website: accounts, readings, recipes stay in sync. Teaching demo, not a diagnosis.",
@@ -323,6 +337,9 @@ object UiLang {
             "toastFaceShot" to "Face/lips captured",
             "toastTongueShot" to "Tongue captured",
             "fallbackZh" to "(Some content is Chinese-only; teaching demo)",
+            "localeSuggest" to "Device language looks like {lang}. Switch? (optional)",
+            "localeSuggestSwitch" to "Switch to {lang}",
+            "localeSuggestKeep" to "Keep current language",
         ),
         "ja" to mapOf(
             "appSub" to "サイトと同じ MySQL：アカウント・検査・レシピを同期。教材デモであり診断ではありません。",
@@ -484,6 +501,9 @@ object UiLang {
             "toastFaceShot" to "顔／唇を撮影しました",
             "toastTongueShot" to "舌を撮影しました",
             "fallbackZh" to "（一部は中国語のみ・教材デモ）",
+            "localeSuggest" to "端末の言語が {lang} のようです。切り替えますか？（任意）",
+            "localeSuggestSwitch" to "{lang} に切り替える",
+            "localeSuggestKeep" to "今の言語のまま",
         ),
         "ko" to mapOf(
             "appSub" to "웹과 같은 MySQL: 계정·검사·레시피 동기화. 교육 시연이며 진단이 아닙니다.",
@@ -645,12 +665,37 @@ object UiLang {
             "toastFaceShot" to "얼굴/입술 촬영됨",
             "toastTongueShot" to "혀 촬영됨",
             "fallbackZh" to "(일부 내용은 중국어만 · 교육 시연)",
+            "localeSuggest" to "기기 언어가 {lang}인 것 같습니다. 바꿀까요? (선택)",
+            "localeSuggestSwitch" to "{lang}(으)로 전환",
+            "localeSuggestKeep" to "현재 언어 유지",
         ),
     )
 
     fun t(lang: String, key: String): String {
         val code = if (lang in packs) lang else "zh"
         return packs[code]?.get(key) ?: packs["zh"]?.get(key) ?: key
+    }
+
+    /** Prefer res/values(-xx)/strings.xml for the active (or requested) locale. */
+    fun t(context: Context, key: String): String {
+        val name = resourceName(key)
+        val id = context.resources.getIdentifier(name, "string", context.packageName)
+        if (id != 0) {
+            val value = context.getString(id)
+            if (value.isNotBlank()) return value
+        }
+        return t(AppLocale.currentUiLang(context), key)
+    }
+
+    fun t(context: Context, lang: String, key: String): String {
+        val localized = AppLocale.contextFor(context, lang)
+        val name = resourceName(key)
+        val id = localized.resources.getIdentifier(name, "string", localized.packageName)
+        if (id != 0) {
+            val value = localized.getString(id)
+            if (value.isNotBlank()) return value
+        }
+        return t(lang, key)
     }
 
     /** 五臟六腑 display name for organ key (heart, liver, …) in UI lang. */
@@ -662,4 +707,7 @@ object UiLang {
         val hit = t(lang, key)
         return if (hit == key) organKey else hit
     }
+
+    fun organName(context: Context, organKey: String): String =
+        organName(AppLocale.currentUiLang(context), organKey)
 }

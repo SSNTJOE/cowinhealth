@@ -50,6 +50,27 @@ h1 { margin: 0 0 8px; font-size: 28px; }
   font-size: 16px;
   font-weight: 600;
 }
+.locale-suggest {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: rgba(255, 248, 238, 0.9);
+}
+.locale-suggest-msg {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.locale-suggest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.locale-suggest-actions button {
+  margin: 0;
+}
 .card {
   background: var(--card);
   border: 1px solid var(--line);

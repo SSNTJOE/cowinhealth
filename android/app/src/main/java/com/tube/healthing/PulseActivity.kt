@@ -56,15 +56,11 @@ class PulseActivity : AppCompatActivity(), FrontCameraHeartRateMonitor.Listener 
         PulseStep("pulseStepRightChi", "mingmen", "bladder", R.drawable.pulse_right_chi),
     )
 
-    private fun uiLang(): String {
-        val prefs = getSharedPreferences("healthing", MODE_PRIVATE)
-        val stored = prefs.getString("ui_lang", "zh") ?: "zh"
-        return if (stored in setOf("zh", "en", "ja", "ko")) stored else "zh"
-    }
+    private fun uiLang(): String = AppLocale.currentUiLang(this)
 
-    private fun t(key: String): String = UiLang.t(uiLang(), key)
+    private fun t(key: String): String = UiLang.t(this, key)
 
-    private fun organName(key: String): String = UiLang.organName(uiLang(), key)
+    private fun organName(key: String): String = UiLang.organName(this, key)
 
     private fun stepShortName(step: PulseStep): String = t(step.stepKey)
 

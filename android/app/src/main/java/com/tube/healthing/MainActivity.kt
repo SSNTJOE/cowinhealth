@@ -73,7 +73,6 @@ class MainActivity : AppCompatActivity() {
         private const val CAPTCHA_TAG = "HealthingCaptcha"
     }
     private val langCodes = listOf("zh", "en", "ja", "ko")
-    private val langLabels = listOf("中文", "English", "日本語", "한국어")
     private val organPatterns = listOf(
         "heart_pattern" to "心",
         "liver_pattern" to "肝",
@@ -678,7 +677,7 @@ class MainActivity : AppCompatActivity() {
         if (user == null) return
         val preferred = jsonText(user, "preferred_lang")
         if (preferred in langCodes && preferred != currentLang()) {
-            prefs.edit().putString("ui_lang", preferred).apply()
+            AppLocale.applyUiLang(this, preferred, explicit = true)
             val index = langCodes.indexOf(preferred).coerceAtLeast(0)
             binding.langSelect.setSelection(index)
         }
@@ -1435,12 +1434,41 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun currentLang(): String {
-        val stored = prefs.getString("ui_lang", "zh") ?: "zh"
-        return if (stored in langCodes) stored else "zh"
+    private fun currentLang(): String = AppLocale.currentUiLang(this)
+
+    private fun deviceUiLang(): String? = AppLocale.deviceUiLang()
+
+    private fun acknowledgeLocaleSuggest(detected: String?) {
+        if (detected.isNullOrBlank()) return
+        prefs.edit().putString(AppLocale.KEY_SUGGEST_ACK, detected).apply()
     }
 
-    private fun t(key: String): String = UiLang.t(currentLang(), key)
+    private fun hideLocaleSuggest() {
+        binding.localeSuggestBox.visibility = View.GONE
+    }
+
+    private fun maybeShowLocaleSuggest() {
+        val detected = deviceUiLang()
+        if (detected == null || detected == currentLang()) {
+            hideLocaleSuggest()
+            return
+        }
+        val ack = prefs.getString(AppLocale.KEY_SUGGEST_ACK, "") ?: ""
+        if (ack == detected) {
+            hideLocaleSuggest()
+            return
+        }
+        val label = AppLocale.displayLabel(this, detected)
+        // Tip copy in the suggested language (strings.xml) so the user can read the offer.
+        binding.localeSuggestMsg.text =
+            UiLang.t(this, detected, "localeSuggest").replace("{lang}", label)
+        binding.localeSuggestSwitch.text =
+            UiLang.t(this, detected, "localeSuggestSwitch").replace("{lang}", label)
+        binding.localeSuggestKeep.text = UiLang.t(this, detected, "localeSuggestKeep")
+        binding.localeSuggestBox.visibility = View.VISIBLE
+    }
+
+    private fun t(key: String): String = UiLang.t(this, key)
 
     private fun t(zh: String, en: String, ja: String, ko: String): String {
         return when (currentLang()) {
@@ -1455,6 +1483,7 @@ class MainActivity : AppCompatActivity() {
         val lang = currentLang()
         binding.appSub.text = t("appSub")
         binding.langLabel.text = t("langLabel")
+        maybeShowLocaleSuggest()
         binding.server.hint = t("serverHint")
         binding.serverNote.text = t("serverNote")
         binding.serverApply.text = t("serverApply")
@@ -2186,18 +2215,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupLanguageSpinner() {
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, langLabels)
+        val labels = langCodes.map { AppLocale.displayLabel(this, it) }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         binding.langSelect.adapter = adapter
         val index = langCodes.indexOf(currentLang()).coerceAtLeast(0)
         binding.langSelect.setSelection(index)
         binding.langSelect.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val code = langCodes.getOrNull(position) ?: "zh"
-                if (code == currentLang()) {
+                if (code == currentLang() && AppLocale.isExplicit(this@MainActivity)) {
                     applyLangChrome()
                     return
                 }
-                prefs.edit().putString("ui_lang", code).apply()
+                acknowledgeLocaleSuggest(deviceUiLang())
+                // Android 13+ per-app language + AppCompatDelegate for older APIs.
+                AppLocale.applyUiLang(this@MainActivity, code, explicit = true)
                 applyLangChrome()
                 Thread {
                     runCatching { api.updatePreferredLang(code) }
@@ -2211,6 +2243,22 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+        binding.localeSuggestSwitch.setOnClickListener {
+            val detected = deviceUiLang() ?: return@setOnClickListener
+            acknowledgeLocaleSuggest(detected)
+            val indexSwitch = langCodes.indexOf(detected).coerceAtLeast(0)
+            AppLocale.applyUiLang(this, detected, explicit = true)
+            binding.langSelect.setSelection(indexSwitch)
+            applyLangChrome()
+            Thread { runCatching { api.updatePreferredLang(detected) } }.start()
+        }
+        binding.localeSuggestKeep.setOnClickListener {
+            acknowledgeLocaleSuggest(deviceUiLang())
+            // Keep current UI lang as an explicit preference so tip stays dismissed.
+            AppLocale.applyUiLang(this, currentLang(), explicit = true)
+            hideLocaleSuggest()
+        }
+        maybeShowLocaleSuggest()
     }
 
     private fun setupRecipeSpinners() {

@@ -302,6 +302,8 @@ function bodyImageSrcFromGender(gender) {
 }
 
 const UI_LANG_KEY = "healthing_lang";
+const UI_LANG_SUGGEST_ACK_KEY = "healthing_lang_suggest_ack";
+const UI_LANG_LABELS = { zh: "中文", en: "English", ja: "日本語", ko: "한국어" };
 const UI_I18N = {
   zh: {
     langLabel: "語言",
@@ -763,7 +765,10 @@ const UI_I18N_EXTRA = {
     "mealDinner": "晚餐",
     "mealSnack": "點心",
     "teachingDemo": "教學示範，非診斷。",
-    "fallbackZhNote": "（部分內容僅有中文，教學示範）"
+    "fallbackZhNote": "（部分內容僅有中文，教學示範）",
+    "localeSuggest": "偵測到瀏覽器／裝置語言為 {lang}，要切換嗎？（不會強制）",
+    "localeSuggestSwitch": "切換為 {lang}",
+    "localeSuggestKeep": "維持目前語言"
   },
   "en": {
     "loginTitle": "Email login",
@@ -859,7 +864,10 @@ const UI_I18N_EXTRA = {
     "mealSnack": "Snack",
     "teachingDemo": "Teaching demo, not a diagnosis.",
     "fallbackZhNote": "(Some content is Chinese-only; teaching demo)",
-    "recipeBodyAdvice": "Suggest by body reading"
+    "recipeBodyAdvice": "Suggest by body reading",
+    "localeSuggest": "Browser/device language looks like {lang}. Switch? (optional)",
+    "localeSuggestSwitch": "Switch to {lang}",
+    "localeSuggestKeep": "Keep current language"
   },
   "ja": {
     "loginTitle": "メールでログイン",
@@ -955,7 +963,10 @@ const UI_I18N_EXTRA = {
     "mealSnack": "間食",
     "teachingDemo": "教材デモであり診断ではありません。",
     "fallbackZhNote": "（一部は中国語のみ・教材デモ）",
-    "recipeBodyAdvice": "体調に合わせて提案"
+    "recipeBodyAdvice": "体調に合わせて提案",
+    "localeSuggest": "ブラウザ／端末の言語が {lang} のようです。切り替えますか？（任意）",
+    "localeSuggestSwitch": "{lang} に切り替える",
+    "localeSuggestKeep": "今の言語のまま"
   },
   "ko": {
     "loginTitle": "이메일 로그인",
@@ -1051,7 +1062,10 @@ const UI_I18N_EXTRA = {
     "mealSnack": "간식",
     "teachingDemo": "교육 시연이며 진단이 아닙니다.",
     "fallbackZhNote": "(일부 내용은 중국어만 있음 · 교육 시연)",
-    "recipeBodyAdvice": "몸 상태에 맞춰 추천"
+    "recipeBodyAdvice": "몸 상태에 맞춰 추천",
+    "localeSuggest": "브라우저/기기 언어가 {lang}인 것 같습니다. 바꿀까요? (선택)",
+    "localeSuggestSwitch": "{lang}(으)로 전환",
+    "localeSuggestKeep": "현재 언어 유지"
   }
 };
 Object.keys(UI_I18N_EXTRA).forEach((lang) => {
@@ -1077,6 +1091,48 @@ function normalizeUiLang(value) {
   return "zh";
 }
 
+/** Map Accept-Language / navigator locale tag → zh|en|ja|ko, or null if unsupported. */
+function mapLocaleTagToUiLang(value) {
+  const raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (!raw) return null;
+  const primary = raw.split("-")[0];
+  if (primary === "zh") return "zh";
+  if (primary === "en") return "en";
+  if (primary === "ja") return "ja";
+  if (primary === "ko") return "ko";
+  return null;
+}
+
+/** Browser language from navigator.languages (mirrors Accept-Language preference order). */
+function detectBrowserUiLang() {
+  const candidates = [];
+  try {
+    if (Array.isArray(navigator.languages)) candidates.push(...navigator.languages);
+  } catch (_err) { /* ignore */ }
+  try {
+    if (navigator.language) candidates.push(navigator.language);
+  } catch (_err) { /* ignore */ }
+  for (let i = 0; i < candidates.length; i += 1) {
+    const mapped = mapLocaleTagToUiLang(candidates[i]);
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
+function getLocaleSuggestAck() {
+  try {
+    return String(localStorage.getItem(UI_LANG_SUGGEST_ACK_KEY) || "").trim().toLowerCase();
+  } catch (_err) {
+    return "";
+  }
+}
+
+function setLocaleSuggestAck(lang) {
+  const value = String(lang || "").trim().toLowerCase();
+  if (!value) return;
+  try { localStorage.setItem(UI_LANG_SUGGEST_ACK_KEY, value); } catch (_err) { /* ignore */ }
+}
+
 function getUiLang() {
   return normalizeUiLang(localStorage.getItem(UI_LANG_KEY) || readCookie(UI_LANG_KEY) || "zh");
 }
@@ -1088,6 +1144,94 @@ function setUiLang(lang) {
   const htmlLang = { zh: "zh-Hant", en: "en", ja: "ja", ko: "ko" }[value] || "zh-Hant";
   document.documentElement.lang = htmlLang;
   return value;
+}
+
+function uiTextForLang(lang, key) {
+  const pack = UI_I18N[lang] || UI_I18N.zh;
+  return pack[key] || UI_I18N.zh[key] || key;
+}
+
+function hideLocaleSuggestTips() {
+  document.querySelectorAll(".js-locale-suggest").forEach((el) => {
+    el.classList.add("hidden");
+  });
+}
+
+function renderLocaleSuggestTip(suggested) {
+  const label = UI_LANG_LABELS[suggested] || suggested;
+  // Tip copy in the suggested language so the visitor can read the offer.
+  const msg = uiTextForLang(suggested, "localeSuggest").replace(/\{lang\}/g, label);
+  const switchLabel = uiTextForLang(suggested, "localeSuggestSwitch").replace(/\{lang\}/g, label);
+  const keepLabel = uiTextForLang(suggested, "localeSuggestKeep");
+  document.querySelectorAll(".js-locale-suggest").forEach((box) => {
+    const msgEl = box.querySelector(".locale-suggest-msg");
+    const switchBtn = box.querySelector(".locale-suggest-switch");
+    const keepBtn = box.querySelector(".locale-suggest-keep");
+    if (msgEl) msgEl.textContent = msg;
+    if (switchBtn) {
+      switchBtn.textContent = switchLabel;
+      switchBtn.dataset.suggested = suggested;
+    }
+    if (keepBtn) {
+      keepBtn.textContent = keepLabel;
+      keepBtn.dataset.suggested = suggested;
+    }
+    box.classList.remove("hidden");
+  });
+}
+
+function maybeShowLocaleSuggest() {
+  const boxes = document.querySelectorAll(".js-locale-suggest");
+  if (!boxes.length) return;
+  const detected = detectBrowserUiLang();
+  if (!detected) {
+    hideLocaleSuggestTips();
+    return;
+  }
+  const current = getUiLang();
+  if (detected === current) {
+    hideLocaleSuggestTips();
+    return;
+  }
+  if (getLocaleSuggestAck() === detected) {
+    hideLocaleSuggestTips();
+    return;
+  }
+  renderLocaleSuggestTip(detected);
+}
+
+function bindLocaleSuggestTips(onChange) {
+  document.querySelectorAll(".js-locale-suggest").forEach((box) => {
+    if (box.dataset.bound === "1") return;
+    box.dataset.bound = "1";
+    const switchBtn = box.querySelector(".locale-suggest-switch");
+    const keepBtn = box.querySelector(".locale-suggest-keep");
+    if (switchBtn) {
+      switchBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const suggested = switchBtn.dataset.suggested || detectBrowserUiLang();
+        if (!suggested) return;
+        setLocaleSuggestAck(suggested);
+        const lang = setUiLang(suggested);
+        document.querySelectorAll(".js-ui-lang, #ui-lang").forEach((sel) => {
+          if (sel) sel.value = lang;
+        });
+        applyUiLangChrome();
+        syncPreferredLangToServer(lang);
+        hideLocaleSuggestTips();
+        if (typeof onChange === "function") onChange(lang);
+      });
+    }
+    if (keepBtn) {
+      keepBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const suggested = keepBtn.dataset.suggested || detectBrowserUiLang();
+        if (suggested) setLocaleSuggestAck(suggested);
+        hideLocaleSuggestTips();
+      });
+    }
+  });
+  maybeShowLocaleSuggest();
 }
 
 function uiText(key) {
@@ -1211,12 +1355,17 @@ function bindUiLang(onChange) {
       unique.forEach((other) => {
         if (other !== select) other.value = lang;
       });
+      // Manual switcher choice counts as acknowledging the current browser locale tip.
+      const detected = detectBrowserUiLang();
+      if (detected) setLocaleSuggestAck(detected);
       applyUiLangChrome();
       syncPreferredLangToServer(lang);
+      hideLocaleSuggestTips();
       if (typeof onChange === "function") onChange(lang);
     });
   });
   applyUiLangChrome();
+  bindLocaleSuggestTips(onChange);
 }
 
 function applyPreferredLangFromUser(user) {

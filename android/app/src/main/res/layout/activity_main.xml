@@ -30,6 +30,41 @@
             android:id="@+id/langSelect"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"/>
+        <LinearLayout
+            android:id="@+id/localeSuggestBox"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/localeSuggestMsg"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#666666"/>
+            <LinearLayout
+                android:orientation="horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp">
+                <Button
+                    android:id="@+id/localeSuggestSwitch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="切換"/>
+                <Button
+                    android:id="@+id/localeSuggestKeep"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="維持目前語言"/>
+            </LinearLayout>
+        </LinearLayout>
         <TextView
             android:id="@+id/serverNote"
             android:layout_width="match_parent"
