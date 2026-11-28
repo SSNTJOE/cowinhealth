@@ -43,7 +43,43 @@ ALLERGEN_I18N: dict[str, dict[str, str]] = {
     "堅果": {"en": "Tree nuts", "ja": "ナッツ類", "ko": "견과류"},
     "雞蛋": {"en": "Egg", "ja": "鶏卵", "ko": "달걀"},
     "牛奶": {"en": "Milk", "ja": "牛乳", "ko": "우유"},
+    "優格": {"en": "Yogurt", "ja": "ヨーグルト", "ko": "요거트"},
+    "南瓜子": {"en": "Pumpkin seeds", "ja": "かぼちゃの種", "ko": "호박씨"},
+    "味噌": {"en": "Miso", "ja": "味噌", "ko": "미소"},
+    "夏威夷豆": {"en": "Macadamia", "ja": "マカダミア", "ko": "마카다미아"},
+    "大麥": {"en": "Barley", "ja": "オオムギ", "ko": "보리"},
+    "奶油": {"en": "Butter", "ja": "バター", "ko": "버터"},
+    "小麥": {"en": "Wheat", "ja": "コムギ", "ko": "밀"},
+    "山葵": {"en": "Wasabi", "ja": "ワサビ", "ko": "와사비"},
+    "杏仁果": {"en": "Almond", "ja": "アーモンド", "ko": "아몬드"},
+    "松子": {"en": "Pine nut", "ja": "松の実", "ko": "잣"},
+    "栗子": {"en": "Chestnut", "ja": "栗", "ko": "밤"},
+    "核桃": {"en": "Walnut", "ja": "クルミ", "ko": "호두"},
+    "淡菜": {"en": "Mussel", "ja": "ムール貝", "ko": "홍합"},
+    "燕麥": {"en": "Oat", "ja": "オート麦", "ko": "귀리"},
+    "牡蠣": {"en": "Oyster", "ja": "カキ", "ko": "굴"},
+    "白芝麻": {"en": "White sesame", "ja": "白ごま", "ko": "흰깨"},
+    "皮蛋": {"en": "Century egg", "ja": "ピータン", "ko": "피단"},
+    "芥末": {"en": "Mustard", "ja": "カラシ", "ko": "겨자"},
+    "花生油": {"en": "Peanut oil", "ja": "ピーナッツ油", "ko": "땅콩기름"},
+    "芹菜": {"en": "Celery", "ja": "セロリ", "ko": "셀러리"},
+    "葡萄酒": {"en": "Wine", "ja": "ワイン", "ko": "와인"},
+    "蕎麥": {"en": "Buckwheat", "ja": "ソバ", "ko": "메밀"},
     "蛋": {"en": "Egg", "ja": "卵", "ko": "달걀"},
+    "蛋白": {"en": "Egg white", "ja": "卵白", "ko": "달걀흰자"},
+    "蛋黃": {"en": "Egg yolk", "ja": "卵黄", "ko": "달걀노른자"},
+    "蛤蜊": {"en": "Clam", "ja": "アサリ", "ko": "바지락"},
+    "豆干": {"en": "Dried tofu", "ja": "豆腐干", "ko": "포두부"},
+    "豆漿": {"en": "Soy milk", "ja": "豆乳", "ko": "두유"},
+    "豆腐": {"en": "Tofu", "ja": "豆腐", "ko": "두부"},
+    "起司": {"en": "Cheese", "ja": "チーズ", "ko": "치즈"},
+    "醋": {"en": "Vinegar", "ja": "酢", "ko": "식초"},
+    "醬油": {"en": "Soy sauce", "ja": "醤油", "ko": "간장"},
+    "麻油": {"en": "Sesame oil", "ja": "ごま油", "ko": "참기름"},
+    "黃豆": {"en": "Soybean", "ja": "大豆", "ko": "대두"},
+    "黃豆芽": {"en": "Soybean sprouts", "ja": "大豆もやし", "ko": "콩나물"},
+    "黃酒": {"en": "Yellow rice wine", "ja": "黄酒", "ko": "황주"},
+    "黑豆": {"en": "Black soybean", "ja": "黒豆", "ko": "검은콩"},
 }
 
 LABEL_SCHEMA_SQL = """
@@ -269,7 +305,14 @@ def default_seed_rows() -> dict[str, list[dict[str, Any]]]:
             }
         )
     allergens = []
-    for i, zh in enumerate(BASE_ALLERGY_OPTIONS):
+    # Prefer the full ALLERGEN_I18N catalog (zh order matches BASE_ALLERGY_OPTIONS when present).
+    allergen_zh = list(BASE_ALLERGY_OPTIONS)
+    seen = set(allergen_zh)
+    for zh in ALLERGEN_I18N:
+        if zh not in seen:
+            allergen_zh.append(zh)
+            seen.add(zh)
+    for i, zh in enumerate(allergen_zh):
         pack = ALLERGEN_I18N.get(zh, {})
         allergens.append(
             {
@@ -281,28 +324,6 @@ def default_seed_rows() -> dict[str, list[dict[str, Any]]]:
                 "sort_order": i,
             }
         )
-    # Extra allergen groups / aliases commonly missing from Foods.xls
-    extras = [
-        ("蝦蟹", ALLERGEN_I18N["蝦蟹"]),
-        ("魚", ALLERGEN_I18N["魚"]),
-        ("堅果", ALLERGEN_I18N["堅果"]),
-        ("蛋", ALLERGEN_I18N["蛋"]),
-    ]
-    seen = {a["name_zh"] for a in allergens}
-    for zh, pack in extras:
-        if zh in seen:
-            continue
-        allergens.append(
-            {
-                "kind": "allergen",
-                "name_zh": zh,
-                "name_en": pack.get("en", ""),
-                "name_ja": pack.get("ja", ""),
-                "name_ko": pack.get("ko", ""),
-                "sort_order": len(allergens),
-            }
-        )
-        seen.add(zh)
     return {"condition": conditions, "allergen": allergens}
 
 
@@ -340,47 +361,96 @@ def upsert_health_labels(rows: list[dict[str, Any]]) -> int:
         conn.close()
 
 
+def _merge_i18n_row(kind: str, row: dict[str, Any], sort_order: int) -> dict[str, Any]:
+    """Fill blank en/ja/ko from builtins so UI lang switch never sticks on zh."""
+    zh = str(row.get("name_zh") or "").strip()
+    pack = (CONDITION_I18N if kind == "condition" else ALLERGEN_I18N).get(zh, {})
+    return {
+        "kind": kind,
+        "name_zh": zh,
+        "name_en": str(row.get("name_en") or "").strip() or pack.get("en", ""),
+        "name_ja": str(row.get("name_ja") or "").strip() or pack.get("ja", ""),
+        "name_ko": str(row.get("name_ko") or "").strip() or pack.get("ko", ""),
+        "sort_order": sort_order,
+    }
+
+
+def _labels_need_i18n_fill() -> bool:
+    """True when catalog is empty or any row is missing en/ja/ko for non-zh UI."""
+    try:
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS c FROM catalog_health_labels")
+                count = int((cur.fetchone() or {}).get("c") or 0)
+                if count == 0:
+                    return True
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM catalog_health_labels
+                    WHERE TRIM(COALESCE(name_en,''))=''
+                       OR TRIM(COALESCE(name_ja,''))=''
+                       OR TRIM(COALESCE(name_ko,''))=''
+                    """
+                )
+                return int((cur.fetchone() or {}).get("c") or 0) > 0
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("catalog_health_labels i18n fill check failed")
+        return True
+
+
 def sync_health_labels_from_xls(*, force: bool = False) -> dict[str, int]:
-    """Import Conditions.xls / Allergens.xls (+ builtin seeds) into MySQL."""
+    """Import Conditions.xls / Allergens.xls (+ builtin seeds) into MySQL.
+
+    When ``force`` is false, still upsert if the table is empty or any row is
+    missing en/ja/ko — otherwise lang switch keeps showing Chinese labels.
+    Upsert only overwrites a column when the incoming value is non-empty.
+    """
     ensure_label_tables()
     stats = {"conditions": 0, "allergens": 0, "seeded": 0}
-    conn = _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS c FROM catalog_health_labels")
-            count = int((cur.fetchone() or {}).get("c") or 0)
-    finally:
-        conn.close()
-    if count and not force:
+    if not force and not _labels_need_i18n_fill():
         return stats
 
     seeds = default_seed_rows()
-    condition_rows = []
-    for i, row in enumerate(_xls_rows(CONDITIONS_XLS) or seeds["condition"]):
-        condition_rows.append(
-            {
-                "kind": "condition",
-                "name_zh": row["name_zh"],
-                "name_en": row.get("name_en") or "",
-                "name_ja": row.get("name_ja") or "",
-                "name_ko": row.get("name_ko") or "",
-                "sort_order": i,
-            }
-        )
-    allergen_rows = []
-    xls_allergens = _xls_rows(ALLERGENS_XLS)
-    base = xls_allergens or seeds["allergen"]
-    for i, row in enumerate(base):
-        allergen_rows.append(
-            {
-                "kind": "allergen",
-                "name_zh": canonicalize_allergy_label(row["name_zh"]) or row["name_zh"],
-                "name_en": row.get("name_en") or "",
-                "name_ja": row.get("name_ja") or "",
-                "name_ko": row.get("name_ko") or "",
-                "sort_order": i,
-            }
-        )
+    # Prefer xls; ensure all CONDITION_OPTIONS / base allergens exist with builtins.
+    by_zh: dict[str, dict[str, Any]] = {}
+    for i, row in enumerate(_xls_rows(CONDITIONS_XLS) or []):
+        by_zh[row["name_zh"]] = _merge_i18n_row("condition", row, i)
+    for row in seeds["condition"]:
+        zh = row["name_zh"]
+        if zh not in by_zh:
+            by_zh[zh] = _merge_i18n_row("condition", row, len(by_zh))
+        else:
+            cur = by_zh[zh]
+            by_zh[zh] = _merge_i18n_row(
+                "condition",
+                {
+                    "name_zh": zh,
+                    "name_en": cur.get("name_en") or row.get("name_en") or "",
+                    "name_ja": cur.get("name_ja") or row.get("name_ja") or "",
+                    "name_ko": cur.get("name_ko") or row.get("name_ko") or "",
+                },
+                int(cur.get("sort_order") or 0),
+            )
+    condition_rows = list(by_zh.values())
+
+    allergen_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, row in enumerate(_xls_rows(ALLERGENS_XLS) or seeds["allergen"]):
+        zh = canonicalize_allergy_label(row["name_zh"]) or row["name_zh"]
+        if not zh or zh in seen:
+            continue
+        seen.add(zh)
+        allergen_rows.append(_merge_i18n_row("allergen", {**row, "name_zh": zh}, i))
+    for row in seeds["allergen"]:
+        zh = row["name_zh"]
+        if zh in seen:
+            continue
+        seen.add(zh)
+        allergen_rows.append(_merge_i18n_row("allergen", row, len(allergen_rows)))
+
     stats["conditions"] = upsert_health_labels(condition_rows)
     stats["allergens"] = upsert_health_labels(allergen_rows)
     stats["seeded"] = stats["conditions"] + stats["allergens"]

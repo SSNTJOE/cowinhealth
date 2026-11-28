@@ -572,7 +572,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadFlagOptions() {
         try {
             if (!rememberServer()) return
-            val flags = api.flags()
+            val flags = api.flags(currentLang())
             runOnUiThread { applyFlagOptions(flags) }
         } catch (_: Exception) {
         }
@@ -2265,7 +2265,11 @@ class MainActivity : AppCompatActivity() {
             AppLocale.applyUiLang(this, detected, explicit = true)
             binding.langSelect.setSelection(indexSwitch)
             applyLangChrome()
-            Thread { runCatching { api.updatePreferredLang(detected) } }.start()
+            Thread {
+                runCatching { api.updatePreferredLang(detected) }
+                val flags = flagsOrNull()
+                runOnUiThread { applyFlagOptions(flags) }
+            }.start()
         }
         binding.localeSuggestKeep.setOnClickListener {
             acknowledgeLocaleSuggest(deviceUiLang())

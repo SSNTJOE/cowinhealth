@@ -87,7 +87,38 @@ function authCaptchaFields() {
 }
 
 let CONDITION_OPTIONS = ["糖尿病", "中風", "痛風", "腎臟病", "肝病", "高血壓", "服用抗凝血劑"];
-let ALLERGY_OPTIONS = ["蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶"];
+
+/** Builtin display labels (zh value → en/ja/ko) when /api/flags is empty or stuck on zh. */
+const CONDITION_I18N = {
+  糖尿病: { en: "Diabetes", ja: "糖尿病", ko: "당뇨병" },
+  中風: { en: "Stroke", ja: "脳卒中", ko: "뇌졸중" },
+  痛風: { en: "Gout", ja: "痛風", ko: "통풍" },
+  腎臟病: { en: "Kidney disease", ja: "腎臓病", ko: "신장병" },
+  肝病: { en: "Liver disease", ja: "肝疾患", ko: "간질환" },
+  高血壓: { en: "Hypertension", ja: "高血圧", ko: "고혈압" },
+  服用抗凝血劑: {
+    en: "Taking anticoagulants",
+    ja: "抗凝固薬を服用中",
+    ko: "항응고제 복용",
+  },
+};
+
+function localizeConditionLabel(zh, lang) {
+  const code = normalizeUiLang(lang || getUiLang());
+  const value = String(zh || "").trim();
+  if (!value || code === "zh") return value;
+  return (CONDITION_I18N[value] && CONDITION_I18N[value][code]) || value;
+}
+
+// Offline fallback values (zh). Live labels come from GET /api/flags?lang=.
+let ALLERGY_OPTIONS = [
+  "蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶",
+  "優格", "南瓜子", "味噌", "夏威夷豆", "大麥", "奶油", "小麥",
+  "山葵", "杏仁果", "松子", "栗子", "核桃", "淡菜", "燕麥", "牡蠣",
+  "白芝麻", "皮蛋", "芥末", "花生油", "芹菜", "葡萄酒", "蕎麥",
+  "蛋", "蛋白", "蛋黃", "蛤蜊", "豆干", "豆漿", "豆腐", "起司",
+  "醋", "醬油", "麻油", "黃豆", "黃豆芽", "黃酒", "黑豆",
+];
 
 const CRUSTACEAN_ALLERGY_TOKENS = new Set([
   "蝦蟹",
@@ -181,8 +212,20 @@ async function loadHealthFlagOptions(lang) {
     const data = await api("/api/flags?lang=" + encodeURIComponent(code));
     const conditions = normalizeFlagOptions(data.conditions);
     if (conditions.length) {
-      CONDITION_FLAG_OPTIONS = conditions;
+      CONDITION_FLAG_OPTIONS = conditions.map((item) => ({
+        value: item.value,
+        // If API still returns zh for a non-zh UI, fall back to builtins.
+        label:
+          code !== "zh" && item.label === item.value
+            ? localizeConditionLabel(item.value, code)
+            : item.label,
+      }));
       CONDITION_OPTIONS = conditions.map((item) => item.value);
+    } else if (code !== "zh") {
+      CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((value) => ({
+        value,
+        label: localizeConditionLabel(value, code),
+      }));
     }
     const allergies = normalizeFlagOptions(data.allergies || data.allergy_options);
     if (allergies.length) {
@@ -195,7 +238,12 @@ async function loadHealthFlagOptions(lang) {
       ALLERGY_OPTIONS = consolidatedValues;
     }
   } catch (_err) {
-    /* keep defaults if Recipe.xls is unavailable */
+    if (code !== "zh") {
+      CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((value) => ({
+        value,
+        label: localizeConditionLabel(value, code),
+      }));
+    }
   }
   return { conditions: CONDITION_FLAG_OPTIONS, allergies: ALLERGY_FLAG_OPTIONS };
 }

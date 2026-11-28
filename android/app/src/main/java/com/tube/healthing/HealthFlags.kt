@@ -18,7 +18,15 @@ object HealthFlags {
         "高血壓",
         "服用抗凝血劑",
     )
-    val ALLERGIES = listOf("蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶")
+    // Offline fallback values (zh). Live labels come from GET /api/flags?lang=.
+    val ALLERGIES = listOf(
+        "蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶",
+        "優格", "南瓜子", "味噌", "夏威夷豆", "大麥", "奶油", "小麥",
+        "山葵", "杏仁果", "松子", "栗子", "核桃", "淡菜", "燕麥", "牡蠣",
+        "白芝麻", "皮蛋", "芥末", "花生油", "芹菜", "葡萄酒", "蕎麥",
+        "蛋", "蛋白", "蛋黃", "蛤蜊", "豆干", "豆漿", "豆腐", "起司",
+        "醋", "醬油", "麻油", "黃豆", "黃豆芽", "黃酒", "黑豆",
+    )
 
     fun optionsFrom(raw: List<String>): List<FlagOption> =
         raw.map { FlagOption(value = it, label = it) }
