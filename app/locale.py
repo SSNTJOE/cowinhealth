@@ -66,9 +66,10 @@ def resolve_ui_lang(
     request: Request,
     lang: str | None = None,
     *,
+    preferred_lang: str | None = None,
     default: str = "zh",
 ) -> str:
-    """Cascade: explicit query/form → X-App-Lang → Accept-Language → CF-IPCountry → default."""
+    """Cascade: query/body → X-App-Lang → Accept-Language → preferred_lang → CF-IPCountry → default."""
     if lang and str(lang).strip():
         return normalize_lang(lang)
     header_lang = (request.headers.get("X-App-Lang") or "").strip()
@@ -77,6 +78,8 @@ def resolve_ui_lang(
     from_accept = parse_accept_language(request.headers.get("Accept-Language"))
     if from_accept:
         return from_accept
+    if preferred_lang and str(preferred_lang).strip():
+        return normalize_lang(preferred_lang)
     from_cf = lang_from_country(request.headers.get("CF-IPCountry"))
     if from_cf:
         return from_cf

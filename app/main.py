@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -1020,18 +1020,33 @@ def api_recipes(
     return payload
 
 
-def _api_recipes_create_or_ensure(country: str, name: str, lang: str | None, request: Request | None = None):
-    """Find or create a recipe row; country may be blank (lookup / infer / Global)."""
+def _api_recipes_create_or_ensure(
+    country: str,
+    name: str,
+    lang: str | None,
+    request: Request | None = None,
+    background_tasks: BackgroundTasks | None = None,
+):
+    """Find or create a recipe row; country may be blank (lookup / infer / Global).
+
+    On create/update, enqueue non-blocking Gemini translation for the other
+    three UI langs (name_* + recipe_translations). Missing API key → skip quietly.
+    """
     from .locale import resolve_ui_lang
+    from .recipe_translate import schedule_recipe_translate
+    from .recipes import normalize_lang
 
     if request is not None:
-        lang = resolve_ui_lang(request, lang)
+        preferred = None
+        user_id = current_user_id(request)
+        if user_id:
+            user = fetch_user(user_id) or {}
+            preferred = user.get("preferred_lang")
+        lang = resolve_ui_lang(request, lang, preferred_lang=preferred)
     else:
-        from .recipes import normalize_lang
-
         lang = normalize_lang(lang)
     try:
-        return ensure_recipe(country=country or "", name=name, lang=lang)
+        result = ensure_recipe(country=country or "", name=name, lang=lang)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -1043,26 +1058,45 @@ def _api_recipes_create_or_ensure(country: str, name: str, lang: str | None, req
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"寫入食譜資料失敗：{exc}") from exc
 
+    if background_tasks is not None and isinstance(result, dict):
+        recipe = result.get("recipe") or {}
+        # Names already present on the saved row (wiki / research) are skipped
+        # inside translate_recipe_missing_langs — pass source lang only.
+        schedule_recipe_translate(
+            background_tasks,
+            recipe.get("id"),
+            lang,
+            created=bool(result.get("created")),
+            updated=bool(result.get("updated")),
+        )
+    return result
+
 
 @app.post("/api/recipes/ensure")
 def api_recipes_ensure(
     request: Request,
+    background_tasks: BackgroundTasks,
     country: str = Form(""),
     name: str = Form(...),
     lang: str | None = Form(None),
 ):
-    return _api_recipes_create_or_ensure(country, name, lang, request)
+    return _api_recipes_create_or_ensure(
+        country, name, lang, request, background_tasks=background_tasks
+    )
 
 
 @app.post("/api/recipes/create")
 def api_recipes_create(
     request: Request,
+    background_tasks: BackgroundTasks,
     country: str = Form(""),
     name: str = Form(...),
     lang: str | None = Form(None),
 ):
     """Alias of /api/recipes/ensure — country optional; missing rows are researched."""
-    return _api_recipes_create_or_ensure(country, name, lang, request)
+    return _api_recipes_create_or_ensure(
+        country, name, lang, request, background_tasks=background_tasks
+    )
 
 
 @app.get("/api/nutrient-targets")
