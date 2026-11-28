@@ -110,10 +110,66 @@ function localizeConditionLabel(zh, lang) {
   return (CONDITION_I18N[value] && CONDITION_I18N[value][code]) || value;
 }
 
+/** Builtin allergen labels (zh value → en/ja/ko) when /api/flags is empty or stuck on zh. */
+const ALLERGEN_I18N = {
+  蝦蟹: { en: "Shellfish (shrimp/crab)", ja: "エビ・カニ", ko: "새우·게" },
+  魚: { en: "Fish", ja: "魚", ko: "생선" },
+  芒果: { en: "Mango", ja: "マンゴー", ko: "망고" },
+  花生: { en: "Peanut", ja: "落花生", ko: "땅콩" },
+  堅果: { en: "Tree nuts", ja: "ナッツ類", ko: "견과류" },
+  雞蛋: { en: "Egg", ja: "鶏卵", ko: "달걀" },
+  牛奶: { en: "Milk", ja: "牛乳", ko: "우유" },
+  優格: { en: "Yogurt", ja: "ヨーグルト", ko: "요거트" },
+  南瓜: { en: "Pumpkin", ja: "かぼちゃ", ko: "호박" },
+  南瓜子: { en: "Pumpkin seeds", ja: "かぼちゃの種", ko: "호박씨" },
+  味噌: { en: "Miso", ja: "味噌", ko: "미소" },
+  夏威夷豆: { en: "Macadamia", ja: "マカダミア", ko: "마카다미아" },
+  大麥: { en: "Barley", ja: "オオムギ", ko: "보리" },
+  奶油: { en: "Butter", ja: "バター", ko: "버터" },
+  小麥: { en: "Wheat", ja: "コムギ", ko: "밀" },
+  山葵: { en: "Wasabi", ja: "ワサビ", ko: "와사비" },
+  杏仁果: { en: "Almond", ja: "アーモンド", ko: "아몬드" },
+  松子: { en: "Pine nut", ja: "松の実", ko: "잣" },
+  栗子: { en: "Chestnut", ja: "栗", ko: "밤" },
+  核桃: { en: "Walnut", ja: "クルミ", ko: "호두" },
+  淡菜: { en: "Mussel", ja: "ムール貝", ko: "홍합" },
+  燕麥: { en: "Oat", ja: "オート麦", ko: "귀리" },
+  牡蠣: { en: "Oyster", ja: "カキ", ko: "굴" },
+  白芝麻: { en: "White sesame", ja: "白ごま", ko: "흰깨" },
+  皮蛋: { en: "Century egg", ja: "ピータン", ko: "피단" },
+  芥末: { en: "Mustard", ja: "カラシ", ko: "겨자" },
+  花生油: { en: "Peanut oil", ja: "ピーナッツ油", ko: "땅콩기름" },
+  芹菜: { en: "Celery", ja: "セロリ", ko: "셀러리" },
+  葡萄酒: { en: "Wine", ja: "ワイン", ko: "와인" },
+  蕎麥: { en: "Buckwheat", ja: "ソバ", ko: "메밀" },
+  蛋: { en: "Egg", ja: "卵", ko: "달걀" },
+  蛋白: { en: "Egg white", ja: "卵白", ko: "달걀흰자" },
+  蛋黃: { en: "Egg yolk", ja: "卵黄", ko: "달걀노른자" },
+  蛤蜊: { en: "Clam", ja: "アサリ", ko: "바지락" },
+  豆干: { en: "Dried tofu", ja: "豆腐干", ko: "포두부" },
+  豆漿: { en: "Soy milk", ja: "豆乳", ko: "두유" },
+  豆腐: { en: "Tofu", ja: "豆腐", ko: "두부" },
+  起司: { en: "Cheese", ja: "チーズ", ko: "치즈" },
+  醋: { en: "Vinegar", ja: "酢", ko: "식초" },
+  醬油: { en: "Soy sauce", ja: "醤油", ko: "간장" },
+  麻油: { en: "Sesame oil", ja: "ごま油", ko: "참기름" },
+  黃豆: { en: "Soybean", ja: "大豆", ko: "대두" },
+  黃豆芽: { en: "Soybean sprouts", ja: "大豆もやし", ko: "콩나물" },
+  黃酒: { en: "Yellow rice wine", ja: "黄酒", ko: "황주" },
+  黑豆: { en: "Black soybean", ja: "黒豆", ko: "검은콩" },
+};
+
+function localizeAllergyLabel(zh, lang) {
+  const code = normalizeUiLang(lang || getUiLang());
+  const value = String(zh || "").trim();
+  if (!value || code === "zh") return value;
+  return (ALLERGEN_I18N[value] && ALLERGEN_I18N[value][code]) || value;
+}
+
 // Offline fallback values (zh). Live labels come from GET /api/flags?lang=.
 let ALLERGY_OPTIONS = [
   "蝦蟹", "魚", "芒果", "花生", "堅果", "雞蛋", "牛奶",
-  "優格", "南瓜子", "味噌", "夏威夷豆", "大麥", "奶油", "小麥",
+  "優格", "南瓜", "味噌", "夏威夷豆", "大麥", "奶油", "小麥",
   "山葵", "杏仁果", "松子", "栗子", "核桃", "淡菜", "燕麥", "牡蠣",
   "白芝麻", "皮蛋", "芥末", "花生油", "芹菜", "葡萄酒", "蕎麥",
   "蛋", "蛋白", "蛋黃", "蛤蜊", "豆干", "豆漿", "豆腐", "起司",
@@ -231,17 +287,33 @@ async function loadHealthFlagOptions(lang) {
     if (allergies.length) {
       const consolidatedValues = consolidateAllergyOptions(allergies.map((item) => item.value));
       const byValue = new Map(allergies.map((item) => [item.value, item.label]));
-      ALLERGY_FLAG_OPTIONS = consolidatedValues.map((value) => ({
-        value,
-        label: byValue.get(value) || value,
-      }));
+      ALLERGY_FLAG_OPTIONS = consolidatedValues.map((value) => {
+        const raw = byValue.get(value) || value;
+        return {
+          value,
+          // If API still returns zh for a non-zh UI, fall back to builtins.
+          label:
+            code !== "zh" && raw === value
+              ? localizeAllergyLabel(value, code)
+              : raw,
+        };
+      });
       ALLERGY_OPTIONS = consolidatedValues;
+    } else if (code !== "zh") {
+      ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((value) => ({
+        value,
+        label: localizeAllergyLabel(value, code),
+      }));
     }
   } catch (_err) {
     if (code !== "zh") {
       CONDITION_FLAG_OPTIONS = CONDITION_OPTIONS.map((value) => ({
         value,
         label: localizeConditionLabel(value, code),
+      }));
+      ALLERGY_FLAG_OPTIONS = ALLERGY_OPTIONS.map((value) => ({
+        value,
+        label: localizeAllergyLabel(value, code),
       }));
     }
   }
@@ -275,20 +347,18 @@ function fillHealthFlags(root, user) {
     CONDITION_FLAG_OPTIONS,
     user && user.conditions,
   );
-  const allergyOpts =
-    user && Array.isArray(user.allergy_options) && user.allergy_options.length
-      ? normalizeFlagOptions(
-          user.allergy_options.map((item) => {
-            if (item && typeof item === "object") return item;
-            const value = canonicalizeAllergyLabel(item) || String(item || "").trim();
-            const hit = ALLERGY_FLAG_OPTIONS.find((opt) => opt.value === value);
-            return { value, label: (hit && hit.label) || value };
-          }),
-        )
-      : ALLERGY_FLAG_OPTIONS;
+  // Always render from localized ALLERGY_FLAG_OPTIONS (/api/flags?lang=).
+  // user.allergy_options is a zh-value catalog from /api/me — not display labels.
+  let allergyOpts = ALLERGY_FLAG_OPTIONS;
+  if ((!allergyOpts || !allergyOpts.length) && user && Array.isArray(user.allergy_options)) {
+    allergyOpts = consolidateAllergyOptions(user.allergy_options).map((value) => ({
+      value,
+      label: localizeAllergyLabel(value),
+    }));
+  }
   renderCheckboxes(
     scope.querySelector("#allergies-group"),
-    allergyOpts.length ? allergyOpts : ALLERGY_FLAG_OPTIONS,
+    allergyOpts,
     canonicalizeAllergySelection(user && user.allergies),
   );
 }

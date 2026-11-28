@@ -172,8 +172,16 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        HealthFlags.inflate(binding.conditionsGroup, HealthFlags.CONDITIONS)
-        HealthFlags.inflate(binding.allergiesGroup, HealthFlags.ALLERGIES, columns = 3)
+        val bootLang = currentLang()
+        HealthFlags.inflateOptions(
+            binding.conditionsGroup,
+            HealthFlags.localizedConditionOptions(bootLang),
+        )
+        HealthFlags.inflateOptions(
+            binding.allergiesGroup,
+            HealthFlags.localizedAllergyOptions(bootLang),
+            columns = 3,
+        )
         CameraFacing.ensureDefaults(this)
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         binding.preview.scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -657,26 +665,31 @@ class MainActivity : AppCompatActivity() {
         runCatching { api.flags(currentLang()) }.getOrNull()
 
     private fun applyFlagOptions(flags: JSONObject?) {
+        val lang = currentLang()
         val keptConditions = JSONArray(HealthFlags.selectedJson(binding.conditionsGroup))
         val keptAllergies = JSONArray(HealthFlags.selectedJson(binding.allergiesGroup))
         val conditionOpts = HealthFlags.optionsFromJson(flags?.optJSONArray("conditions"))
-        if (conditionOpts.isNotEmpty()) {
-            HealthFlags.inflateOptions(binding.conditionsGroup, conditionOpts)
-            HealthFlags.apply(binding.conditionsGroup, keptConditions)
+        val conditionLocalized = if (conditionOpts.isNotEmpty()) {
+            conditionOpts.map { FlagOption(it.value, HealthFlags.displayLabel(it, lang, "condition")) }
+        } else {
+            HealthFlags.localizedConditionOptions(lang)
         }
+        HealthFlags.inflateOptions(binding.conditionsGroup, conditionLocalized)
+        HealthFlags.apply(binding.conditionsGroup, keptConditions)
         val allergyRaw = flags?.optJSONArray("allergy_options")
             ?: flags?.optJSONArray("allergies")
         val allergyOpts = HealthFlags.optionsFromJson(allergyRaw)
-        if (allergyOpts.isNotEmpty()) {
-            val consolidated = HealthFlags.consolidateAllergyOptions(allergyOpts.map { it.value })
-            val byValue = allergyOpts.associateBy { it.value }
-            val localized = consolidated.map { value ->
-                FlagOption(value = value, label = byValue[value]?.label ?: value)
-            }
-            flagAllergyOptions = consolidated
-            HealthFlags.inflateOptions(binding.allergiesGroup, localized, columns = 3)
-            HealthFlags.apply(binding.allergiesGroup, keptAllergies)
+        val consolidated = HealthFlags.consolidateAllergyOptions(
+            allergyOpts.map { it.value }.ifEmpty { HealthFlags.ALLERGIES }
+        )
+        val byValue = allergyOpts.associateBy { it.value }
+        val localized = consolidated.map { value ->
+            val opt = byValue[value] ?: FlagOption(value, value)
+            FlagOption(value = value, label = HealthFlags.displayLabel(opt, lang, "allergen"))
         }
+        flagAllergyOptions = consolidated
+        HealthFlags.inflateOptions(binding.allergiesGroup, localized, columns = 3)
+        HealthFlags.apply(binding.allergiesGroup, keptAllergies)
     }
 
     private fun applyUser(user: JSONObject?, flags: JSONObject? = null) {
@@ -699,23 +712,9 @@ class MainActivity : AppCompatActivity() {
             else -> binding.genderGroup.clearCheck()
         }
         applyLangChrome()
+        // Re-apply localized flag options for current lang (API or builtin).
+        applyFlagOptions(flags)
         HealthFlags.apply(binding.conditionsGroup, user.optJSONArray("conditions"))
-        val allergyFromFlags = HealthFlags.optionsFromJson(
-            flags?.optJSONArray("allergy_options") ?: flags?.optJSONArray("allergies")
-        )
-        val allergyValues = HealthFlags.consolidateAllergyOptions(
-            allergyFromFlags.map { it.value }.ifEmpty {
-                HealthFlags.jsonLabelsFrom(user, "allergy_options")
-            }.ifEmpty { flagAllergyOptions }
-        )
-        if (allergyValues.isNotEmpty()) {
-            flagAllergyOptions = allergyValues
-            val byValue = allergyFromFlags.associateBy { it.value }
-            val localized = allergyValues.map { value ->
-                FlagOption(value = value, label = byValue[value]?.label ?: value)
-            }
-            HealthFlags.inflateOptions(binding.allergiesGroup, localized, columns = 3)
-        }
         HealthFlags.apply(binding.allergiesGroup, user.optJSONArray("allergies"))
         female = jsonText(user, "gender") == "female"
         loadBodyImage()

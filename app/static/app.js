@@ -226,6 +226,8 @@ async function loadMe() {
   authCard.classList.add("hidden");
   appCard.classList.remove("hidden");
   applyPreferredLangFromUser(data.user);
+  // Preferred lang may differ from the lang used on first /api/flags load.
+  await loadHealthFlagOptions(getUiLang());
   fillProfile(data.user);
   applyUiLangChrome();
   bindRecipePickers();

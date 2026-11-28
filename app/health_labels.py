@@ -45,6 +45,7 @@ ALLERGEN_I18N: dict[str, dict[str, str]] = {
     "雞蛋": {"en": "Egg", "ja": "鶏卵", "ko": "달걀"},
     "牛奶": {"en": "Milk", "ja": "牛乳", "ko": "우유"},
     "優格": {"en": "Yogurt", "ja": "ヨーグルト", "ko": "요거트"},
+    "南瓜": {"en": "Pumpkin", "ja": "かぼちゃ", "ko": "호박"},
     "南瓜子": {"en": "Pumpkin seeds", "ja": "かぼちゃの種", "ko": "호박씨"},
     "味噌": {"en": "Miso", "ja": "味噌", "ko": "미소"},
     "夏威夷豆": {"en": "Macadamia", "ja": "マカダミア", "ko": "마카다미아"},
@@ -377,7 +378,7 @@ def _merge_i18n_row(kind: str, row: dict[str, Any], sort_order: int) -> dict[str
 
 
 def _labels_need_i18n_fill() -> bool:
-    """True when catalog is empty, missing a condition, or any row lacks en/ja/ko."""
+    """True when catalog is empty, missing a condition/allergen, or any row lacks en/ja/ko."""
     try:
         conn = _connect()
         try:
@@ -392,11 +393,25 @@ def _labels_need_i18n_fill() -> bool:
                     WHERE kind='condition'
                     """
                 )
-                have = {
+                have_conditions = {
                     str(row.get("name_zh") or "").strip()
                     for row in (cur.fetchall() or [])
                 }
-                if any(zh not in have for zh in CONDITION_OPTIONS):
+                if any(zh not in have_conditions for zh in CONDITION_OPTIONS):
+                    return True
+                cur.execute(
+                    """
+                    SELECT name_zh FROM catalog_health_labels
+                    WHERE kind='allergen'
+                    """
+                )
+                have_allergens = {
+                    str(row.get("name_zh") or "").strip()
+                    for row in (cur.fetchall() or [])
+                }
+                if any(zh not in have_allergens for zh in BASE_ALLERGY_OPTIONS):
+                    return True
+                if any(zh not in have_allergens for zh in ALLERGEN_I18N):
                     return True
                 cur.execute(
                     """
