@@ -21,6 +21,7 @@ CONDITIONS_XLS = ROOT / "Conditions.xls"
 ALLERGENS_XLS = ROOT / "Allergens.xls"
 
 # Built-in fallbacks when MySQL/xls rows are empty (zh is always the stored value).
+# HIRE-48: the seven special-disease checkbox labels (Conditions.xls / CONDITION_OPTIONS).
 CONDITION_I18N: dict[str, dict[str, str]] = {
     "糖尿病": {"en": "Diabetes", "ja": "糖尿病", "ko": "당뇨병"},
     "中風": {"en": "Stroke", "ja": "脳卒中", "ko": "뇌졸중"},
@@ -376,7 +377,7 @@ def _merge_i18n_row(kind: str, row: dict[str, Any], sort_order: int) -> dict[str
 
 
 def _labels_need_i18n_fill() -> bool:
-    """True when catalog is empty or any row is missing en/ja/ko for non-zh UI."""
+    """True when catalog is empty, missing a condition, or any row lacks en/ja/ko."""
     try:
         conn = _connect()
         try:
@@ -384,6 +385,18 @@ def _labels_need_i18n_fill() -> bool:
                 cur.execute("SELECT COUNT(*) AS c FROM catalog_health_labels")
                 count = int((cur.fetchone() or {}).get("c") or 0)
                 if count == 0:
+                    return True
+                cur.execute(
+                    """
+                    SELECT name_zh FROM catalog_health_labels
+                    WHERE kind='condition'
+                    """
+                )
+                have = {
+                    str(row.get("name_zh") or "").strip()
+                    for row in (cur.fetchall() or [])
+                }
+                if any(zh not in have for zh in CONDITION_OPTIONS):
                     return True
                 cur.execute(
                     """
